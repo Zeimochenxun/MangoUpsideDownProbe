@@ -1,6 +1,5 @@
-// Diagnostic source, NOT a positioning fix. Original methods run exactly once.
-// Verified against Mango UUID 67C0D7C2-4487-3FD2-9535-067745AE4B8F.
-// No binary offsets, no preference writes to Mango, no backboardd injection.
+// Experimental positioning fix. Private names below are evidenced in the
+// supplied Mango image or the user's 04_final_parent_chain.log; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -9,38 +8,50 @@
 #import <mach-o/dyld.h>
 #import <mach-o/loader.h>
 #import <substrate.h>
-#include <fcntl.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <string.h>
-#include <strings.h>
 #include <errno.h>
+#include "Geometry.h"
 
-static const char *kDisabled = "/var/mobile/Library/Preferences/MangoUpsideDownProbe.disabled";
-static const char *kLog = "/var/mobile/Library/Logs/MangoUpsideDownProbe.log";
-static NSHashTable<UIWindow *> *gFallbackWindows;
-static NSHashTable<UIView *> *gHostViews;
-static __weak UIViewController *gAperture;
-static NSMapTable<id, NSNumber *> *gLastCapture;
-static BOOL gInstalled;
-static unsigned gTryCount;
+static const char *kDisabled = "/var/mobile/Library/Preferences/MangoUpsideDownFix.disabled";
+static const char *kLogPath = "/var/mobile/Library/Logs/MangoUpsideDownFix.log";
+static Class gContainerClass, gWindowClass, gContentClass;
+static NSHashTable<UIView *> *gContainers;
+static dispatch_source_t gTimer;
+static BOOL gInstalled, gEnabled;
+static unsigned gOwnWrite, gAttempts, gLayoutDepth;
+static char kStateKey;
 
-static BOOL Enabled(void) { return access(kDisabled, F_OK) != 0; }
+// Our own class, not a Mango class. References to the private hierarchy are weak.
+@interface MUDFFixState : NSObject
+@property(nonatomic, strong) NSHashTable<UIView *> *hosts;
+@property(nonatomic, weak) UIView *parent;
+@property(nonatomic) CGAffineTransform baseline;
+@property(nonatomic) CGAffineTransform appliedTransform;
+@property(nonatomic) BOOL applied;
+@property(nonatomic) BOOL suspended;
+@property(nonatomic) unsigned mutationDepth;
+@property(nonatomic) double lastLog;
+@end
+@implementation MUDFFixState
+@end
 
-static void Log(NSString *line) {
-    if (!Enabled() || ![NSThread isMainThread]) return;
-    NSString *text = [NSString stringWithFormat:@"%.3f [MangoUDProbe] %@\n",
-                      [NSDate timeIntervalSinceReferenceDate], line];
-    NSLog(@"[MangoUDProbe] %@", line);
+static void Log(NSString *message) {
+    if (![NSThread isMainThread]) return;
+    NSLog(@"[MangoUDFix] %@", message);
     mkdir("/var/mobile/Library/Logs", 0755);
-    int fd = open(kLog, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0600);
-    if (fd < 0) return; // Unified log remains available if file access fails.
+    int fd = open(kLogPath, O_WRONLY|O_CREAT|O_APPEND|O_NOFOLLOW, 0600);
+    if (fd < 0) return;
     struct stat st;
     if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) { close(fd); return; }
-    if (st.st_size > 1024 * 1024) ftruncate(fd, 0);
-    NSData *data = [text dataUsingEncoding:NSUTF8StringEncoding];
-    const uint8_t *p = (const uint8_t *)data.bytes;
-    size_t left = data.length;
+    if (st.st_size > 512*1024) ftruncate(fd, 0);
+    NSData *bytes = [[NSString stringWithFormat:@"%.3f [MangoUDFix] %@\n",
+                      NSDate.timeIntervalSinceReferenceDate, message]
+                    dataUsingEncoding:NSUTF8StringEncoding];
+    const uint8_t *p = (const uint8_t *)bytes.bytes;
+    size_t left = bytes.length;
     while (left) {
         ssize_t n = write(fd, p, left);
         if (n < 0 && errno == EINTR) continue;
@@ -50,301 +61,346 @@ static void Log(NSString *line) {
     close(fd);
 }
 
-static NSString *Matrix(CATransform3D t) {
-    return [NSString stringWithFormat:
-        @"[%.4g %.4g %.4g %.4g; %.4g %.4g %.4g %.4g; %.4g %.4g %.4g %.4g; %.4g %.4g %.4g %.4g]",
-        t.m11,t.m12,t.m13,t.m14,t.m21,t.m22,t.m23,t.m24,
-        t.m31,t.m32,t.m33,t.m34,t.m41,t.m42,t.m43,t.m44];
+static MUDFAffine Affine(CGAffineTransform t) {
+    return (MUDFAffine){t.a,t.b,t.c,t.d,t.tx,t.ty};
 }
-
-static BOOL RateAllows(id object) {
-    if (!Enabled() || ![NSThread isMainThread] || !object) return NO;
+static CGAffineTransform CGAffine(MUDFAffine t) {
+    return CGAffineTransformMake(t.a,t.b,t.c,t.d,t.tx,t.ty);
+}
+static MUDFRect MUDFRectFromCGRect(CGRect r) {
+    return (MUDFRect){r.origin.x,r.origin.y,r.size.width,r.size.height};
+}
+static CGRect CGRectFromMUDF(MUDFRect r) {
+    return CGRectMake(r.x,r.y,r.width,r.height);
+}
+static BOOL Near(CGAffineTransform a, CGAffineTransform b) {
+    return MUDFAffineNear(Affine(a), Affine(b));
+}
+static MUDFFixState *State(UIView *v) {
+    return (MUDFFixState *)objc_getAssociatedObject(v, &kStateKey);
+}
+static void StateLog(MUDFFixState *s, NSString *message) {
     double now = CACurrentMediaTime();
-    NSNumber *last = [gLastCapture objectForKey:object];
-    if (last && now - last.doubleValue < 0.8) return NO;
-    [gLastCapture setObject:@(now) forKey:object];
-    return YES;
-}
-
-static void CaptureView(UIView *v, NSString *reason) {
-    if (!Enabled() || ![NSThread isMainThread] || ![v isKindOfClass:[UIView class]]) return;
-    @try {
-        UIWindow *w = v.window;
-        UIScreen *screen = w.screen ?: [UIScreen mainScreen];
-        CGRect b = v.bounds;
-        CGPoint a = [v convertPoint:CGPointMake(CGRectGetMinX(b), CGRectGetMinY(b))
-                  toCoordinateSpace:screen.fixedCoordinateSpace];
-        CGPoint x = [v convertPoint:CGPointMake(CGRectGetMaxX(b), CGRectGetMinY(b))
-                  toCoordinateSpace:screen.fixedCoordinateSpace];
-        CGPoint y = [v convertPoint:CGPointMake(CGRectGetMinX(b), CGRectGetMaxY(b))
-                  toCoordinateSpace:screen.fixedCoordinateSpace];
-        Log([NSString stringWithFormat:
-             @"%@ view=%@/%p window=%@/%p frame=%@ bounds=%@ center=%@ safe=%@ transform=%@ fixedBasis={%@,%@,%@} sceneOrientation=%ld",
-             reason, NSStringFromClass(v.class), (__bridge void *)v,
-             w ? NSStringFromClass(w.class) : @"nil", (__bridge void *)w,
-             NSStringFromCGRect(v.frame), NSStringFromCGRect(b), NSStringFromCGPoint(v.center),
-             NSStringFromUIEdgeInsets(v.safeAreaInsets), NSStringFromCGAffineTransform(v.transform),
-             NSStringFromCGPoint(a), NSStringFromCGPoint(x), NSStringFromCGPoint(y),
-             (long)w.windowScene.interfaceOrientation]);
-        CALayer *presentation = (CALayer *)v.layer.presentationLayer;
-        Log([NSString stringWithFormat:@"%@ layer=%@ sublayer=%@ presentationFrame=%@",
-             reason, Matrix(v.layer.transform), Matrix(v.layer.sublayerTransform),
-             presentation ? NSStringFromCGRect(presentation.frame) : @"nil"]);
-        if (w && v != w) {
-            Log([NSString stringWithFormat:@"%@ windowFrame=%@ windowBounds=%@ windowTransform=%@ windowLayer=%@ windowSafe=%@",
-                 reason, NSStringFromCGRect(w.frame), NSStringFromCGRect(w.bounds),
-                 NSStringFromCGAffineTransform(w.transform), Matrix(w.layer.transform),
-                 NSStringFromUIEdgeInsets(w.safeAreaInsets)]);
-        }
-    } @catch (NSException *e) {
-        Log([NSString stringWithFormat:@"capture exception class=%@", e.name]);
-    }
+    if (now-s.lastLog < 1.0) return;
+    s.lastLog = now; Log(message);
 }
 
 static NSInteger MangoOrientation(void) {
-    Class cls = objc_getClass("DecoratedAppSceneView");
+    Class c = objc_getClass("DecoratedAppSceneView");
     SEL sel = sel_registerName("mango_currentInterfaceOrientation");
-    Method m = cls ? class_getClassMethod(cls, sel) : NULL;
+    Method m = c ? class_getClassMethod(c, sel) : NULL;
     if (!m || method_getNumberOfArguments(m) != 2) return -1;
     char type[64] = {0}; method_getReturnType(m, type, sizeof(type));
     if (strcmp(type, @encode(NSInteger)) != 0) return -1;
-    return ((NSInteger (*)(id, SEL))objc_msgSend)((id)cls, sel);
+    return ((NSInteger (*)(id,SEL))objc_msgSend)((id)c, sel);
 }
 
-static void CaptureSuperviewChain(UIView *v, NSString *reason) {
-    if (!Enabled() || ![NSThread isMainThread] || ![v isKindOfClass:[UIView class]]) return;
-    @try {
-        UIScreen *screen = v.window.screen ?: [UIScreen mainScreen];
-        UIView *cur = v;
-        for (NSUInteger depth = 0; cur && depth < 12; ++depth) {
-            CGRect b = cur.bounds;
-            CGPoint a = [cur convertPoint:CGPointMake(CGRectGetMinX(b), CGRectGetMinY(b))
-                        toCoordinateSpace:screen.fixedCoordinateSpace];
-            CGPoint x = [cur convertPoint:CGPointMake(CGRectGetMaxX(b), CGRectGetMinY(b))
-                        toCoordinateSpace:screen.fixedCoordinateSpace];
-            CGPoint y = [cur convertPoint:CGPointMake(CGRectGetMinX(b), CGRectGetMaxY(b))
-                        toCoordinateSpace:screen.fixedCoordinateSpace];
-            Log([NSString stringWithFormat:
-                 @"%@ depth=%lu class=%@/%p super=%@/%p frame=%@ bounds=%@ center=%@ safe=%@ transform=%@ fixedBasis={%@,%@,%@} clips=%d hidden=%d alpha=%.3f",
-                 reason, (unsigned long)depth, NSStringFromClass(cur.class), (__bridge void *)cur,
-                 cur.superview ? NSStringFromClass(cur.superview.class) : @"nil", (__bridge void *)cur.superview,
-                 NSStringFromCGRect(cur.frame), NSStringFromCGRect(b), NSStringFromCGPoint(cur.center),
-                 NSStringFromUIEdgeInsets(cur.safeAreaInsets), NSStringFromCGAffineTransform(cur.transform),
-                 NSStringFromCGPoint(a), NSStringFromCGPoint(x), NSStringFromCGPoint(y),
-                 cur.clipsToBounds, cur.hidden, cur.alpha]);
-            if ([cur isKindOfClass:[UIWindow class]]) break;
-            cur = cur.superview;
-        }
-    } @catch (NSException *e) {
-        Log([NSString stringWithFormat:@"superview-chain exception class=%@", e.name]);
+static void WriteTransform(UIView *v, CGAffineTransform t) {
+    // Only our translation changes are non-animated. Never remove system
+    // animation keys, change anchorPoint, or modify a child content transform.
+    ++gOwnWrite;
+    @try { [UIView performWithoutAnimation:^{ v.transform = t; }]; }
+    @finally { --gOwnWrite; }
+}
+
+static void Restore(UIView *v, MUDFFixState *s, NSString *reason) {
+    if (!s.applied) return;
+    if (Near(v.transform, s.appliedTransform)) {
+        WriteTransform(v, s.baseline);
+        if (reason) Log([NSString stringWithFormat:@"RESTORE %@ container=%p", reason, (__bridge void *)v]);
+    } else {
+        // A direct CALayer write or another hook bypassed our setter tracking.
+        // Do not overwrite an unknown transform; freeze this instance until respring.
+        s.suspended = YES;
+        Log(@"CONFLICT untracked transform change; instance suspended, respring required for clean reset");
+    }
+    s.applied = NO;
+}
+
+static UIView *FindAncestor(UIView *host, Class cls) {
+    UIView *v = host;
+    for (unsigned i=0; v && i<16; ++i, v=v.superview)
+        if ([v isKindOfClass:cls]) return v;
+    return nil;
+}
+
+static UIView *CurrentHost(UIView *container, MUDFFixState *s) {
+    for (UIView *host in s.hosts.allObjects)
+        if (FindAncestor(host, gContainerClass) == container) return host;
+    return nil;
+}
+
+static BOOL AffineHierarchy(UIView *v) {
+    for (unsigned depth=0; v && depth<20; ++depth, v=v.superview) {
+        if (!CATransform3DIsAffine(v.layer.transform) ||
+            !CATransform3DIsIdentity(v.layer.sublayerTransform)) return NO;
+        if ([v isKindOfClass:[UIWindow class]]) return YES;
+    }
+    return NO;
+}
+
+static BOOL ContentIsUpsideDown(UIView *host, UIView *container, id<UICoordinateSpace> fixed) {
+    UIView *content = FindAncestor(host, gContentClass);
+    if (!content || FindAncestor(content, gContainerClass) != container) return NO;
+    CGPoint o = [content convertPoint:CGPointZero toCoordinateSpace:fixed];
+    CGPoint x = [content convertPoint:CGPointMake(1,0) toCoordinateSpace:fixed];
+    CGPoint y = [content convertPoint:CGPointMake(0,1) toCoordinateSpace:fixed];
+    double ax=x.x-o.x, ay=x.y-o.y, bx=y.x-o.x, by=y.y-o.y;
+    return isfinite(ax) && isfinite(ay) && isfinite(bx) && isfinite(by) &&
+           ax < -1e-5 && by < -1e-5 && fabs(ay) < fabs(ax)*1e-3 &&
+           fabs(bx) < fabs(by)*1e-3;
+}
+
+static void Update(UIView *v) {
+    MUDFFixState *s = State(v);
+    if (!s || s.mutationDepth || gOwnWrite || gLayoutDepth || ![NSThread isMainThread]) return;
+    if (s.applied && !Near(v.transform, s.appliedTransform)) {
+        Restore(v, s, @"transform-conflict"); return;
+    }
+    if (s.suspended) return;
+    if (!gEnabled || MangoOrientation() != UIInterfaceOrientationPortraitUpsideDown) {
+        Restore(v, s, gEnabled ? @"orientation" : @"disabled"); return;
+    }
+    UIView *host = CurrentHost(v, s);
+    UIView *parent = v.superview;
+    UIWindow *window = v.window;
+    if (!host || !parent || ![window isKindOfClass:gWindowClass] ||
+        window.screen != UIScreen.mainScreen) {
+        Restore(v, s, @"host-or-window-detached"); return;
+    }
+    if (s.applied && s.parent != parent) Restore(v, s, @"parent-changed");
+    if (s.suspended) return;
+    s.parent = parent;
+    id<UICoordinateSpace> fixed = window.screen.fixedCoordinateSpace;
+    if (!AffineHierarchy(host) || !ContentIsUpsideDown(host, v, fixed)) {
+        Restore(v, s, @"unsupported-or-transitioning-coordinate-space");
+        StateLog(s, @"SKIP content basis is not the evidenced 180-degree affine configuration");
+        return;
+    }
+    CGPoint o=[parent convertPoint:CGPointZero toCoordinateSpace:fixed];
+    CGPoint x=[parent convertPoint:CGPointMake(1,0) toCoordinateSpace:fixed];
+    CGPoint y=[parent convertPoint:CGPointMake(0,1) toCoordinateSpace:fixed];
+    MUDFAffine map={x.x-o.x,x.y-o.y,y.x-o.x,y.y-o.y,o.x,o.y};
+    MUDFRect current=MUDFRectFromCGRect([v convertRect:v.bounds toCoordinateSpace:fixed]);
+    MUDFRect baseline=current;
+    CGAffineTransform base = s.applied ? s.baseline : v.transform;
+    if (s.applied) {
+        MUDFPoint own={s.appliedTransform.tx-base.tx, s.appliedTransform.ty-base.ty};
+        baseline=MUDFBaselineRect(current,map,own);
+    }
+    MUDFPoint delta; MUDFRect target;
+    MUDFPlanResult result=MUDFPlan(MUDFRectFromCGRect(fixed.bounds),baseline,map,&delta,&target);
+    if (result != MUDFPlanOK) {
+        Restore(v,s,@"geometry-guard");
+        StateLog(s,result==MUDFPlanAlreadyAtOtherEdge ?
+                 @"SKIP baseline already lies in lower screen half" : @"SKIP invalid geometry");
+        return;
+    }
+    CGAffineTransform desired=CGAffine(MUDFWithTranslation(Affine(base),delta));
+    s.baseline=base;
+    s.appliedTransform=desired;
+    s.applied=YES;
+    if (!Near(v.transform,desired)) WriteTransform(v,desired);
+    // A post-write check proves model geometry only; not animation or hit testing.
+    CGRect after=[v convertRect:v.bounds toCoordinateSpace:fixed];
+    if (!MUDFFiniteRect(MUDFRectFromCGRect(after)) || fabs(CGRectGetMinY(after)-target.y) > 1.0 ||
+        fabs(CGRectGetMinX(after)-target.x) > 1.0) {
+        Restore(v,s,@"post-write-mismatch"); s.suspended=YES;
+        Log(@"SUSPEND geometry verification failed for this instance"); return;
+    }
+    StateLog(s,[NSString stringWithFormat:
+        @"APPLY orientation=2 container=%p baselineFixed=%@ targetFixed=%@ actualFixed=%@ deltaParent={%.3f,%.3f} hostAlpha=%.3f containerAlpha=%.3f",
+        (__bridge void *)v,NSStringFromCGRect(CGRectFromMUDF(baseline)),
+        NSStringFromCGRect(CGRectFromMUDF(target)),NSStringFromCGRect(after),
+        delta.x,delta.y,host.alpha,v.alpha]);
+}
+
+static void UpdateAll(void) {
+    if (![NSThread isMainThread]) return;
+    for (UIView *v in gContainers.allObjects) Update(v);
+}
+
+static void RefreshEnabled(void) {
+    if (gEnabled && access(kDisabled,F_OK)==0) {
+        gEnabled=NO; UpdateAll();
+        Log(@"DISABLED marker detected; known translations restored; remove marker and respring to re-enable");
     }
 }
 
-static UIViewController *FindAperture(UIViewController *vc, unsigned depth, unsigned *budget) {
-    if (!vc || depth > 8 || *budget == 0) return nil;
-    --*budget;
-    Class cls = objc_getClass("SBSystemApertureViewController");
-    if (cls && [vc isKindOfClass:cls]) return vc;
-    for (UIViewController *child in vc.childViewControllers) {
-        UIViewController *found = FindAperture(child, depth + 1, budget);
-        if (found) return found;
-    }
-    return FindAperture(vc.presentedViewController, depth + 1, budget);
+static MUDFFixState *BeginMutation(UIView *v) {
+    if (gOwnWrite || ![NSThread isMainThread]) return nil;
+    MUDFFixState *s=State(v);
+    if (!s || s.suspended) return nil;
+    if (s.mutationDepth==0) Restore(v,s,nil);
+    ++s.mutationDepth;
+    return s;
+}
+static void EndMutation(UIView *v, MUDFFixState *s) {
+    if (!s) return;
+    --s.mutationDepth;
+    if (s.mutationDepth==0) Update(v);
 }
 
-static void Snapshot(NSString *reason) {
-    if (!Enabled() || ![NSThread isMainThread]) return;
-    @try {
-        UIScreen *s = UIScreen.mainScreen;
-        Log([NSString stringWithFormat:@"SNAP %@ mangoOrientation=%ld statusBarOrientation=%ld deviceOrientation=%ld screen=%@ native=%@ scale=%.2f",
-             reason, (long)MangoOrientation(), (long)UIApplication.sharedApplication.statusBarOrientation,
-             (long)UIDevice.currentDevice.orientation, NSStringFromCGRect(s.bounds),
-             NSStringFromCGRect(s.nativeBounds), s.scale]);
-        UIViewController *vc = gAperture;
-        if (!vc) {
-            unsigned budget = 128;
-            for (UIWindow *w in UIApplication.sharedApplication.windows) {
-                vc = FindAperture(w.rootViewController, 0, &budget);
-                if (vc) { gAperture = vc; break; }
-            }
-        }
-        if (vc.isViewLoaded) CaptureView(vc.view, @"native-aperture-root");
-        for (UIView *v in gHostViews.allObjects) CaptureView(v, @"Mango-layout-host");
-        for (UIWindow *w in gFallbackWindows.allObjects) CaptureView(w, @"Mango-fallback-window");
-    } @catch (NSException *e) { Log([NSString stringWithFormat:@"snapshot exception class=%@", e.name]); }
-}
-
-static NSArray<UIWindow *> *Windows(void) {
-    NSMutableOrderedSet<UIWindow *> *set = [NSMutableOrderedSet orderedSet];
-    [set addObjectsFromArray:UIApplication.sharedApplication.windows];
-    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-        if ([scene isKindOfClass:[UIWindowScene class]])
-            [set addObjectsFromArray:((UIWindowScene *)scene).windows];
-    }
-    return set.array;
-}
-
-static void (*OrigOrientation)(id, SEL, id);
-static void HookOrientation(id self, SEL cmd, id note) {
-    OrigOrientation(self, cmd, note);
-    if (!Enabled()) return;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        Log(@"MangoPillManager orientation callback returned (original dismissal policy preserved)");
-        Snapshot(@"orientation-callback");
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 350 * NSEC_PER_MSEC),
-                       dispatch_get_main_queue(), ^{ Snapshot(@"orientation-settled"); });
-    });
-}
-
-static void (*OrigLayoutHost)(id, SEL, id);
-static void HookLayoutHost(id self, SEL cmd, id host) {
-    OrigLayoutHost(self, cmd, host);
-    if (!Enabled() || ![NSThread isMainThread]) return;
-    if ([host isKindOfClass:[UIView class]]) {
-        [gHostViews addObject:host];
-        if (RateAllows(host)) {
-            CaptureView(host, @"layoutHostContainerViewDidLayoutSubviews");
-            if (MangoOrientation() == 2) CaptureSuperviewChain(host, @"Mango-superview-chain");
-        }
-    } else if (RateAllows(self)) {
-        Log([NSString stringWithFormat:@"layout callback argument class=%@ (no guessed private getter used)",
-             host ? NSStringFromClass([host class]) : @"nil"]);
+// These are PUBLIC UIView selectors, checked at runtime on the evidenced
+// SBSystemApertureContainerView class. No global UIView or UIWindow hooks.
+static void (*OrigLayout)(id,SEL);
+static void HookLayout(id self,SEL cmd) {
+    MUDFFixState *s=BeginMutation(self);
+    BOOL main=[NSThread isMainThread];
+    if(main)++gLayoutDepth;
+    @try { OrigLayout(self,cmd); }
+    @finally {
+        if(main)--gLayoutDepth;
+        EndMutation(self,s);
+        // A Mango callback may have first registered this container during orig.
+        if(main && !s)Update(self);
     }
 }
-
-static UIEdgeInsets (*OrigOutsets)(id, SEL, NSInteger, UIEdgeInsets, UIEdgeInsets);
-static UIEdgeInsets HookOutsets(id self, SEL cmd, NSInteger mode, UIEdgeInsets suggested, UIEdgeInsets maximum) {
-    UIEdgeInsets result = OrigOutsets(self, cmd, mode, suggested, maximum);
-    if (RateAllows(self)) {
-        Log([NSString stringWithFormat:@"outsets mode=%ld mangoOrientation=%ld suggested=%@ maximum=%@ result=%@",
-             (long)mode, (long)MangoOrientation(), NSStringFromUIEdgeInsets(suggested),
-             NSStringFromUIEdgeInsets(maximum), NSStringFromUIEdgeInsets(result)]);
-    }
-    return result; // Do not swap top/bottom or reinterpret insets as a frame.
+static void (*OrigFrame)(id,SEL,CGRect);
+static void HookFrame(id self,SEL cmd,CGRect value) {
+    MUDFFixState *s=BeginMutation(self);
+    @try { OrigFrame(self,cmd,value); } @finally { EndMutation(self,s); }
+}
+static void (*OrigBounds)(id,SEL,CGRect);
+static void HookBounds(id self,SEL cmd,CGRect value) {
+    MUDFFixState *s=BeginMutation(self);
+    @try { OrigBounds(self,cmd,value); } @finally { EndMutation(self,s); }
+}
+static void (*OrigCenter)(id,SEL,CGPoint);
+static void HookCenter(id self,SEL cmd,CGPoint value) {
+    MUDFFixState *s=BeginMutation(self);
+    @try { OrigCenter(self,cmd,value); } @finally { EndMutation(self,s); }
+}
+static void (*OrigTransform)(id,SEL,CGAffineTransform);
+static void HookTransform(id self,SEL cmd,CGAffineTransform value) {
+    MUDFFixState *s=BeginMutation(self);
+    @try { OrigTransform(self,cmd,value); } @finally { EndMutation(self,s); }
+}
+static void (*OrigMove)(id,SEL);
+static void HookMove(id self,SEL cmd) {
+    MUDFFixState *s=BeginMutation(self);
+    @try { OrigMove(self,cmd); } @finally { EndMutation(self,s); }
 }
 
-static void (*OrigFallback)(id, SEL, id);
-static void HookFallback(id self, SEL cmd, id element) {
-    BOOL observe = Enabled() && [NSThread isMainThread];
-    NSArray<UIWindow *> *before = observe ? Windows() : nil;
-    OrigFallback(self, cmd, element);
-    if (!observe) return;
-    Log(@"showFallbackPill: called (fallback route positively identified)");
-    for (UIWindow *w in Windows()) {
-        if (![before containsObject:w]) {
-            [gFallbackWindows addObject:w];
-            CaptureView(w, @"new-window-during-showFallbackPill");
-        }
+static void (*OrigHostLayout)(id,SEL,id);
+static void HookHostLayout(id self,SEL cmd,id object) {
+    OrigHostLayout(self,cmd,object);
+    if (!gEnabled || ![NSThread isMainThread] || ![object isKindOfClass:[UIView class]]) return;
+    UIView *host=(UIView *)object;
+    UIView *v=FindAncestor(host,gContainerClass);
+    if (!v || ![v.window isKindOfClass:gWindowClass]) return;
+    MUDFFixState *s=State(v);
+    if (!s) {
+        s=[MUDFFixState new]; s.hosts=[NSHashTable weakObjectsHashTable];
+        objc_setAssociatedObject(v,&kStateKey,s,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [gContainers addObject:v];
+        Log([NSString stringWithFormat:@"TRACK Mango host=%p container=%p",(__bridge void *)host,(__bridge void *)v]);
     }
-    // An added window is a candidate until its geometry/hierarchy is checked.
+    [s.hosts addObject:host];
+    // A layout in progress can have intermediate geometry; validate again after
+    // it returns. Immediate update is guarded by the container mutation depth.
+    Update(v);
+    __weak UIView *weakView=v;
+    dispatch_async(dispatch_get_main_queue(), ^{ if (weakView) Update(weakView); });
 }
 
-static void (*OrigApertureAppear)(id, SEL, BOOL);
-static void HookApertureAppear(id self, SEL cmd, BOOL animated) {
-    OrigApertureAppear(self, cmd, animated);
-    if (!Enabled() || ![NSThread isMainThread]) return;
-    if ([self isKindOfClass:[UIViewController class]]) {
-        gAperture = (UIViewController *)self;
-        Snapshot(@"SBSystemApertureViewController.viewWillAppear");
-    }
-}
-
-static BOOL Signature(Class c, SEL s, const char *ret, NSArray<NSString *> *args) {
-    Method m = c ? class_getInstanceMethod(c, s) : NULL;
-    if (!m || method_getNumberOfArguments(m) != args.count + 2) return NO;
-    char type[512] = {0}; method_getReturnType(m, type, sizeof(type));
-    if (strcmp(type, ret) != 0) return NO;
-    for (NSUInteger i = 0; i < args.count; ++i) {
-        memset(type, 0, sizeof(type));
-        method_getArgumentType(m, (unsigned)i + 2, type, sizeof(type));
-        if (strcmp(type, args[i].UTF8String) != 0) return NO;
+static BOOL Signature(Class cls,SEL sel,const char *ret,NSArray<NSString *> *args) {
+    Method m=cls ? class_getInstanceMethod(cls,sel) : NULL;
+    if (!m || method_getNumberOfArguments(m)!=args.count+2) return NO;
+    char t[512]={0}; method_getReturnType(m,t,sizeof(t));
+    if (strcmp(t,ret)!=0) return NO;
+    for (NSUInteger i=0;i<args.count;++i) {
+        memset(t,0,sizeof(t)); method_getArgumentType(m,(unsigned)i+2,t,sizeof(t));
+        if (strcmp(t,args[i].UTF8String)!=0) return NO;
     }
     return YES;
 }
-
-static BOOL VerifiedMangoLoaded(void) {
-    const uint8_t expected[16] = {0x67,0xc0,0xd7,0xc2,0x44,0x87,0x3f,0xd2,0x95,0x35,0x06,0x77,0x45,0xae,0x4b,0x8f};
-    uint32_t count = _dyld_image_count();
-    for (uint32_t i = 0; i < count; ++i) {
-        const char *path = _dyld_get_image_name(i);
-        if (!path) continue;
-        const char *base = strrchr(path, '/'); base = base ? base + 1 : path;
-        if (strcasecmp(base, "mango.dylib") != 0) continue;
-        const struct mach_header *raw = _dyld_get_image_header(i);
-        if (!raw || raw->magic != MH_MAGIC_64) return NO;
-        const struct mach_header_64 *h = (const struct mach_header_64 *)raw;
-        const uint8_t *p = (const uint8_t *)(h + 1), *end = p + h->sizeofcmds;
-        for (uint32_t n = 0; n < h->ncmds; ++n) {
-            if (p + sizeof(struct load_command) > end) return NO;
-            const struct load_command *c = (const struct load_command *)p;
-            if (c->cmdsize < sizeof(*c) || c->cmdsize > (size_t)(end - p)) return NO;
-            if (c->cmd == LC_UUID && c->cmdsize >= sizeof(struct uuid_command))
-                return memcmp(((const struct uuid_command *)p)->uuid, expected, 16) == 0;
-            p += c->cmdsize;
+static BOOL SubclassOf(Class cls,Class parent) {
+    for (Class c=cls;c;c=class_getSuperclass(c)) if(c==parent)return YES;
+    return NO;
+}
+static BOOL VerifiedMango(void) {
+    const uint8_t uuid[16]={0x67,0xc0,0xd7,0xc2,0x44,0x87,0x3f,0xd2,0x95,0x35,0x06,0x77,0x45,0xae,0x4b,0x8f};
+    for (uint32_t i=0;i<_dyld_image_count();++i) {
+        const char *name=_dyld_get_image_name(i);
+        if(!name)continue;
+        const char *base=strrchr(name,'/');base=base?base+1:name;
+        if(strcmp(base,"mango.dylib")!=0)continue;
+        const struct mach_header *raw=_dyld_get_image_header(i);
+        if(!raw || raw->magic!=MH_MAGIC_64)return NO;
+        const struct mach_header_64 *h=(const struct mach_header_64 *)raw;
+        const uint8_t *p=(const uint8_t *)(h+1),*end=p+h->sizeofcmds;
+        for(uint32_t n=0;n<h->ncmds;++n) {
+            if((size_t)(end-p)<sizeof(struct load_command))return NO;
+            const struct load_command *lc=(const struct load_command *)p;
+            if(lc->cmdsize<sizeof(*lc) || lc->cmdsize>(size_t)(end-p))return NO;
+            if(lc->cmd==LC_UUID && lc->cmdsize>=sizeof(struct uuid_command))
+                return memcmp(((const struct uuid_command *)p)->uuid,uuid,16)==0;
+            p+=lc->cmdsize;
         }
         return NO;
     }
     return NO;
 }
 
-static void Heartbeat(unsigned remaining) {
-    if (!Enabled() || remaining == 0) return;
-    Snapshot(@"periodic");
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
-                   dispatch_get_main_queue(), ^{ Heartbeat(remaining - 1); });
-}
-
-static void TryInstall(void) {
-    if (gInstalled || !Enabled()) return;
-    if (!VerifiedMangoLoaded()) {
-        if (++gTryCount < 40) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC),
-                                            dispatch_get_main_queue(), ^{ TryInstall(); });
-        else Log(@"No matching Mango UUID within 20 seconds; no hooks installed.");
+static void Install(void) {
+    if(gInstalled || access(kDisabled,F_OK)==0)return;
+    NSOperatingSystemVersion os=NSProcessInfo.processInfo.operatingSystemVersion;
+    if(os.majorVersion!=16 || os.minorVersion!=5 || os.patchVersion!=0) {
+        Log(@"NO HOOKS this experimental build is restricted to iOS 16.5");return;
+    }
+    Class element=objc_getClass("MangoPillElement");
+    gContainerClass=objc_getClass("SBSystemApertureContainerView");
+    gWindowClass=objc_getClass("SBSystemApertureWindow");
+    gContentClass=objc_getClass("_SBSystemApertureContainerViewContentView");
+    if(!VerifiedMango() || !element || !gContainerClass || !gWindowClass || !gContentClass) {
+        if(++gAttempts<40)
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,500*NSEC_PER_MSEC),dispatch_get_main_queue(),^{Install();});
+        else Log(@"NO HOOKS matching Mango UUID/classes not found within 20 seconds");
         return;
     }
-    Class manager = objc_getClass("MangoPillManager"), element = objc_getClass("MangoPillElement");
-    Class aperture = objc_getClass("SBSystemApertureViewController");
-    SEL orientation = sel_registerName("handleInterfaceOrientationChange:");
-    SEL fallback = sel_registerName("showFallbackPill:");
-    SEL layout = sel_registerName("layoutHostContainerViewDidLayoutSubviews:");
-    SEL outsets = sel_registerName("preferredEdgeOutsetsForLayoutMode:suggestedOutsets:maximumOutsets:");
-    SEL appear = sel_registerName("viewWillAppear:");
-    NSArray *oneObject = @[@"@"];
-    NSArray *outsetArgs = @[[NSString stringWithUTF8String:@encode(NSInteger)],
-                            [NSString stringWithUTF8String:@encode(UIEdgeInsets)],
-                            [NSString stringWithUTF8String:@encode(UIEdgeInsets)]];
-    if (!Signature(manager, orientation, "v", oneObject) || !Signature(manager, fallback, "v", oneObject) ||
-        !Signature(element, layout, "v", oneObject) || !Signature(element, outsets, @encode(UIEdgeInsets), outsetArgs)) {
-        Log(@"Runtime signature mismatch; no hooks installed."); return;
+    if(!SubclassOf(gContainerClass,[UIView class]) || !SubclassOf(gContentClass,[UIView class]) ||
+       !SubclassOf(gWindowClass,[UIWindow class])) { Log(@"NO HOOKS class hierarchy mismatch");return; }
+    SEL host=sel_registerName("layoutHostContainerViewDidLayoutSubviews:");
+    NSArray *rectArgs=@[[NSString stringWithUTF8String:@encode(CGRect)]];
+    NSArray *pointArgs=@[[NSString stringWithUTF8String:@encode(CGPoint)]];
+    NSArray *transformArgs=@[[NSString stringWithUTF8String:@encode(CGAffineTransform)]];
+    if(!Signature(element,host,"v",@[@"@"]) ||
+       !Signature(gContainerClass,@selector(layoutSubviews),"v",@[]) ||
+       !Signature(gContainerClass,@selector(setFrame:),"v",rectArgs) ||
+       !Signature(gContainerClass,@selector(setBounds:),"v",rectArgs) ||
+       !Signature(gContainerClass,@selector(setCenter:),"v",pointArgs) ||
+       !Signature(gContainerClass,@selector(setTransform:),"v",transformArgs) ||
+       !Signature(gContainerClass,@selector(didMoveToWindow),"v",@[])) {
+        Log(@"NO HOOKS method signature mismatch");return;
     }
-    gFallbackWindows = [NSHashTable weakObjectsHashTable];
-    gHostViews = [NSHashTable weakObjectsHashTable];
-    gLastCapture = [NSMapTable weakToStrongObjectsMapTable];
-    MSHookMessageEx(manager, orientation, (IMP)HookOrientation, (IMP *)&OrigOrientation);
-    MSHookMessageEx(manager, fallback, (IMP)HookFallback, (IMP *)&OrigFallback);
-    MSHookMessageEx(element, layout, (IMP)HookLayoutHost, (IMP *)&OrigLayoutHost);
-    MSHookMessageEx(element, outsets, (IMP)HookOutsets, (IMP *)&OrigOutsets);
-    BOOL nativeSignature = Signature(aperture, appear, "v", @[@"B"]) || Signature(aperture, appear, "v", @[@"c"]);
-    if (nativeSignature) MSHookMessageEx(aperture, appear, (IMP)HookApertureAppear, (IMP *)&OrigApertureAppear);
-    gInstalled = YES;
-    Log(@"Installed observational hooks; original behavior preserved.");
-    Log(nativeSignature ? @"native-appear=yes" : @"native-appear=no");
-    // Use the actual local notification observed in the supplied binary.
-    // This is NSNotificationCenter, not a Darwin notification.
-    [NSNotificationCenter.defaultCenter addObserverForName:@"MangoInterfaceOrientationDidChange" object:nil
-        queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
-            if (!Enabled()) return;
-            id value = note.userInfo[@"orientation"];
-            if ([value isKindOfClass:[NSNumber class]])
-                Log([NSString stringWithFormat:@"local-notification orientation=%ld", (long)[value integerValue]]);
-            Snapshot(@"local-notification");
+    gContainers=[NSHashTable weakObjectsHashTable];gEnabled=YES;
+    MSHookMessageEx(gContainerClass,@selector(layoutSubviews),(IMP)HookLayout,(IMP *)&OrigLayout);
+    MSHookMessageEx(gContainerClass,@selector(setFrame:),(IMP)HookFrame,(IMP *)&OrigFrame);
+    MSHookMessageEx(gContainerClass,@selector(setBounds:),(IMP)HookBounds,(IMP *)&OrigBounds);
+    MSHookMessageEx(gContainerClass,@selector(setCenter:),(IMP)HookCenter,(IMP *)&OrigCenter);
+    MSHookMessageEx(gContainerClass,@selector(setTransform:),(IMP)HookTransform,(IMP *)&OrigTransform);
+    MSHookMessageEx(gContainerClass,@selector(didMoveToWindow),(IMP)HookMove,(IMP *)&OrigMove);
+    MSHookMessageEx(element,host,(IMP)HookHostLayout,(IMP *)&OrigHostLayout);
+    gInstalled=YES;
+    [NSNotificationCenter.defaultCenter addObserverForName:@"MangoInterfaceOrientationDidChange"
+        object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+            RefreshEnabled();UpdateAll();
+            dispatch_async(dispatch_get_main_queue(),^{UpdateAll();});
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,350*NSEC_PER_MSEC),dispatch_get_main_queue(),^{UpdateAll();});
         }];
-    Heartbeat(300); // Ten minutes, two-second sampling, bounded 1 MiB file.
+    // Low-rate recovery/reconciliation, not an animation driver or touch hook.
+    gTimer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
+    dispatch_source_set_timer(gTimer,dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),
+                              250*NSEC_PER_MSEC,50*NSEC_PER_MSEC);
+    dispatch_source_set_event_handler(gTimer,^{
+        RefreshEnabled();UpdateAll();
+        if(!gEnabled)dispatch_source_cancel(gTimer);
+    });
+    dispatch_resume(gTimer);
+    Log(@"INSTALLED 0.1.0-alpha1; scoped translation only; waiting for a verified Mango host");
 }
 
-__attribute__((constructor)) static void StartProbe(void) {
-    @autoreleasepool {
-        if (!Enabled()) return;
-        dispatch_async(dispatch_get_main_queue(), ^{ TryInstall(); });
-    }
+__attribute__((constructor)) static void StartFix(void) {
+    @autoreleasepool { dispatch_async(dispatch_get_main_queue(),^{Install();}); }
 }

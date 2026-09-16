@@ -1,91 +1,137 @@
-# MangoUpsideDownProbe：仅诊断，尚未修复位置
+# MangoUpsideDownFix 0.1.0-alpha1
 
-这是与本次二进制证据对应的独立 Objective-C tweak 源码。文件名有意使用 Probe，避免将诊断工程误认为 MangoUpsideDownFix。没有提供或声称已编译、已实机验证的 dylib/deb。
+独立的实验性位置修复工程，目标是 **iPhone 13 mini / iOS 16.5 / Dopamine RootHide**，配合已购买的 Mango 和现有 Upsidedowned。它不包含 Mango 原始二进制，也不修改其配置或授权。
 
-## 先准备恢复，再考虑编译安装
+这次交付的是源码及构建流程，**不是已经真机验证的安装包**。工程内 `VALIDATION.md` 区分已完成检查与尚未完成的验证。
 
-1. 保留原始 Mango 文件、现有插件配置，以及当前能用的越狱环境。此工程不替换 Mango。
-2. 在电脑上实际验证 SSH 能登录设备，并能打开两个并行会话。不要只确认“装了 SSH”。
-3. 先验证 package manager 的卸载命令可用，并记录 `dpkg -L com.chenxun.mangoupsidedownprobe` 的结果。该命令须在安装后执行以获得实际路径；安装前确认 `dpkg` 可用。
-4. 明确手中 Dopamine 版本关闭 tweak 注入的入口。测试前实际查看；不要依赖可能因版本而不同的安全模式手势。
-5. 即使诊断代码也运行在 SpringBoard，仍可能触发 crash/respring。出现问题优先卸载本工程，不重装或修改 Mango、MobileGestalt、backboardd。
+## 它具体修什么
 
-### SSH 恢复
+真机日志已确认：倒置时 Mango 读到方向 2，内容层已转 180°，但外层 `SBSystemApertureContainerView` 仍在原来的物理顶部。
 
-在已确认使用 RootHide bootstrap 路径语义的 shell 中：
+本工程只对从 Mango 布局回调确认的容器实例加位置补偿：将其矩形在屏幕固定坐标中沿水平中线移动到对侧，保持内部已有旋转。不会给内容再旋转一次，也不改 `alpha`。正常竖屏和横屏撤销本工程的位移。
+
+**这只验证了一个待实机检验的修复方向，不能预先保证动画和触摸正确。** 当前仅覆盖已确认的系统 aperture 路径，不覆盖 Mango 的备用 UIWindow。
+
+## 编译前先准备恢复
+
+沿用你先前已经成功连接的 SSH。先确认电脑仍能登录手机；保留一个会话。记录 Dopamine 中关闭 tweak 注入的位置，并保留当前能正常工作的 Mango、Upsidedowned。
+
+这个新包的卸载命令是：
 
 ```sh
-dpkg -r com.chenxun.mangoupsidedownprobe
+dpkg -r com.chenxun.mangoupsidedownfix
 ```
 
-先移除包，再使用你当前越狱环境已验证可用的 respring 功能。不要先反复重启 backboardd。
+卸载后通过你当前环境已经验证可用的功能 respring。此命令只卸载 Fix，不卸载 Mango 或 Upsidedowned。
 
-如果包管理器不可用，在 Filza 中按安装清单定位本工程的 `MangoUpsideDownProbe.plist` 和 `MangoUpsideDownProbe.dylib`，把它们移出注入目录（存入单独的禁用备份目录），然后 respring。不要只凭路径猜测删除文件；不要移动任何 Mango 原文件。
-
-代码还检查一个自定义禁用标记，其**真实根文件系统路径**为：
-
-`/var/mobile/Library/Preferences/MangoUpsideDownProbe.disabled`
-
-创建该空文件会停止诊断采样；下次 SpringBoard 启动不再安装本工程的 hooks。已安装的 hooks 仍调用原方法，直到进程退出，不尝试运行中卸钩。
-
-RootHide bootstrap 工具可能将 `/` 映射为 jbroot。其官方文档规定可经 `/rootfs` 访问真实系统目录。因此，只有确认该 shell 确实采用该语义后，才使用：
+安装后可用以下只读命令记录实际安装位置：
 
 ```sh
-touch /rootfs/var/mobile/Library/Preferences/MangoUpsideDownProbe.disabled
+dpkg -L com.chenxun.mangoupsidedownfix
 ```
 
-Filza 中显示的实际路径与上述 shell 路径可能不同，不要照搬 `/var/jb`。
+如果包管理器不可用，在 Filza 按该清单把 **MangoUpsideDownFix.dylib 和 MangoUpsideDownFix.plist** 移出注入目录，再 respring。不要照搬 `/var/jb`；RootHide 的实际路径应以安装清单为准。
 
-如果 SSH 也不可达，iPhone 13 mini 强制重启操作为：快速按放音量加、快速按放音量减，再按住侧边键直到 Apple 标志。Dopamine 是 semi-untethered 越狱；完整重启后先保持未重新启用 tweak 注入的状态，再通过当前版本支持的关闭注入方式恢复、卸载本工程。不能保证用户尚未验证的 SSH/Filza 在未越狱状态可用。
+若 SSH 也无法连接：快速按放音量加、快速按放音量减，按住侧边键直到 Apple 标志。重启后通过 Dopamine 当前版本支持的关闭 tweak 注入方式恢复环境，再卸载 Fix。不要假定未越狱时 SSH 或 Filza 仍然可用。
 
-## 工程做什么
+### 运行时禁用开关
 
-- 仅注入 `com.apple.springboard`。
-- 启动后在主队列最多等待 20 秒，确认加载的 `mango.dylib` UUID 完全匹配本次样本。
-- 验证实际方法签名。四个 Mango hook 的签名任一不匹配就不安装。
-- Hook `MangoPillManager` 的 `handleInterfaceOrientationChange:`、`showFallbackPill:`。
-- Hook `MangoPillElement` 的 `layoutHostContainerViewDidLayoutSubviews:`、`preferredEdgeOutsetsForLayoutMode:suggestedOutsets:maximumOutsets:`。
-- 若运行时签名匹配，观察 `SBSystemApertureViewController` 的 `viewWillAppear:`；若它已出现，则用有限深度的公开 view-controller 树查找现有实例。
-- 记录 Mango 缓存方向、UIKit 方向、windowScene 方向、bounds、safe area、UIView/CALayer transform，以及映射到 screen.fixedCoordinateSpace 的三个基点。
-- 所有原方法原样调用一次，边距返回值原样返回；不设置 frame/center/transform，不更改方向 API，不修改触摸分发，不发送虚假系统通知。
-- 不主动开始 UIDevice 方向采样。因此 `deviceOrientation=0` 是允许的，不能据此判断传感器或倒置插件失效。
-- 记录布局参数和类名，不读取通知正文、账号或授权信息。
+本工程识别真实文件系统中的空文件：
 
-日志文件真实路径：
+```text
+/var/mobile/Library/Preferences/MangoUpsideDownFix.disabled
+```
 
-`/var/mobile/Library/Logs/MangoUpsideDownProbe.log`
-
-同时写系统日志，前缀 `[MangoUDProbe]`。日志文件约 1 MiB 封顶，超过会清空本工程的日志重新写。周期采样每 2 秒一次，持续 10 分钟；旋转通知及相关 hook 也可触发采样。没有“后台永久运行”的额外进程。
-
-`new-window-during-showFallbackPill` 是在该方法执行期间新出现的窗口候选；仍应结合 160×44、y=10 等证据识别，不能仅凭“新增”就断定归属。未观察到 host 回调不等于没有系统灵动岛。
-
-## 编译前提和命令
-
-使用支持当前 arm64e ABI 的 macOS/Xcode 工具链及 RootHide Theos，SDK 至少支持 iOS 16。`ARCHS=arm64e` 是 Mach-O CPU 架构；Debian `Architecture` 是包兼容标记，二者不是一个概念。打包后检查实际 `Architecture` 与目标设备的 `dpkg --print-architecture` 一致，不使用强制安装参数。
+若你的 SSH shell 与先前日志一样在 RootHide bootstrap 中，已确认通过 `/rootfs` 访问真实系统，则执行：
 
 ```sh
+touch /rootfs/var/mobile/Library/Preferences/MangoUpsideDownFix.disabled
+```
+
+在 SpringBoard 正常运行、主线程可执行的情况下，通常约 0.25～0.30 秒内检查到标记并撤销能够确认属于本工程的位移；本次进程内保持禁用。移除标记并 respring 才重新启用。启动前已有标记则不安装 hooks。
+
+这不是 SpringBoard 卡死后的恢复保证；卡死或崩溃时使用卸载、关闭注入或重启。遇到 `CONFLICT` 日志时不覆盖未知 transform，应卸载/respring 恢复。
+
+## 使用已有 GitHub Actions 构建
+
+1. 解压后进入 `MangoUpsideDownFix` 文件夹。把**文件夹里的完整内容**放到仓库根目录，不要多套一层目录。
+2. 沿用已有私有仓库也可以。替换根目录 `Tweak.xm`、`Makefile`、`control`，加入 `Geometry.h`、`MangoUpsideDownFix.plist`、`tests/`、`tools/`；将附带的 `.github/workflows/build.yml` 替换到同一路径。这些文件必须一起更新，不能只替换 Tweak.xm。
+3. 提交后打开 **Actions → Build MangoUpsideDownFix (RootHide)**。它会用 macOS、RootHide Theos、iOS 16.5 SDK 构建。
+4. 绿色成功后，下载 **MangoUpsideDownFix-0.1.0-alpha1** artifact，解压其中的 `.deb`。失败时不要安装残留包。
+5. 核对包名称是 **MangoUpsideDownFix**、包 ID 是 `com.chenxun.mangoupsidedownfix`，不是旧 Probe。
+
+本流程只构建和检查，不自动连接手机或安装。工程不需要修改 Mango 原版文件。
+
+已安装 Probe 时，可通过包管理器卸载 `com.chenxun.mangoupsidedownprobe` 后进行 Fix 首轮测试，以免混淆日志。它们使用不同包名和日志路径，Fix 不会替换 Probe。
+
+### 本地 macOS 命令
+
+已有 RootHide Theos 和 iOS 16.5 SDK 时，在工程根目录执行：
+
+```sh
+export THEOS="$HOME/theos"
 make clean
 make package FINALPACKAGE=1
+python3 tools/check_package.py packages/*.deb
 ```
 
-Makefile 已设置 `THEOS_PACKAGE_SCHEME=roothide`。没有 `after-install` 脚本，也没有自动安装步骤。生成包后先检查包清单、注入 plist、加载依赖、arm64e 架构和签名，再由包管理器安装。
+Makefile 使用 `ARCHS=arm64e`、`THEOS_PACKAGE_SCHEME=roothide`。直接构建 RootHide 包，无须先构建普通 rootless 包再转换。不要使用出现 `incompatible arm64e ABI` 警告的产物；转换工具不能修复坐标算法或方法签名。
 
-直接为 RootHide 编译优于先生成普通 rootless 包再转换。转换工具不能补上错误的 arm64e ABI、方法签名或坐标算法；本工程不需要改 Mango 原包，不应把 `/var/jb` 硬编码到代码。
+## 第一轮安装与测试
 
-来源：[RootHide 开发文档](https://github.com/roothide/Developer)、[RootHide 路径规则](https://github.com/roothide/Developer/blob/main/roothide.md)、[Theos arm64e/rootless 说明](https://theos.dev/docs/rootless)、[RootHide Dopamine](https://github.com/roothide/Dopamine2-roothide)。
+先完成上面的恢复准备，再用现有包管理器安装构建成功的 `.deb` 并 respring。Mango 和 Upsidedowned 保持原来的配置。
 
-## 采样矩阵
+按下面顺序观察；出现异常先停用/卸载 Fix：
 
-在恢复手段就绪、源码成功构建并检查后，分次记录：
+| 顺序 | 操作 | 通过标准 |
+|---|---|---|
+| 1 | 正常竖屏触发一次以前会显示 Mango 岛的事件 | 原有位置、文字和交互不变 |
+| 2 | 倒置手机，触发相同事件 | 岛位于视觉顶部，文字正向，不在刘海一侧 |
+| 3 | 点击岛、长按展开并收起 | 点击命中可见位置，动画没有闪回原来一侧 |
+| 4 | 保持展开切回竖屏，再反复倒置 5 次 | 能恢复，没有累积漂移或双重旋转 |
+| 5 | 左右横屏、锁屏/解锁 | 保留原有行为，不残留位移 |
+| 6 | 测音乐、计时器及其他实际使用的岛内容 | 分别记录位置、展开和点击；不能用 Mango 通知一次成功代替这些检查 |
 
-| 场景 | 采样重点 |
+**先前出现过 Mango host `alpha=0`。** 这不等于屏幕上的整个岛都不可见，也不代表交互已被证明；Fix 不会强行把 host 变成不透明。
+
+Fix 只追踪通过 Mango 的真实回调找到的容器。若音乐/计时器使用不同容器，或最后一个 Mango host 已从这个容器分离，它可能不受此版影响。没有观察到回调时不盲目扫描并移动所有系统窗口。
+
+## 查看这版的日志
+
+日志与旧 Probe 分开，真实路径为：
+
+```text
+/var/mobile/Library/Logs/MangoUpsideDownFix.log
+```
+
+在已确认的 RootHide bootstrap shell 中：
+
+```sh
+tail -n 80 /rootfs/var/mobile/Library/Logs/MangoUpsideDownFix.log
+```
+
+| 标记 | 意义 |
 |---|---|
-| 正常竖屏、Mango 开启 | 系统 aperture 是否存在；正常几何基线 |
-| 打开倒置插件、稳定 180° | Mango 缓存/scene/statusBar 是否真的变成 2；三个坐标基点是否改变 |
-| 倒置状态触发一条无敏感内容的通知 | 是否调用 `showFallbackPill:`；outsets；内容是否被撤下 |
-| 展开、收起、点击、滑动 | 人工记录命中位置和动画方向；日志本身不能验证触摸成功 |
-| 关闭倒置、恢复正向 | 几何和内容是否恢复基线 |
-| 左右横屏 | 保留原行为的对照 |
-| 临时关闭 Mango 玻璃效果后重复倒置 | 区分宿主坐标错误与纯纹理采样错误 |
+| `INSTALLED` | 已通过版本/签名检查并安装 scoped hooks |
+| `TRACK` | Mango 回调已确认一个 host 和外层容器 |
+| `APPLY` | 已施加位移，并核对模型坐标到达目标 |
+| `RESTORE` | 撤销本工程的已知位移 |
+| `SKIP` | 当前方向/几何不符合本版处理条件 |
+| `NO HOOKS` | 系统版本、Mango UUID 或方法签名不匹配，本版未挂钩 |
+| `CONFLICT` / `SUSPEND` | 出现未覆盖情况，停止处理该实例，需 respring 清理状态 |
 
-这份 Probe 不修复任何场景。只有在确定当前显示路径以及倒置插件改变的坐标层之后，才应把对应变换写入正式的 MangoUpsideDownFix。
+`APPLY` **不代表触摸测试或动画测试通过**。日志不记录通知正文或账户信息，文件约 512 KiB 封顶循环写入。
+
+## 设计边界
+
+- 仅注入 SpringBoard，不注入 backboardd。
+- 只接受 iOS 16.5，以及 Mango UUID `67C0D7C2-4487-3FD2-9535-067745AE4B8F`；这是一版受限实验补丁，Mango 更新后通常会停止挂钩。
+- 不改方向 API、不伪造通知、不读写 Mango 配置、不改原始 dylib。
+- 不写固定 y、屏幕高度或设备分辨率；按目标 window 的固定坐标和实际父视图变换计算。
+- 本版只补偿垂直位置，保留 Mango/System Aperture 原有水平位置和尺寸，不额外修正其水平布局。
+- 旋转和缩放来自系统，本工程只加父坐标中的平移。进入受监控的系统 geometry setter / layout 时先撤销已知位移，原方法执行后再计算。
+- 这仍可能与系统动画、自定义命中测试或直接 CALayer 写入冲突。没有修改事件分发，没有证明“仅移动容器就能覆盖所有系统触摸区域”。
+
+技术依据、已知风险和验证结果分别见 `EVIDENCE.md`、`VALIDATION.md`。
+
+来源：[RootHide 开发说明](https://github.com/roothide/Developer)、[Theos arm64e 构建说明](https://theos.dev/docs/rootless)、[Apple 视图坐标与变换说明](https://developer.apple.com/library/archive/documentation/WindowsViews/Conceptual/ViewPG_iPhoneOS/CreatingViews/CreatingViews.html)。
