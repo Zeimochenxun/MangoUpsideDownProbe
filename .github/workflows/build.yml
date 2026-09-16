@@ -1,0 +1,42 @@
+name: Build RootHide Tweak
+
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Procursus tools
+        uses: dhinakg/procursus-action@main
+        with:
+          packages: ldid make
+
+      - name: Install RootHide Theos
+        run: |
+          git clone --recursive https://github.com/roothide/theos.git "$HOME/theos"
+
+      - name: Install iOS 16.5 SDK
+        run: |
+          mkdir -p "$HOME/theos/sdks"
+          curl -L \
+            https://github.com/theos/sdks/releases/latest/download/iPhoneOS16.5.sdk.tar.xz \
+            -o /tmp/iPhoneOS16.5.sdk.tar.xz
+          tar -xJf /tmp/iPhoneOS16.5.sdk.tar.xz -C "$HOME/theos/sdks"
+
+      - name: Build RootHide deb
+        run: |
+          export THEOS="$HOME/theos"
+          make clean
+          make package FINALPACKAGE=1
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: MangoUpsideDownProbe
+          path: packages/*.deb
