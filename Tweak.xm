@@ -164,6 +164,19 @@ static void ApplyWorld(UIView *root){
     if(CACurrentMediaTime()-s.lastLog>5){s.lastLog=CACurrentMediaTime();
         Log([NSString stringWithFormat:@"WORLD orientation=2 root=%p contents=%lu canceled=%lu windowBounds=%@",(__bridge void *)root,(unsigned long)contents.count,(unsigned long)cancel.count,NSStringFromCGRect(w.bounds)]);}
 }
+static NSArray<UIWindow *> *ExistingWindows(void){
+    NSMutableOrderedSet<UIWindow *> *result=[NSMutableOrderedSet orderedSet];
+    for(UIScene *scene in UIApplication.sharedApplication.connectedScenes)
+        if([scene isKindOfClass:UIWindowScene.class])
+            [result addObjectsFromArray:((UIWindowScene *)scene).windows];
+    // SpringBoard's legacy system aperture window may have no UIWindowScene
+    // (sceneOrientation=0 in the supplied log). Keep this targeted fallback.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    [result addObjectsFromArray:UIApplication.sharedApplication.windows];
+#pragma clang diagnostic pop
+    return result.array;
+}
 static void Reconcile(void){
     if(Busy||Depth||![NSThread isMainThread])return;
     Busy=YES;
@@ -172,7 +185,7 @@ static void Reconcile(void){
             for(UIView *root in Roots.allObjects)RestoreWorld(root);
             if(access(Disabled,F_OK)==0&&Enabled){Enabled=NO;Log(@"DISABLED: restored owned transforms");}
             if(!Enabled||Orientation()!=UIInterfaceOrientationPortraitUpsideDown)return;
-            for(UIWindow *w in UIApplication.sharedApplication.windows)Discover(w);
+            for(UIWindow *w in ExistingWindows())Discover(w);
             for(UIWindow *w in Windows.allObjects)Discover(w);
             for(UIView *root in Roots.allObjects)ApplyWorld(root);
         }];
