@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 0.3.0-alpha3：证据与边界
+# MangoUpsideDownWorld 0.4.0-alpha4：证据与边界
 
 这是本次新实现，不是从关联对话中取回的既有 World 源码，也不是给 Fix alpha2 改名。
 
@@ -45,10 +45,19 @@ alpha2 改为规范化传入值：在内容层的 `setTransform:` hook 里，先
 
 副作用：内容层的 `setTransform:` 不再在每一帧都触发一次同步的全量 `Reconcile`（之前 `End` 在 `Depth` 归零时会触发）。这个视图自身的规范化已经在 hook 内联完成，其它被追踪的 root 仍由 250ms 定时器和方向变化通知驱动，不依赖这次调用。
 
+## 0.4.0-alpha4：把半周旋转从根视图移到窗口本身（触控方向上下颠倒）
+
+之前三个版本都是让 `ApplyWorld` 旋转 root（`SBSystemApertureWindow` 的直接子 `SBFTouchPassThroughView`），窗口本身的 transform 从未被触碰。这对**位置**和**内容朝向**是够的——旋转 root 和旋转 window 对渲染结果的效果完全等价（对任意仿射函数 F 都有 `F(2a-b)=2F(a)-F(b)`，只要 pivot 用 `convertPoint:fromCoordinateSpace:` 换算到对应的父坐标系，两种做法对根视图在固定坐标系里的最终位置给出完全相同的结果，与 UIKit 如何用 center/bounds 定义 transform 的具体细节无关）——但对**手势方向**不够：root 和 content（root 内部，经过取消旋转后）相对固定坐标系是一致的（都被"转了半周"），而窗口本身从未被转，仍然与固定坐标系一致。凡是拿窗口局部坐标（或等价的，未经视图变换的原始/固定坐标）算手势位移的代码，读到的符号就与拿 content 局部坐标算的相反——这正好是"触发位置对,方向反"的成因：手指往下滑,在固定坐标系里 Y 是减小的（因为用户是倒着看屏幕),而 content 内部坐标系(已经整体转了半周)把这解读为"往下",和窗口/固定坐标系解读的"往上"正好反号。
+
+只比较组合链的线性部分(旋转/缩放,与位移无关,因为手势的是位移量 `p2-p1`,常数项在减法里直接消掉)验证了这个符号分歧:现有做法下 window 的线性部分是正对角(未转),root 和 content 的线性部分是负对角(已转)——两者符号相反。改成转窗口后,三者的线性部分全部是负对角,一致。
+
+本版把 `ApplyWorld` 里 `SetOwned` 的目标从 `root` 改成 `w`(窗口):增加一条对窗口自身基向量的"未被改动"前置检查(与原有的 root-basis 检查同构),pivot 直接用固定坐标系的屏幕中点(窗口没有 superview,它自己的 center/frame 已经是直接用固定坐标系表达的,不需要像 root 的 pivot 那样先经过 `convertPoint:fromCoordinateSpace:` 换算)。`RestoreWorld` 相应改为还原 `s.parent`(即窗口)而不是 root。内容层的取消旋转逻辑完全不变——它只看 content 自身相对固定坐标系的基向量,与外层转的是 root 还是 window 无关。`WorldHit`/`HookHit`/`HookInside` 也不需要改——它们用的是 UIKit 自己的 `convertPoint:`/`hitTest:`,自动适配变换实际所在的层级。
+
+`WorldMath.h` 本身不需要新函数：`MWTurn` 已经是通用的，只是这次喂给它的是窗口的 transform/center，而不是 root 的。数学正确性用符号证明和线性部分的数值验证覆盖，没有新增 C 单测——现有的模糊测试已经覆盖了 `MWTurn` 的核心代数性质（对任意仿射输入的自逆性），这次改动没有引入新的数学原语，只是把已验证的函数用在了另一个视图上。
+
 ## 尚未处理
 
-- 触控方向上下颠倒（第 2 条）。World 只旋转窗口内部的视图，窗口与屏幕坐标系本身没翻，手势位移若在窗口或屏幕空间计算，符号就与视图内部坐标相反。下一步待验的方向是把半周旋转上移到 `SBSystemApertureWindow.transform`（其 frame 为 {0,0,375,812}、center 恰为屏幕中心、现有 transform 为纯 25/24 缩放，符号取反即绕屏幕中心的精确半周）。若位移是在 UIScreen 固定坐标系或 HID 层计算，UIKit 层无法修正。本版未改动。
-- 岛落到屏幕底部（第 3 条）。alpha2 只加了跳过原因日志，未改判定。需要真机复现后读 `SKIP` 行才能定性；另需确认异常时岛内文字对倒置视角是正还是倒，以区分是 Mango 的方向状态问题还是 World 的几何判定问题。
+- 岛落到屏幕底部。alpha2 加了跳过原因日志，未改判定。需要真机复现后读 `SKIP` 行才能定性；另需确认异常时岛内文字对倒置视角是正还是倒，以区分是 Mango 的方向状态问题还是 World 的几何判定问题。
 
 ## 保留风险
 

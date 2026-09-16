@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.3.0-alpha3. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 0.4.0-alpha4. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -55,8 +55,9 @@ static MWTransform Math(CGAffineTransform t){return (MWTransform){t.a,t.b,t.c,t.
 static CGAffineTransform CG(MWTransform t){return CGAffineTransformMake(t.a,t.b,t.c,t.d,t.tx,t.ty);}
 static MWWorldState *State(UIView *v){return objc_getAssociatedObject(v,&StateKey);}
 // The cancellation record for this content view, created on demand. Returns it
-// only while the root that owns the view is actually turned: that turn is what
-// makes an inverted content value render upside-down, so it is also the exact
+// only while the window above this view's root is actually turned (s.outer is
+// the window's owned transform; see ApplyWorld): that turn is what makes an
+// inverted content value render upside-down, so it is also the exact
 // condition under which normalizing an incoming value is correct.
 static MWOwnedTransform *OwnedContent(UIView *v){
     for(UIView *p=v.superview;p;p=p.superview){
@@ -86,7 +87,15 @@ static BOOL RestoreOne(UIView *v,MWOwnedTransform *s){
 }
 static void RestoreWorld(UIView *root){
     MWWorldState *s=State(root);if(!s)return;
-    BOOL ok=RestoreOne(root,s.outer);
+    // s.outer now belongs to the window (see ApplyWorld), not to root itself.
+    // s.parent is weak; treat it going nil while still marked applied as the
+    // same kind of conflict an unrecognized value would be, rather than
+    // message a nil view for the CGAffineTransform-returning accessor below.
+    BOOL ok=YES;
+    if(s.outer.applied){
+        if(s.parent)ok=RestoreOne(s.parent,s.outer);
+        else{s.outer.applied=NO;ok=NO;}
+    }
     for(UIView *v in s.inner.keyEnumerator.allObjects)
         if(!RestoreOne(v,[s.inner objectForKey:v]))ok=NO;
     if(!ok&&!s.suspended){s.suspended=YES;Log(@"CONFLICT: unknown transform; world suspended until respring");}
@@ -154,6 +163,14 @@ static void ApplyWorld(UIView *root){
     CGPoint y=[root convertPoint:CGPointMake(0,1) toCoordinateSpace:fixed];
     if(x.x-o.x<=0||y.y-o.y<=0||fabs(x.y-o.y)>1e-4||fabs(y.x-o.x)>1e-4){
         Skip(s,[NSString stringWithFormat:@"root-basis dx=%g dy=%g skewX=%g skewY=%g",x.x-o.x,y.y-o.y,y.x-o.x,x.y-o.y]);return;}
+    // Require an upright unmodified window too: the turn below is applied to
+    // the window itself now (see the comment further down for why), so this is
+    // the same kind of precondition on the thing about to be rotated.
+    CGPoint wo=[w convertPoint:CGPointZero toCoordinateSpace:fixed];
+    CGPoint wx=[w convertPoint:CGPointMake(1,0) toCoordinateSpace:fixed];
+    CGPoint wy=[w convertPoint:CGPointMake(0,1) toCoordinateSpace:fixed];
+    if(wx.x-wo.x<=0||wy.y-wo.y<=0||fabs(wx.y-wo.y)>1e-4||fabs(wy.x-wo.x)>1e-4){
+        Skip(s,[NSString stringWithFormat:@"window-basis dx=%g dy=%g skewX=%g skewY=%g",wx.x-wo.x,wy.y-wo.y,wy.x-wo.x,wx.y-wo.y]);return;}
     // Validate every content basis first, so unsupported geometry causes no
     // partial correction. Hidden contents are retained for subsequent reveals.
     NSMutableArray<UIView *> *cancel=[NSMutableArray array];
@@ -169,17 +186,34 @@ static void ApplyWorld(UIView *root){
         for(UIView *p=v.superview;p&&p!=root;p=p.superview)if([p isKindOfClass:ContentClass]){Skip(s,@"nested-content");return;}
         if(MWInvertedBasis(dx,dy,c.x-a.x,b.y-a.y))[cancel addObject:v];
     }
-    CGPoint pivot=[w convertPoint:CGPointMake(CGRectGetMidX(screen),CGRectGetMidY(screen)) fromCoordinateSpace:fixed];
-    MWTransform rotated=MWTurn(Math(root.transform),(MWPoint){root.center.x,root.center.y},(MWPoint){pivot.x,pivot.y});
+    // Turn the WINDOW, not root. Turning only root's own transform (the
+    // current approach) leaves root and content agreeing with each other --
+    // both end up turned relative to fixed space, root directly and content
+    // because its own cancellation is relative to root, not to fixed -- which
+    // is exactly why position and content orientation already came out
+    // right. But the window itself was never touched, so it stays upright
+    // relative to fixed space, disagreeing in SIGN with root and content. A
+    // gesture whose translation is read relative to the window (or via any
+    // API that hands back raw/fixed-space deltas, which is equivalent) reads
+    // the opposite direction from one read relative to root or content --
+    // which is what turned a downward swipe into an upward one. Turning the
+    // window instead makes it agree with root and content too, so every
+    // gesture in the subtree reads the same direction regardless of which
+    // view it is anchored to. A window has no superview; its own center and
+    // frame are already expressed directly in the fixed/screen space, so
+    // unlike root's pivot (which needs converting into root's parent, the
+    // window, first) no conversion is needed here.
+    CGPoint pivot=CGPointMake(CGRectGetMidX(screen),CGRectGetMidY(screen));
+    MWTransform rotated=MWTurn(Math(w.transform),(MWPoint){w.center.x,w.center.y},(MWPoint){pivot.x,pivot.y});
     if(!MWFinite(rotated)){Skip(s,@"nonfinite-turn");return;}
-    // The sweep creates ownership directly: it runs before the root is turned,
-    // which is the condition OwnedContent deliberately refuses.
+    // The sweep creates ownership directly: it runs before the window is
+    // turned, which is the condition OwnedContent deliberately refuses.
     for(UIView *v in cancel){
         MWOwnedTransform *owned=[s.inner objectForKey:v];
         if(!owned){owned=[MWOwnedTransform new];[s.inner setObject:owned forKey:v];}
         SetOwned(v,owned,CG(MWCancelTurn(Math(v.transform))));
     }
-    SetOwned(root,s.outer,CG(rotated));
+    SetOwned(w,s.outer,CG(rotated));
     // Verify model-space half-turn on three independent points.
     CGPoint actual[3]={[root convertPoint:CGPointZero toCoordinateSpace:fixed],
         [root convertPoint:CGPointMake(1,0) toCoordinateSpace:fixed],
@@ -379,6 +413,6 @@ static void Install(void){
     Timer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
     dispatch_source_set_timer(Timer,dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),250*NSEC_PER_MSEC,50*NSEC_PER_MSEC);
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
-    Log(@"INSTALLED World 0.3.0-alpha3: whole aperture root turn + inline content normalization + skip reasons + window hit fallback");Reconcile();
+    Log(@"INSTALLED World 0.4.0-alpha4: window turn + content normalization + skip reasons + window hit fallback");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}
