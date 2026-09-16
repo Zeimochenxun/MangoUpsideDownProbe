@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.2.0-alpha2. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 0.3.0-alpha3. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -255,30 +255,36 @@ DEFINE_HOOKS(Window)
 DEFINE_TRANSFORM_HOOK(Pass)
 DEFINE_TRANSFORM_HOOK(Window)
 
-// Content transforms are the one value Mango animates, and correcting one after
-// the original setter cannot retarget the animation UIKit has by then created:
-// it interpolates from the upright presentation value toward Mango's inverted
-// model value, so the island stayed inverted for as long as that animation ran
-// -- the whole length of a touch. Normalizing the incoming value keeps both
-// ends of that animation upright. The ownership record is written exactly as
-// the sweep would have written it, so restoring to portrait still hands Mango's
-// own value back and Reconcile sees the state it expects.
+// Content transforms are the one value Mango animates. Correcting one after
+// the original setter cannot retarget an animation UIKit has already built
+// toward Mango's inverted value, so this hook substitutes an upright target
+// before calling through instead. It deliberately does not use Begin()/End():
+// Begin's restore silently commits Mango's raw last value to the model right
+// before this call runs, and Core Animation captures whatever the model held
+// at that instant as the start of any animation this call is part of. That
+// silent detour is what turned Mango's own reveal and dismiss animations into
+// a visible spin through the sign boundary this cancellation exists to hide --
+// a brief one on every activation, a slow one on dismissal. Handling the
+// value directly, with no write in between, keeps every animation Core
+// Animation builds for this call between two upright endpoints. World's own
+// writes (SetOwned, RestoreOne) reach this same hook re-entrantly while Busy
+// is set; they are passed through untouched since their bookkeeping is
+// already done by the caller.
 static void (*ContentTransform)(id,SEL,CGAffineTransform);
 static void ContentHookTransform(UIView *s,SEL c,CGAffineTransform v){
-    // Normalize only a cleanly inverted incoming basis under a turned root. A
-    // transitional angle or an already-upright value is passed through
-    // untouched. Ownership must be read before Begin restores the world, which
-    // clears the flag this depends on.
+    if(Busy||![NSThread isMainThread]){ContentTransform(s,c,v);return;}
+    MWOwnedTransform *owned=OwnedContent(s);
     MWTransform upright=MWCancelTurn(Math(v));
-    MWOwnedTransform *owned=(!Busy&&!Depth&&[NSThread isMainThread]&&
-        MWInvertedBasis(v.a,v.d,v.c,v.b)&&MWFinite(upright))?OwnedContent(s):nil;
-    BOOL b=Begin(s);
-    @try{
-        ContentTransform(s,c,owned?CG(upright):v);
-        // Record it the way the sweep would, so a later restore hands Mango's
-        // own value back and Reconcile recognizes what it finds.
-        if(owned){owned.before=v;owned.after=CG(upright);owned.applied=YES;}
-    }@finally{End(b);}
+    if(owned&&MWInvertedBasis(v.a,v.d,v.c,v.b)&&MWFinite(upright)){
+        ContentTransform(s,c,CG(upright));
+        owned.before=v;owned.after=CG(upright);owned.applied=YES;
+    }else{
+        // Not a value this hook can reconstruct from (transitional, already
+        // upright, or nonfinite): pass it through untouched and let the
+        // periodic sweep re-examine and re-cancel it if it settles inverted.
+        if(owned)owned.applied=NO;
+        ContentTransform(s,c,v);
+    }
 }
 
 static UIView *WorldHit(UIWindow *w,CGPoint point,UIEvent *event){
@@ -373,6 +379,6 @@ static void Install(void){
     Timer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
     dispatch_source_set_timer(Timer,dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),250*NSEC_PER_MSEC,50*NSEC_PER_MSEC);
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
-    Log(@"INSTALLED World 0.2.0-alpha2: whole aperture root turn + inbound content normalization + skip reasons + window hit fallback");Reconcile();
+    Log(@"INSTALLED World 0.3.0-alpha3: whole aperture root turn + inline content normalization + skip reasons + window hit fallback");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}

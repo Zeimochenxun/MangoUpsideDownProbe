@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 0.2.0-alpha2：证据与边界
+# MangoUpsideDownWorld 0.3.0-alpha3：证据与边界
 
 这是本次新实现，不是从关联对话中取回的既有 World 源码，也不是给 Fix alpha2 改名。
 
@@ -34,6 +34,16 @@ alpha2 改为规范化传入值：在内容层的 `setTransform:` hook 里，先
 同时把 `ApplyWorld` 的每个静默 return 改为限频的 `SKIP reason=… mangoOrientation=…` 记录（同一原因 5 秒内不重复，成功后清空），用于把第 3 条从推测变成证据。这一项只增加日志，不改变任何几何行为。
 
 抵消算子下沉为 `MWCancelTurn` 与 `MWInvertedBasis`，由 sweep 和 `setTransform:` 两条路径共用同一判定，CI 的 world_math_test 覆盖其保持缩放与位移、自逆、以及对已正向/镜像/过渡角度/退化/非有限输入的拒绝。
+
+## 0.3.0-alpha3 真机结果（用户报告）与本版改动
+
+0.2.0-alpha2 修好了触控期间的倒置闪动，但引入了新问题：以音乐播放为例，未展开状态下长按灵动岛的瞬间会闪现一次旋转动画（似乎每次激活——不论触控还是其它方式——只要岛出现就会闪一次），展开态关闭时也会闪现旋转动画，且这次是慢速的、从倒置转正向的旋转。
+
+原因是 alpha2 的内容层 `setTransform:` hook 仍然调用了 `Begin(s)`。`Begin` 会在真正调用原始实现之前，先用 `performWithoutAnimation` 把内容层的 transform **同步写回** Mango 的上一次原始（倒置）值——这一步本身不产生动画，但它改变了模型层当时持有的值。紧接着 hook 调用原始实现，把我们替换的正向值交给它；如果这次调用处于 Mango 自己开的动画事务里（长按激活、关闭动画都是这种事务），Core Animation 会以调用瞬间的模型值作为该属性动画的起点——也就是刚被 `Begin` 写回的倒置值，终点是我们替换的正向值。于是 Core Animation 真的把"倒置→正向"这段翻转做成了一次可见动画，长按/关闭的动画时长越长，这个翻转就越慢越明显。
+
+修法：内容层的 `setTransform:` hook 不再调用 `Begin`/`End`，不在真正调用之前做任何同步写回。直接判定传入值是否为干净的倒置基向量，是则把替换值交给原始实现，所有权记录按替换值直接写，不经过还原-重算这一圈。这样模型层在两次调用之间始终停留在"正向"这一侧，Core Animation 捕捉到的起点和终点都是正向值，不会经过符号翻转的那一刻。World 自身的写入（`SetOwned`/`RestoreOne`，运行在 `Busy=YES` 期间）原样放行，不受影响。定期扫描（`Reconcile`/`ApplyWorld`）仍然全程包在 `performWithoutAnimation` 里，从未是闪动的来源；问题只出在这一个 hook 里"先还原、再用动画事务写入"的间隙。
+
+副作用：内容层的 `setTransform:` 不再在每一帧都触发一次同步的全量 `Reconcile`（之前 `End` 在 `Depth` 归零时会触发）。这个视图自身的规范化已经在 hook 内联完成，其它被追踪的 root 仍由 250ms 定时器和方向变化通知驱动，不依赖这次调用。
 
 ## 尚未处理
 
