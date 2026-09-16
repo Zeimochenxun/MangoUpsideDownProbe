@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.5.0-alpha5. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 0.6.0-alpha6. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -412,6 +412,36 @@ static void ProbeMangoSelectors(void){
     }
     free(classes);
 }
+// Device result of the probe above: pillSwipeDownAction/pillSwipeUpAction and
+// their setters matched nothing -- read alongside the rest of the earlier
+// string dump (UIButton/UILabel/UISlider-typed neighbors named
+// pillDismissDelayLabel, pillDismissDelaySlider, and so on) they are almost
+// certainly a settings-screen configuration property, not live gesture code,
+// and that settings class simply was not loaded yet when this one-shot probe
+// ran. mango_prepareTopDismissReverseGeometryForInteractiveMirror turned out
+// to belong to MangoAppLibraryPickerView -- the App Library picker, a
+// different surface entirely, not the island. What did land somewhere real:
+// MangoPillManager defines dismissPill/dismissPillAnimated:, confirming it is
+// loaded and is a plausible island controller. This probe lists every method
+// MangoPillManager itself defines (its own custom superclass chain too, since
+// a helper could live one level up) instead of testing more guessed names, so
+// whatever actually reads swipe direction can be found by what it is really
+// called rather than by continuing to guess.
+static void ProbeMangoPillManager(void){
+    Class c=objc_getClass("MangoPillManager");
+    if(!c){Log(@"PROBE MangoPillManager not loaded");return;}
+    for(unsigned depth=0;c&&depth<8;c=class_getSuperclass(c),depth++){
+        const char *name=class_getName(c);
+        // Stop at the first Apple framework class: those add thousands of
+        // methods that say nothing about Mango's own code.
+        if(!strncmp(name,"NS",2)||!strncmp(name,"UI",2)||!strncmp(name,"OS_",3))break;
+        unsigned mc=0;Method *methods=class_copyMethodList(c,&mc);
+        if(!methods)continue;
+        for(unsigned m=0;m<mc;m++)
+            Log([NSString stringWithFormat:@"PROBE class=%@ method=%s",NSStringFromClass(c),sel_getName(method_getName(methods[m]))]);
+        free(methods);
+    }
+}
 #define INSTALL_HOOKS(C,P) \
 MSHookMessageEx(C,@selector(layoutSubviews),(IMP)P##HookLayout,(IMP *)&P##Layout); \
 MSHookMessageEx(C,@selector(setFrame:),(IMP)P##HookFrame,(IMP *)&P##Frame); \
@@ -448,6 +478,7 @@ static void Install(void){
     dispatch_source_set_timer(Timer,dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),250*NSEC_PER_MSEC,50*NSEC_PER_MSEC);
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
     ProbeMangoSelectors();
-    Log(@"INSTALLED World 0.5.0-alpha5: window turn + content normalization + skip reasons + selector probe + window hit fallback");Reconcile();
+    ProbeMangoPillManager();
+    Log(@"INSTALLED World 0.6.0-alpha6: window turn + content normalization + skip reasons + selector probe + window hit fallback");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}

@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 0.5.0-alpha5：证据与边界
+# MangoUpsideDownWorld 0.6.0-alpha6：证据与边界
 
 这是本次新实现，不是从关联对话中取回的既有 World 源码，也不是给 Fix alpha2 改名。
 
@@ -69,6 +69,25 @@ alpha2 改为规范化传入值：在内容层的 `setTransform:` hook 里，先
   - `mango_prepareTopDismissReverseGeometryForInteractiveMirror` 及一组 `_topDismissRevDx/Dy/ECx/ECy/EH/EW/LenSq/SCx/SCy/ScaleMin`——名字里直接带"Reverse"和"InteractiveMirror"，说明 Mango 内部已经有一套自己的"反向几何/镜像"机制用在某个从顶部关闭的手势上，具体用途和是否与倒置相关未知。
 
 方法名只指出"去哪找"，不能证明"内部怎么算的"——这仍是基于命名的假设，不是确认的行为证据。本版新增 `ProbeMangoSelectors()`：运行时用 `objc_copyClassList`/`class_copyMethodList` 遍历所有已加载的类，找出真正**定义**（不是继承）上述候选方法的类，把类名和方法名记入日志。纯只读，不 hook、不改变任何行为，只是把"字符串猜测"变成"运行时坐标"，安装成功后调用一次。
+
+## 0.6.0-alpha6：`PROBE` 真机结果——排除两条假线索，锁定 `MangoPillManager`，列全部方法
+
+真机日志的 `PROBE` 行：
+
+```
+PROBE class=MangoPillManager sel=dismissPill
+PROBE class=MangoPillManager sel=dismissPillAnimated:
+PROBE class=MangoAppLibraryPickerView sel=mango_prepareTopDismissReverseGeometryForInteractiveMirror
+PROBE class=DecoratedAppSceneView sel=mango_orientationDidChange:
+```
+
+`pillSwipeDownAction`/`pillSwipeUpAction` 及其 setter **零匹配**。结合之前扒出的完整字符串上下文（紧邻的是 `UIButton` 类型的 `_pillSwipeDownActionButton`、`UILabel` 类型的 `_pillDismissDelayLabel`、`UISlider` 类型的 `_pillDismissDelaySlider`），这几个名字现在看是 Mango **设置界面**里"选择下滑/上滑执行什么动作"的配置控件，不是运行时手势处理代码——设置页面的类要用户打开设置才会加载，装上就跑一次的探测自然找不到。这条线索排除。
+
+`mango_prepareTopDismissReverseGeometryForInteractiveMirror` 挂在 `MangoAppLibraryPickerView` 上——这是"应用资源库选择器"，与灵动岛是完全不同的界面。之前把它当作"Mango 内部已有倒置相关机制"的证据是错的，这条也排除。
+
+唯一落到实处的：**`MangoPillManager`** 确认已加载，定义了 `dismissPill`/`dismissPillAnimated:`，是灵动岛（pill）控制器类的强候选。但只探测了 8 个猜的名字，没有看这个类真正暴露了哪些方法。
+
+本版新增 `ProbeMangoPillManager()`：直接用 `objc_getClass("MangoPillManager")` 取类，沿它自己的父类链（遇到 `NS`/`UI`/`OS_` 前缀的苹果框架类就停，避免把 `NSObject`/`UIResponder` 几千个无关方法也倒出来，最多走 8 层）用 `class_copyMethodList` 列出每一层**直接定义**的全部方法，记入日志。不再猜名字，直接看这个类真实暴露了什么。仍然纯只读，不 hook 任何东西。
 
 ## 尚未处理
 

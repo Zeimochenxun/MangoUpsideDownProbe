@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 0.5.0-alpha5
+# MangoUpsideDownWorld 0.6.0-alpha6
 
 新编写的实验兼容补丁。目标：iPhone 13 mini / iOS 16.5 / Dopamine RootHide / 已核对的 Mango 版本。尚未真机验证，不宣称全场景已修复。
 
@@ -12,7 +12,8 @@ alpha1 真机结果：收起态的岛已经能在倒置下显示在正确位置�
 - alpha2 引入了新问题：长按激活、展开态关闭时会闪现一次旋转动画（关闭时是慢速的倒置转正向）。原因是 alpha2 的 hook 仍调用了 `Begin`，会在真正调用之前同步把内容层写回 Mango 的原始倒置值，这个写回本身不产生动画，但会成为紧接着那次动画调用的起点，于是 Core Animation 把“倒置→正向”做成了一次可见动画。
 - alpha3 修了这个问题：内容层的 `setTransform:` hook 不再调用 `Begin`/`End`，不在替换之前做任何同步写回，模型层在两次调用之间始终停留在正向一侧。
 - alpha4 修了触控方向上下颠倒的**一部分**：之前三个版本都是转 root（灵动岛内部的一个视图），窗口本身从未被转，导致拿窗口/固定坐标算手势方向的代码和拿 content 内部坐标算的方向正好相反。alpha4 改成转窗口本身，位置和内容朝向的效果不变，但窗口现在也和 root/content 一致地转了半周。
-- 真机复验发现：拖动跟手了，但上下滑动判断依旧反。这说明问题不完全在坐标系——很可能是 Mango 自己内部有一段判断"这是上滑还是下滑"的代码，不经过任何坐标转换，只看一次性符号。本版（alpha5）**不改行为**，只加了一段只读探测：通过读取 `mango.dylib` 自身的方法名字符串（同一批二进制，UUID 已核对），找出几个名字上最可能相关的候选方法（`pillSwipeDownAction`/`pillSwipeUpAction`/`dismissPill` 等），运行时找出真正实现它们的类并记入日志。详见 EVIDENCE.md。这一步不解决方向问题，是为下一步收集证据。
+- 真机复验发现：拖动跟手了，但上下滑动判断依旧反。这说明问题不完全在坐标系——很可能是 Mango 自己内部有一段判断"这是上滑还是下滑"的代码，不经过任何坐标转换，只看一次性符号。alpha5 加了一段只读探测：通过读取 `mango.dylib` 自身的方法名字符串（同一批二进制，UUID 已核对），找出几个名字上最可能相关的候选方法（`pillSwipeDownAction`/`pillSwipeUpAction`/`dismissPill` 等），运行时找出真正实现它们的类并记入日志。
+- alpha5 的真机结果：`pillSwipeDownAction`/`pillSwipeUpAction` 零匹配，现在判断这两个其实是 Mango 设置界面里的配置控件，不是手势代码，这条线索排除；`mango_prepareTopDismissReverseGeometryForInteractiveMirror` 挂在应用资源库选择器上，跟灵动岛无关，也排除。唯一坐实的是 **`MangoPillManager`**（定义了 `dismissPill`/`dismissPillAnimated:`），是岛控制器类的强候选。本版（alpha6）仍**不改行为**，把探测从"猜名字"改成直接列出 `MangoPillManager` 自身及其父类链定义的全部方法，不再猜。详见 EVIDENCE.md。
 
 ## 先准备恢复途径，再安装
 
@@ -28,7 +29,7 @@ alpha1 真机结果：收起态的岛已经能在倒置下显示在正确位置�
 - 安装本包的 `iphoneos-arm64e.deb`，这是原生 RootHide 包，不要再次进行 rootless→RootHide 转换。
 - 安装后 respring。先测普通竖屏和横屏，确认行为与安装前一致，再进入倒置。
 - 本版**不改行为**，触控方向反的问题预期依旧存在，不用重新测这一条。安装后确认没有回归即可：长按激活、展开、关闭全程岛内文字图标保持正向、没有旋转闪动；收起态位置正确；拖动跟手。
-- 装上、正常使用一段（触发过长按/展开/关闭/滑动）之后，取日志找 `PROBE` 行——本版新增的诊断，会记录哪些类实现了几个候选的岛滑动/关闭方法，把这些行发回来即可，不需要专门操作触发它，装上就会在启动时记一次。
+- 装上后取日志找 `PROBE` 行发回来即可，不需要专门操作触发——装上启动就会记一次。本版会多出一批 `PROBE class=MangoPillManager method=...` 行，把它们整段发回来（会比之前多不少行，这是预期的，目的就是看这个类完整暴露了什么）。
 - 再分别验证：收起岛、通知、音乐/计时器、展开、收起；检查文字图标、左右排列、展开方向、点击、长按、拖动和岛外穿透；最后转回竖屏。
 - 若要复现岛落到底部：锁屏后在音乐播放状态点亮屏幕，随后取日志查 `SKIP` 行。同时请记录异常时岛内文字对倒置视角是正还是倒 —— 这一条用于区分是 Mango 的方向状态问题还是 World 的几何判定问题。
 - 日志位于 `/var/mobile/Library/Logs/MangoUpsideDownWorld.log`。`WORLD` 仅证明变换已应用；`SKIP` 说明该轮未施加修正及原因；`HIT fallback` 仅证明窗口回退命中；都不是功能全通过。`NO HOOKS` / `CONFLICT` / `SUSPEND` 表示没有启用或已停止。

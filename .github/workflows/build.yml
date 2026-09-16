@@ -75,7 +75,7 @@ jobs:
       - name: Upload package and build information
         uses: actions/upload-artifact@v4
         with:
-          name: MangoUpsideDownWorld-0.5.0-alpha5
+          name: MangoUpsideDownWorld-0.6.0-alpha6
           if-no-files-found: error
           path: |
             packages/*.deb
