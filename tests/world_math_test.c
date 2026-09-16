@@ -22,10 +22,28 @@ int main(void) {
     // Existing 180-degree content rotation is canceled before outer turn.
     MWTransform content={-1.18,0,0,-1.15,0,0};
     MWPoint q={30,10};
-    MWTransform upright={-content.a,-content.b,-content.c,-content.d,0,0};
+    MWTransform upright=MWCancelTurn(content);
     MWPoint inside=MWApply(upright,q);
     assert(near(-inside.x,MWApply(content,q).x));
     assert(near(-inside.y,MWApply(content,q).y));
+    // Cancellation keeps scale and translation, and is its own inverse.
+    MWTransform shifted={-1.1966,0,0,-1.1821,4.5,-7.25};
+    MWTransform once=MWCancelTurn(shifted);
+    assert(near(once.a,1.1966)&&near(once.d,1.1821));
+    assert(near(once.tx,shifted.tx)&&near(once.ty,shifted.ty));
+    assert(MWNear(MWCancelTurn(once),shifted));
+    // The inverted-basis test drives both the sweep and the setTransform: path,
+    // so it must accept the device's inverted content values and nothing else.
+    assert(MWInvertedBasis(-1,-1,0,0));
+    assert(MWInvertedBasis(shifted.a,shifted.d,shifted.c,shifted.b));
+    assert(!MWInvertedBasis(1,1,0,0));            // already upright
+    assert(!MWInvertedBasis(-1,1,0,0));           // mirrored, not turned
+    assert(!MWInvertedBasis(1,-1,0,0));
+    assert(!MWInvertedBasis(-1,-1,0.5,0.5));      // transitional angle
+    assert(!MWInvertedBasis(0,-1,0,0));           // degenerate
+    assert(!MWInvertedBasis(-1,NAN,0,0));
+    // A near-identity skew from floating point still counts as inverted.
+    assert(MWInvertedBasis(-1,-1,1.2246e-16,-1.2246e-16));
     assert(!MWFinite((MWTransform){NAN,0,0,1,0,0}));
-    puts("PASS: whole-world half-turn, inverse, scaled content and nonfinite guard");
+    puts("PASS: whole-world half-turn, inverse, scaled content, cancellation and basis guard");
 }

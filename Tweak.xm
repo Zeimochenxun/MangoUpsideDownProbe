@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.1.0-alpha1. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 0.2.0-alpha2. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -34,7 +34,8 @@ static char StateKey;
 @property(nonatomic,strong) NSMapTable<UIView *,MWOwnedTransform *> *inner;
 @property(nonatomic,weak) UIView *parent;
 @property(nonatomic) BOOL suspended;
-@property(nonatomic) double lastLog;
+@property(nonatomic) double lastLog, lastSkipLog;
+@property(nonatomic,copy) NSString *lastSkip;
 @end
 @implementation MWWorldState
 @end
@@ -53,6 +54,21 @@ static void Log(NSString *s) {
 static MWTransform Math(CGAffineTransform t){return (MWTransform){t.a,t.b,t.c,t.d,t.tx,t.ty};}
 static CGAffineTransform CG(MWTransform t){return CGAffineTransformMake(t.a,t.b,t.c,t.d,t.tx,t.ty);}
 static MWWorldState *State(UIView *v){return objc_getAssociatedObject(v,&StateKey);}
+// The cancellation record for this content view, created on demand. Returns it
+// only while the root that owns the view is actually turned: that turn is what
+// makes an inverted content value render upside-down, so it is also the exact
+// condition under which normalizing an incoming value is correct.
+static MWOwnedTransform *OwnedContent(UIView *v){
+    for(UIView *p=v.superview;p;p=p.superview){
+        MWWorldState *s=State(p);
+        if(!s)continue;
+        if(s.suspended||!s.outer.applied)return nil;
+        MWOwnedTransform *owned=[s.inner objectForKey:v];
+        if(!owned){owned=[MWOwnedTransform new];[s.inner setObject:owned forKey:v];}
+        return owned;
+    }
+    return nil;
+}
 static NSInteger Orientation(void){
     Class c=objc_getClass("DecoratedAppSceneView");
     SEL sel=sel_registerName("mango_currentInterfaceOrientation");
@@ -77,6 +93,15 @@ static void RestoreWorld(UIView *root){
 }
 static void SetOwned(UIView *v,MWOwnedTransform *s,CGAffineTransform t){
     s.before=v.transform;s.after=t;s.applied=YES;v.transform=t;
+}
+// Report why a correction was skipped. Rate limited per root, and repeated only
+// when the reason changes, so a steady skip cannot flood the log.
+static void Skip(MWWorldState *s,NSString *reason){
+    if(!s)return;
+    double now=CACurrentMediaTime();
+    if([s.lastSkip isEqualToString:reason]&&now-s.lastSkipLog<=5)return;
+    s.lastSkip=reason;s.lastSkipLog=now;
+    Log([NSString stringWithFormat:@"SKIP reason=%@ mangoOrientation=%ld",reason,(long)Orientation()]);
 }
 static BOOL VisibleChain(UIView *v,UIView *stop){
     unsigned n=0;
@@ -113,20 +138,22 @@ static void ApplyWorld(UIView *root){
     MWWorldState *s=State(root);UIWindow *w=root.window;
     if(s.suspended||root.superview!=w||![w isKindOfClass:WindowClass]||w.screen!=UIScreen.mainScreen)return;
     if(s.parent!=w){s.suspended=YES;return;}
-    NSArray<UIView *> *contents=Contents(root);if(!contents.count)return;
-    if(!CATransform3DIsAffine(w.layer.transform)||!CATransform3DIsIdentity(w.layer.sublayerTransform))return;
+    NSArray<UIView *> *contents=Contents(root);if(!contents.count){Skip(s,@"contents");return;}
+    if(!CATransform3DIsAffine(w.layer.transform)||!CATransform3DIsIdentity(w.layer.sublayerTransform)){Skip(s,@"window-layer");return;}
     id<UICoordinateSpace> fixed=w.screen.fixedCoordinateSpace;
     CGRect screen=fixed.bounds;
     CGRect r=[root convertRect:root.bounds toCoordinateSpace:fixed];
     // Only the full-screen root shape evidenced in the device log is accepted.
     if(!isfinite(r.origin.x)||!isfinite(r.origin.y)||!isfinite(r.size.width)||!isfinite(r.size.height)||
        fabs(CGRectGetWidth(r)-CGRectGetWidth(screen))>2||fabs(CGRectGetHeight(r)-CGRectGetHeight(screen))>2||
-       fabs(CGRectGetMidX(r)-CGRectGetMidX(screen))>2||fabs(CGRectGetMidY(r)-CGRectGetMidY(screen))>2)return;
+       fabs(CGRectGetMidX(r)-CGRectGetMidX(screen))>2||fabs(CGRectGetMidY(r)-CGRectGetMidY(screen))>2){
+        Skip(s,[NSString stringWithFormat:@"root-shape rect=%@ screen=%@",NSStringFromCGRect(r),NSStringFromCGRect(screen)]);return;}
     // Require an upright unmodified root before making the world upside-down.
     CGPoint o=[root convertPoint:CGPointZero toCoordinateSpace:fixed];
     CGPoint x=[root convertPoint:CGPointMake(1,0) toCoordinateSpace:fixed];
     CGPoint y=[root convertPoint:CGPointMake(0,1) toCoordinateSpace:fixed];
-    if(x.x-o.x<=0||y.y-o.y<=0||fabs(x.y-o.y)>1e-4||fabs(y.x-o.x)>1e-4)return;
+    if(x.x-o.x<=0||y.y-o.y<=0||fabs(x.y-o.y)>1e-4||fabs(y.x-o.x)>1e-4){
+        Skip(s,[NSString stringWithFormat:@"root-basis dx=%g dy=%g skewX=%g skewY=%g",x.x-o.x,y.y-o.y,y.x-o.x,x.y-o.y]);return;}
     // Validate every content basis first, so unsupported geometry causes no
     // partial correction. Hidden contents are retained for subsequent reveals.
     NSMutableArray<UIView *> *cancel=[NSMutableArray array];
@@ -136,19 +163,21 @@ static void ApplyWorld(UIView *root){
         CGPoint c=[v convertPoint:CGPointMake(0,1) toCoordinateSpace:fixed];
         double dx=b.x-a.x,dy=c.y-a.y;
         if(!isfinite(dx)||!isfinite(dy)||fabs(dx)<1e-5||fabs(dy)<1e-5||
-           fabs(b.y-a.y)>fabs(dx)*.001||fabs(c.x-a.x)>fabs(dy)*.001||dx*dy<=0)return;
+           fabs(b.y-a.y)>fabs(dx)*.001||fabs(c.x-a.x)>fabs(dy)*.001||dx*dy<=0){
+            Skip(s,[NSString stringWithFormat:@"content-basis dx=%g dy=%g skewX=%g skewY=%g",dx,dy,c.x-a.x,b.y-a.y]);return;}
         // Nested content instances would be normalized twice. Fail closed.
-        for(UIView *p=v.superview;p&&p!=root;p=p.superview)if([p isKindOfClass:ContentClass])return;
-        if(dx<0&&dy<0)[cancel addObject:v];
+        for(UIView *p=v.superview;p&&p!=root;p=p.superview)if([p isKindOfClass:ContentClass]){Skip(s,@"nested-content");return;}
+        if(MWInvertedBasis(dx,dy,c.x-a.x,b.y-a.y))[cancel addObject:v];
     }
     CGPoint pivot=[w convertPoint:CGPointMake(CGRectGetMidX(screen),CGRectGetMidY(screen)) fromCoordinateSpace:fixed];
     MWTransform rotated=MWTurn(Math(root.transform),(MWPoint){root.center.x,root.center.y},(MWPoint){pivot.x,pivot.y});
-    if(!MWFinite(rotated))return;
+    if(!MWFinite(rotated)){Skip(s,@"nonfinite-turn");return;}
+    // The sweep creates ownership directly: it runs before the root is turned,
+    // which is the condition OwnedContent deliberately refuses.
     for(UIView *v in cancel){
         MWOwnedTransform *owned=[s.inner objectForKey:v];
         if(!owned){owned=[MWOwnedTransform new];[s.inner setObject:owned forKey:v];}
-        CGAffineTransform t=v.transform;t.a=-t.a;t.b=-t.b;t.c=-t.c;t.d=-t.d;
-        SetOwned(v,owned,t);
+        SetOwned(v,owned,CG(MWCancelTurn(Math(v.transform))));
     }
     SetOwned(root,s.outer,CG(rotated));
     // Verify model-space half-turn on three independent points.
@@ -161,6 +190,7 @@ static void ApplyWorld(UIView *root){
         fabs(actual[i].y-(2*CGRectGetMidY(screen)-old[i].y))>.1){
         RestoreWorld(root);s.suspended=YES;Log(@"SUSPEND post-transform verification failed");return;
     }
+    s.lastSkip=nil;
     if(CACurrentMediaTime()-s.lastLog>5){s.lastLog=CACurrentMediaTime();
         Log([NSString stringWithFormat:@"WORLD orientation=2 root=%p contents=%lu canceled=%lu windowBounds=%@",(__bridge void *)root,(unsigned long)contents.count,(unsigned long)cancel.count,NSStringFromCGRect(w.bounds)]);}
 }
@@ -215,12 +245,41 @@ static void P##HookFrame(id s,SEL c,CGRect v){BOOL b=Begin(s);@try{P##Frame(s,c,
 static void (*P##Bounds)(id,SEL,CGRect); \
 static void P##HookBounds(id s,SEL c,CGRect v){BOOL b=Begin(s);@try{P##Bounds(s,c,v);}@finally{End(b);}} \
 static void (*P##Center)(id,SEL,CGPoint); \
-static void P##HookCenter(id s,SEL c,CGPoint v){BOOL b=Begin(s);@try{P##Center(s,c,v);}@finally{End(b);}} \
+static void P##HookCenter(id s,SEL c,CGPoint v){BOOL b=Begin(s);@try{P##Center(s,c,v);}@finally{End(b);}}
+#define DEFINE_TRANSFORM_HOOK(P) \
 static void (*P##Transform)(id,SEL,CGAffineTransform); \
 static void P##HookTransform(id s,SEL c,CGAffineTransform v){BOOL b=Begin(s);@try{P##Transform(s,c,v);}@finally{End(b);}}
 DEFINE_HOOKS(Pass)
 DEFINE_HOOKS(Content)
 DEFINE_HOOKS(Window)
+DEFINE_TRANSFORM_HOOK(Pass)
+DEFINE_TRANSFORM_HOOK(Window)
+
+// Content transforms are the one value Mango animates, and correcting one after
+// the original setter cannot retarget the animation UIKit has by then created:
+// it interpolates from the upright presentation value toward Mango's inverted
+// model value, so the island stayed inverted for as long as that animation ran
+// -- the whole length of a touch. Normalizing the incoming value keeps both
+// ends of that animation upright. The ownership record is written exactly as
+// the sweep would have written it, so restoring to portrait still hands Mango's
+// own value back and Reconcile sees the state it expects.
+static void (*ContentTransform)(id,SEL,CGAffineTransform);
+static void ContentHookTransform(UIView *s,SEL c,CGAffineTransform v){
+    // Normalize only a cleanly inverted incoming basis under a turned root. A
+    // transitional angle or an already-upright value is passed through
+    // untouched. Ownership must be read before Begin restores the world, which
+    // clears the flag this depends on.
+    MWTransform upright=MWCancelTurn(Math(v));
+    MWOwnedTransform *owned=(!Busy&&!Depth&&[NSThread isMainThread]&&
+        MWInvertedBasis(v.a,v.d,v.c,v.b)&&MWFinite(upright))?OwnedContent(s):nil;
+    BOOL b=Begin(s);
+    @try{
+        ContentTransform(s,c,owned?CG(upright):v);
+        // Record it the way the sweep would, so a later restore hands Mango's
+        // own value back and Reconcile recognizes what it finds.
+        if(owned){owned.before=v;owned.after=CG(upright);owned.applied=YES;}
+    }@finally{End(b);}
+}
 
 static UIView *WorldHit(UIWindow *w,CGPoint point,UIEvent *event){
     if(!Enabled||Busy||Depth||![NSThread isMainThread]||HitDepth||Orientation()!=2)return nil;
@@ -283,7 +342,8 @@ static BOOL VerifiedMango(void){
 MSHookMessageEx(C,@selector(layoutSubviews),(IMP)P##HookLayout,(IMP *)&P##Layout); \
 MSHookMessageEx(C,@selector(setFrame:),(IMP)P##HookFrame,(IMP *)&P##Frame); \
 MSHookMessageEx(C,@selector(setBounds:),(IMP)P##HookBounds,(IMP *)&P##Bounds); \
-MSHookMessageEx(C,@selector(setCenter:),(IMP)P##HookCenter,(IMP *)&P##Center); \
+MSHookMessageEx(C,@selector(setCenter:),(IMP)P##HookCenter,(IMP *)&P##Center)
+#define INSTALL_TRANSFORM_HOOK(C,P) \
 MSHookMessageEx(C,@selector(setTransform:),(IMP)P##HookTransform,(IMP *)&P##Transform)
 static void Install(void){
     if(Installed||access(Disabled,F_OK)==0)return;
@@ -305,12 +365,14 @@ static void Install(void){
     if(!Signature(WindowClass,@selector(hitTest:withEvent:),"@",hitArgs)||!Signature(WindowClass,@selector(pointInside:withEvent:),@encode(BOOL),hitArgs)){Log(@"NO HOOKS: touch signature mismatch");return;}
     Roots=[NSHashTable weakObjectsHashTable];Windows=[NSHashTable weakObjectsHashTable];Enabled=YES;Installed=YES;
     INSTALL_HOOKS(PassClass,Pass);INSTALL_HOOKS(ContentClass,Content);INSTALL_HOOKS(WindowClass,Window);
+    INSTALL_TRANSFORM_HOOK(PassClass,Pass);INSTALL_TRANSFORM_HOOK(WindowClass,Window);
+    MSHookMessageEx(ContentClass,@selector(setTransform:),(IMP)ContentHookTransform,(IMP *)&ContentTransform);
     MSHookMessageEx(WindowClass,@selector(hitTest:withEvent:),(IMP)HookHit,(IMP *)&OrigHit);
     MSHookMessageEx(WindowClass,@selector(pointInside:withEvent:),(IMP)HookInside,(IMP *)&OrigInside);
     [NSNotificationCenter.defaultCenter addObserverForName:@"MangoInterfaceOrientationDidChange" object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){Reconcile();dispatch_async(dispatch_get_main_queue(),^{Reconcile();});}];
     Timer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
     dispatch_source_set_timer(Timer,dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),250*NSEC_PER_MSEC,50*NSEC_PER_MSEC);
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
-    Log(@"INSTALLED World 0.1.0-alpha1: whole aperture root turn + internal rotation normalization + window hit fallback");Reconcile();
+    Log(@"INSTALLED World 0.2.0-alpha2: whole aperture root turn + inbound content normalization + skip reasons + window hit fallback");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}

@@ -1,8 +1,16 @@
-# MangoUpsideDownWorld 0.1.0-alpha1
+# MangoUpsideDownWorld 0.2.0-alpha2
 
 新编写的实验兼容补丁。目标：iPhone 13 mini / iOS 16.5 / Dopamine RootHide / 已核对的 Mango 版本。尚未真机验证，不宣称全场景已修复。
 
 采用完整灵动岛根视图倒置、内部重复旋转抵消及窗口触摸命中补偿。正常竖屏和横屏不施加倒置。仅注入 SpringBoard；不修改 Mango 原版，不涉及授权或付费逻辑。
+
+## 本版相对 alpha1 的变化
+
+alpha1 真机结果：收起态的岛已经能在倒置下显示在正确位置，但触控期间岛内内容会倒置、松手或动画结束后恢复；触控方向上下颠倒；少数情况下岛仍落在屏幕底部。
+
+- 修触控期间内容倒置。alpha1 在原始 setter 之后才把内容层改回正向，而 Mango 是在动画块里写这个 transform 的，UIKit 已按“正向 → 倒置”建好动画，后写的模型值改不了动画终点，于是整段动画都朝倒置插值。本版改为在 `setTransform:` 里先把传入值规范化再交给原始实现，动画两端都是正向的。提交的模型值与 alpha1 相同。
+- 新增 `SKIP reason=… mangoOrientation=…` 日志（限频，同一原因 5 秒内不重复），用于定位岛落到底部的原因。只加日志，不改几何行为。
+- 触控方向上下颠倒本版**未修**，原因与下一步方向见 EVIDENCE.md。
 
 ## 先准备恢复途径，再安装
 
@@ -17,8 +25,10 @@
 - 先卸载 MangoUpsideDownFix 并 respring；建议停用旧 Probe 以减少高频日志。保留 Mango 和原来的倒置插件。World 包声明与 Fix 冲突，运行时也拒绝同时加载 Fix。
 - 安装本包的 `iphoneos-arm64e.deb`，这是原生 RootHide 包，不要再次进行 rootless→RootHide 转换。
 - 安装后 respring。先测普通竖屏和横屏，确认行为与安装前一致，再进入倒置。
-- 分别验证：收起岛、通知、音乐/计时器、展开、收起；检查文字图标、左右排列、展开方向、点击、长按、拖动和岛外穿透；最后转回竖屏。
-- 日志位于 `/var/mobile/Library/Logs/MangoUpsideDownWorld.log`。`WORLD` 仅证明变换已应用；`HIT fallback` 仅证明窗口回退命中；都不是功能全通过。`NO HOOKS` / `CONFLICT` / `SUSPEND` 表示没有启用或已停止。
+- 本版要重点复验的是：**按住并拖动灵动岛的整个过程中**，岛内文字图标是否一直保持正向（alpha1 在这一段会倒置）。
+- 另外分别验证：收起岛、通知、音乐/计时器、展开、收起；检查文字图标、左右排列、展开方向、点击、长按、拖动和岛外穿透；最后转回竖屏。
+- 若要复现岛落到底部：锁屏后在音乐播放状态点亮屏幕，随后取日志查 `SKIP` 行。同时请记录异常时岛内文字对倒置视角是正还是倒 —— 这一条用于区分是 Mango 的方向状态问题还是 World 的几何判定问题。
+- 日志位于 `/var/mobile/Library/Logs/MangoUpsideDownWorld.log`。`WORLD` 仅证明变换已应用；`SKIP` 说明该轮未施加修正及原因；`HIT fallback` 仅证明窗口回退命中；都不是功能全通过。`NO HOOKS` / `CONFLICT` / `SUSPEND` 表示没有启用或已停止。
 - 如果没有 `TRACK` / `WORLD`，不要叠加更多补丁强制生效：这表示当前窗口结构/方向/版本未满足保护条件。
 
 ## 编译

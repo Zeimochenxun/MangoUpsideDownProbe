@@ -11,6 +11,17 @@ static inline MWTransform MWTurn(MWTransform t, MWPoint center, MWPoint pivot) {
     return (MWTransform){-t.a,-t.b,-t.c,-t.d,
         2*(pivot.x-center.x)-t.tx,2*(pivot.y-center.y)-t.ty};
 }
+// Cancel a half-turn already present in a content transform, keeping its scale
+// and translation. Applying it twice returns the original transform.
+static inline MWTransform MWCancelTurn(MWTransform t) {
+    return (MWTransform){-t.a,-t.b,-t.c,-t.d,t.tx,t.ty};
+}
+// A content basis is inverted when both diagonal directions point backwards and
+// the off-diagonal terms stay negligible against them.
+static inline int MWInvertedBasis(double dx, double dy, double skewX, double skewY) {
+    return isfinite(dx)&&isfinite(dy)&&fabs(dx)>1e-5&&fabs(dy)>1e-5&&
+        fabs(skewY)<=fabs(dx)*.001&&fabs(skewX)<=fabs(dy)*.001&&dx<0&&dy<0;
+}
 static inline int MWFinite(MWTransform t) {
     return isfinite(t.a)&&isfinite(t.b)&&isfinite(t.c)&&isfinite(t.d)&&isfinite(t.tx)&&isfinite(t.ty);
 }

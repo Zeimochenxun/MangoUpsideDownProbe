@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 0.1.0-alpha1：证据与边界
+# MangoUpsideDownWorld 0.2.0-alpha2：证据与边界
 
 这是本次新实现，不是从关联对话中取回的既有 World 源码，也不是给 Fix alpha2 改名。
 
@@ -12,23 +12,41 @@
 - 最外层触摸穿透视图固定坐标大小约 375×811.80556，屏幕是 375×812。不能忽略窗口缩放或直接写死 812 点的父坐标。
 - 用户纠正：只有通知视觉正常，触摸仍不正常，其他形态视觉和触摸也异常。因此不采用“展开已修复”的旧结论。
 
-## 新方案（实验，未真机证明）
+## alpha1 真机结果（用户报告，三份日志）
 
-World 选择 SBSystemApertureWindow 的直接子 SBFTouchPassThroughView；要求它覆盖全屏且含真实内容层。对这个完整根视图围绕固定屏幕中心作半周旋转。该旋转覆盖其所有子元素和父子坐标转换，不以透明 Mango host 是否出现为前提。
+alpha1 已经把收起态的岛放到了倒置下的正确位置，这是 MangoUpsideDownWorld.log 里稳定出现的 `TRACK` / `WORLD orientation=2 … canceled=1` 所对应的效果。同时报告了三个缺陷：
 
-在整体旋转之前，检查每个 _SBSystemApertureContainerViewContentView 的未补丁基向量：若已倒置，则抵消其内部半周旋转，保留缩放和位移；若本来正向，则不改。这样整个屏幕倒过来使用时，内容理论上保持可读。过渡角度、非仿射层级、嵌套内容层或不是全屏的根视图均跳过。
+1. 触控灵动岛期间岛内内容倒置，停止触控或触发一定动画后恢复。
+2. 触控方向上下颠倒：手指下滑执行的是上滑。
+3. 少数情况下岛仍出现在屏幕底部，复现路径是锁屏后在音乐播放状态点亮屏幕。
 
-窗口 hitTest / pointInside 保留原结果优先。在原结果为空或窗口自身时，使用真实 UIView 坐标转换询问已变换根视图的原生 hitTest。仅接纳仍可见、可交互的真实后代；不伪造触摸事件、不交换 UITouch 坐标、不直接调用业务按钮。未命中时仍穿透。此补偿不能保证 BackBoard 向窗口派发触摸；若事件被更上游裁掉，本版不会解决。
+日志给出两条关键约束：
 
-正常竖屏、横屏恢复本补丁拥有的 transform。不改 frame/bounds/center、safeAreaInsets 或原始 Mango 文件。hook 的 layoutSubviews、geometry setter、hitTest:withEvent:、pointInside:withEvent: 均为 UIView 公共方法，先核对运行时签名；没有声称这些是 Mango 自定义方法。
+- 全程没有 `HIT fallback`。窗口原生 hitTest 一直返回非空且非窗口自身，命中位置的修正来自根视图整体旋转本身，窗口命中兜底在实机上是未触发的路径。方向颠倒不可能来自兜底逻辑。
+- 全程没有 `CONFLICT`。每次 4 Hz 校正读到的内容层 transform 都等于 World 上次写入的值，说明 Mango 对内容层的每一次写入都经过 `setTransform:`，World 的 hook 全部可见。
+
+## 0.2.0-alpha2 的改动（针对上面第 1 条）
+
+alpha1 对内容层的抵消发生在原始 setter 之后：先还原成 Mango 的倒置值，调用原始实现，再由 `Reconcile` 写回正向值。Mango 是在动画块里写这个 transform 的（Probe 日志中内容层在动画期间出现纯缩放值），所以原始 setter 一执行，UIKit 就已按“当前显示的正向 → 倒置”建立了 CAAnimation。之后写入的模型值改不了这条动画的终点，presentation layer 整段动画都朝倒置插值，直到动画结束才被模型值拽回。这与“触控期间倒置、松手或动画结束后恢复”完全对应，包括恢复的时机。
+
+alpha2 改为规范化传入值：在内容层的 `setTransform:` hook 里，先判定传入的基向量是否是干净的半周倒置，是则把符号取反后再交给原始实现，使 UIKit 建立的动画两端都是正向的。提交的模型值与 alpha1 由 `Reconcile` 写入的值相同，所有权记录也按 sweep 的方式写入，因此转回竖屏仍把 Mango 自己的值交还。过渡角度、已经正向的值、非有限值一律原样透传，`suspended` 或根视图未被翻转时不改写。
+
+同时把 `ApplyWorld` 的每个静默 return 改为限频的 `SKIP reason=… mangoOrientation=…` 记录（同一原因 5 秒内不重复，成功后清空），用于把第 3 条从推测变成证据。这一项只增加日志，不改变任何几何行为。
+
+抵消算子下沉为 `MWCancelTurn` 与 `MWInvertedBasis`，由 sweep 和 `setTransform:` 两条路径共用同一判定，CI 的 world_math_test 覆盖其保持缩放与位移、自逆、以及对已正向/镜像/过渡角度/退化/非有限输入的拒绝。
+
+## 尚未处理
+
+- 触控方向上下颠倒（第 2 条）。World 只旋转窗口内部的视图，窗口与屏幕坐标系本身没翻，手势位移若在窗口或屏幕空间计算，符号就与视图内部坐标相反。下一步待验的方向是把半周旋转上移到 `SBSystemApertureWindow.transform`（其 frame 为 {0,0,375,812}、center 恰为屏幕中心、现有 transform 为纯 25/24 缩放，符号取反即绕屏幕中心的精确半周）。若位移是在 UIScreen 固定坐标系或 HID 层计算，UIKit 层无法修正。本版未改动。
+- 岛落到屏幕底部（第 3 条）。alpha2 只加了跳过原因日志，未改判定。需要真机复现后读 `SKIP` 行才能定性；另需确认异常时岛内文字对倒置视角是正还是倒，以区分是 Mango 的方向状态问题还是 World 的几何判定问题。
 
 ## 保留风险
 
-1. 模型坐标数学验证不能证明 presentation layer 动画、手势捕获或自定义系统点击区域正确。系统动画可能出现过渡闪动；4 Hz 校正不是逐帧动画同步。
+1. 模型坐标数学验证不能证明 presentation layer 动画、手势捕获或自定义系统点击区域正确。规范化传入值只覆盖经过 `setTransform:` 的写入；直接写 CALayer 或用 CAAnimation 另行驱动的路径不在其内。
 2. 未重写 safe area。内部布局仍由系统/Mango计算；展开间距和展开方向必须真机核验。
 3. 未取得其他实时形态的完整日志；不承诺独立 fallback UIWindow、窗口外图层或独立浮层得到修正。
 4. 直接 CALayer 写入冲突时不猜测新基线，停止该实例；需 respring 清理。父布局读取变换后的 frame 仍有反馈风险。
 5. 同一系统 aperture 根里的其他元素也跟随倒置，这是整体方案的作用范围。只在已核对 UUID 和 iOS 16.5 下启用。
 6. 没有倒置插件本身的二进制，不能确认其是否修改 compositor / HID 或仅修改 UIKit。本版没有 backboardd 注入。
 
-测试覆盖：局部语法检查；1000 组仿射半周变换及逆变换；日志中的缩放/非对称中心案例；重复旋转抵消；非有限数值拒绝；CI 将检查真实 deb 的 arm64e、RootHide 链接、签名数据、SpringBoard 注入过滤及仅含两个 payload 文件。均不等同于真机验证。
+测试覆盖：局部语法检查；1000 组仿射半周变换及逆变换；日志中的缩放/非对称中心案例；重复旋转抵消；抵消算子的缩放/位移保持与自逆；倒置基向量判定的接受与拒绝用例；非有限数值拒绝；CI 将检查真实 deb 的 arm64e、RootHide 链接、签名数据、SpringBoard 注入过滤及仅含两个 payload 文件。均不等同于真机验证。第 1 条的修复本身也未经真机验证。
