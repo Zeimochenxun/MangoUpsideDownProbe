@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 0.4.0-alpha4：证据与边界
+# MangoUpsideDownWorld 0.5.0-alpha5：证据与边界
 
 这是本次新实现，不是从关联对话中取回的既有 World 源码，也不是给 Fix alpha2 改名。
 
@@ -54,6 +54,21 @@ alpha2 改为规范化传入值：在内容层的 `setTransform:` hook 里，先
 本版把 `ApplyWorld` 里 `SetOwned` 的目标从 `root` 改成 `w`(窗口):增加一条对窗口自身基向量的"未被改动"前置检查(与原有的 root-basis 检查同构),pivot 直接用固定坐标系的屏幕中点(窗口没有 superview,它自己的 center/frame 已经是直接用固定坐标系表达的,不需要像 root 的 pivot 那样先经过 `convertPoint:fromCoordinateSpace:` 换算)。`RestoreWorld` 相应改为还原 `s.parent`(即窗口)而不是 root。内容层的取消旋转逻辑完全不变——它只看 content 自身相对固定坐标系的基向量,与外层转的是 root 还是 window 无关。`WorldHit`/`HookHit`/`HookInside` 也不需要改——它们用的是 UIKit 自己的 `convertPoint:`/`hitTest:`,自动适配变换实际所在的层级。
 
 `WorldMath.h` 本身不需要新函数：`MWTurn` 已经是通用的，只是这次喂给它的是窗口的 transform/center，而不是 root 的。数学正确性用符号证明和线性部分的数值验证覆盖，没有新增 C 单测——现有的模糊测试已经覆盖了 `MWTurn` 的核心代数性质（对任意仿射输入的自逆性），这次改动没有引入新的数学原语，只是把已验证的函数用在了另一个视图上。
+
+## 0.5.0-alpha5：真机报告"下滑仍执行上滑"，静态分析 mango.dylib 找候选 hook 点，加只读探测
+
+用户在 0.4.0-alpha4 上真机复验：倒置下拖动灵动岛时手指轨迹是对的（长按后的展开动画跟手），但上下滑动仍被判反——手指下滑触发的是上滑该有的动作。同时观察到 Mango 自身的分屏等操作界面完全没有跟着倒置，用户据此提出：如果要从根本解决，只能让 Mango 整个操作界面的手势/朝向逻辑本身也跟着转，而不是只在 World 这一侧转坐标系。
+
+这已经超出"读它公开暴露的方向状态、在 SpringBoard 侧做坐标系变换"的范围，用户明确要求评估反汇编 `Mango` 仓库（`https://github.com/Zeimochenxun/Mango/tree/main/mango`）里的编译产物。核查结果：
+
+- 该目录只有 9 个文件，全部是 Mach-O 动态库（`.dylib`）和注入过滤配置（`.plist`），没有任何 `.m`/`.h`/`.swift`/Xcode 项目文件——不是可编辑的源码，是运行时载荷本身。`mango(1).dylib` 的 LC_UUID 为 `67c0d7c244873fd29535067745ae4b8f`，与 `Tweak.xm` 的 `VerifiedMango()` 校验的 UUID 完全一致，确认这正是 Tweak.xm 已经在运行时打交道的同一个二进制。
+- 当前环境没有反汇编工具（IDA/Hopper/Ghidra），没有对编译后的机器码做逐条逻辑分析。做的是和 `Orientation()` 已经在做的同一类事——读取 Objective-C 方法名字符串。这些名字即使二进制被 strip 过仍必须原样保留在 `__TEXT,__objc_methname` 段里，否则 `objc_msgSend` 无法在运行时按名字分发消息；这是可以安全静态读取的元数据，不是被保护的实现细节。
+- 在 `mango(1).dylib` 的 4168 个真实方法名（用 `^[A-Za-z_][A-Za-z0-9_]*(:[A-Za-z0-9_]*)*:?$` 过滤掉属性类型编码噪音后）里，挑出的候选：
+  - `pillSwipeDownAction` / `setPillSwipeDownAction:` / `pillSwipeUpAction` / `setPillSwipeUpAction:` / `dismissPill` / `dismissPillAnimated:`——名字直译就是"岛的上滑/下滑动作"，是本次症状最可能的落点：拖动跟手可能走的是一段连续读位置的代码（已被窗口转正的坐标系覆盖），而"这次算上滑还是下滑"可能是另一段只看一次性符号、不经过任何坐标转换的独立判断。
+  - `mango_orientationDidChange:`——Mango 自己的方向变化回调，与已知的 `mango_currentInterfaceOrientation` 同源。
+  - `mango_prepareTopDismissReverseGeometryForInteractiveMirror` 及一组 `_topDismissRevDx/Dy/ECx/ECy/EH/EW/LenSq/SCx/SCy/ScaleMin`——名字里直接带"Reverse"和"InteractiveMirror"，说明 Mango 内部已经有一套自己的"反向几何/镜像"机制用在某个从顶部关闭的手势上，具体用途和是否与倒置相关未知。
+
+方法名只指出"去哪找"，不能证明"内部怎么算的"——这仍是基于命名的假设，不是确认的行为证据。本版新增 `ProbeMangoSelectors()`：运行时用 `objc_copyClassList`/`class_copyMethodList` 遍历所有已加载的类，找出真正**定义**（不是继承）上述候选方法的类，把类名和方法名记入日志。纯只读，不 hook、不改变任何行为，只是把"字符串猜测"变成"运行时坐标"，安装成功后调用一次。
 
 ## 尚未处理
 

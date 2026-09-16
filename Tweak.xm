@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.4.0-alpha4. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 0.5.0-alpha5. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -378,6 +378,40 @@ static BOOL VerifiedMango(void){
     }
     return found;
 }
+// Read-only diagnostic. Static analysis of mango.dylib's own __objc_methname
+// table (selector-name strings survive stripping -- objc_msgSend needs them at
+// runtime -- so they are readable the same way mango_currentInterfaceOrientation
+// was found; see EVIDENCE.md) turned up a set of pill-swipe/dismiss/orientation
+// selectors that read like plausible sites for the touch-direction bug: the
+// window turn fixed the coordinate space touch POSITION is measured in (drag
+// tracking now follows the finger), but whatever decides "was that an up-swipe
+// or a down-swipe" is still backwards, and a decision like that does not have
+// to route through any coordinate conversion World could see or correct. This
+// changes nothing; it only records which loaded class actually defines each
+// selector, once, so a corrective hook -- if one turns out to be needed and
+// possible -- can target the right class instead of guessing.
+static void ProbeMangoSelectors(void){
+    static const char *names[]={
+        "pillSwipeDownAction","setPillSwipeDownAction:",
+        "pillSwipeUpAction","setPillSwipeUpAction:",
+        "dismissPill","dismissPillAnimated:",
+        "mango_orientationDidChange:",
+        "mango_prepareTopDismissReverseGeometryForInteractiveMirror"};
+    unsigned count=0;Class *classes=objc_copyClassList(&count);
+    if(!classes)return;
+    for(unsigned i=0;i<count;i++){
+        unsigned mc=0;Method *methods=class_copyMethodList(classes[i],&mc);
+        if(!methods)continue;
+        for(unsigned m=0;m<mc;m++){
+            const char *sel=sel_getName(method_getName(methods[m]));
+            for(unsigned n=0;n<sizeof(names)/sizeof(names[0]);n++)
+                if(!strcmp(sel,names[n]))
+                    Log([NSString stringWithFormat:@"PROBE class=%@ sel=%s",NSStringFromClass(classes[i]),sel]);
+        }
+        free(methods);
+    }
+    free(classes);
+}
 #define INSTALL_HOOKS(C,P) \
 MSHookMessageEx(C,@selector(layoutSubviews),(IMP)P##HookLayout,(IMP *)&P##Layout); \
 MSHookMessageEx(C,@selector(setFrame:),(IMP)P##HookFrame,(IMP *)&P##Frame); \
@@ -413,6 +447,7 @@ static void Install(void){
     Timer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
     dispatch_source_set_timer(Timer,dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),250*NSEC_PER_MSEC,50*NSEC_PER_MSEC);
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
-    Log(@"INSTALLED World 0.4.0-alpha4: window turn + content normalization + skip reasons + window hit fallback");Reconcile();
+    ProbeMangoSelectors();
+    Log(@"INSTALLED World 0.5.0-alpha5: window turn + content normalization + skip reasons + selector probe + window hit fallback");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}
