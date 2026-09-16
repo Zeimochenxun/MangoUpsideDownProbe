@@ -1,0 +1,9 @@
+Package: com.chenxun.mangoupsidedownprobe
+Name: Mango Upside Down Probe
+Version: 0.1.0
+Architecture: iphoneos-arm64e
+Description: Geometry and orientation diagnostics for one verified Mango image. No geometry fix is applied.
+Maintainer: Chen Xun
+Author: Chen Xun
+Section: Tweaks
+Depends: mobilesubstrate, firmware (>= 16.0)
