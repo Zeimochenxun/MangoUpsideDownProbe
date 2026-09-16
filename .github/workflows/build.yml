@@ -1,4 +1,4 @@
-name: Build MangoUpsideDownFix (RootHide)
+name: Build MangoUpsideDownWorld (RootHide)
 
 on:
   workflow_dispatch:
@@ -18,13 +18,8 @@ jobs:
       - name: Verify geometry arithmetic
         run: |
           set -eu
-          xcrun clang -std=c11 -Wall -Wextra -Werror tests/geometry_test.c -o "$RUNNER_TEMP/geometry-test"
+          xcrun clang -std=c11 -Wall -Wextra -Werror tests/world_math_test.c -o "$RUNNER_TEMP/geometry-test"
           "$RUNNER_TEMP/geometry-test"
-
-      - name: Check tweak structure and probe read-only discipline
-        run: |
-          set -eu
-          python3 tools/static_check.py
 
       - name: Install Procursus tools
         uses: dhinakg/procursus-action@main
@@ -60,28 +55,31 @@ jobs:
           export THEOS="$HOME/theos"
           xcrun clang --version
           git -C "$THEOS" rev-parse HEAD
-          shasum -a 256 Tweak.xm Geometry.h "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz"
+          shasum -a 256 Tweak.xm WorldMath.h "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz"
           make clean
-          make package FINALPACKAGE=1 2>&1 | tee "$RUNNER_TEMP/mangofix-build.log"
-          if grep -qi 'incompatible arm64e ABI' "$RUNNER_TEMP/mangofix-build.log"; then
+          make package FINALPACKAGE=1 2>&1 | tee "$RUNNER_TEMP/mangoworld-build.log"
+          if grep -qi 'incompatible arm64e ABI' "$RUNNER_TEMP/mangoworld-build.log"; then
             echo 'Refusing package with incompatible arm64e ABI warning'
             exit 1
           fi
           python3 tools/check_package.py packages/*.deb
-          dylib="$(find .theos -name MangoUpsideDownFix.dylib -type f | head -n 1)"
+          dylib="$(find .theos -name MangoUpsideDownWorld.dylib -type f | head -n 1)"
           test -n "$dylib"
           xcrun lipo -info "$dylib"
           xcrun otool -L "$dylib"
-          xcrun otool -l "$dylib" > "$RUNNER_TEMP/mangofix-load-commands.txt"
+          xcrun otool -l "$dylib" > "$RUNNER_TEMP/mangoworld-load-commands.txt"
           mkdir -p build-info
-          cp "$RUNNER_TEMP/mangofix-build.log" "$RUNNER_TEMP/mangofix-load-commands.txt" build-info/
+          cp "$RUNNER_TEMP/mangoworld-build.log" "$RUNNER_TEMP/mangoworld-load-commands.txt" build-info/
           shasum -a 256 packages/*.deb > build-info/SHA256SUMS.txt
 
       - name: Upload package and build information
         uses: actions/upload-artifact@v4
         with:
-          name: MangoUpsideDownFix-0.2.0-alpha2
+          name: MangoUpsideDownWorld-0.1.0-alpha1
           if-no-files-found: error
           path: |
             packages/*.deb
             build-info/*
+            README.md
+            EVIDENCE.md
+

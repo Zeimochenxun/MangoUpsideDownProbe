@@ -46,15 +46,15 @@ def check(path):
     data = tar_files(next(v for k, v in members.items() if k.startswith("data.tar")))
     fields = dict(line.split(": ", 1) for line in control["control"].decode().splitlines()
                   if ": " in line and not line.startswith(" "))
-    require(fields.get("Package") == "com.chenxun.mangoupsidedownfix", "wrong package ID")
+    require(fields.get("Package") == "com.chenxun.mangoupsidedownworld", "wrong package ID")
     require(fields.get("Architecture") == "iphoneos-arm64e", "wrong RootHide package architecture")
     require(set(control).issubset({"control", "md5sums"}), "unexpected package scripts")
     by_name = {Path(k).name: v for k, v in data.items()}
-    require(len(data) == 2 and set(by_name) == {"MangoUpsideDownFix.dylib", "MangoUpsideDownFix.plist"},
+    require(len(data) == 2 and set(by_name) == {"MangoUpsideDownWorld.dylib", "MangoUpsideDownWorld.plist"},
             "unexpected payload; original Mango must never be included")
-    plist = plistlib.loads(by_name["MangoUpsideDownFix.plist"])
+    plist = plistlib.loads(by_name["MangoUpsideDownWorld.plist"])
     require(plist == {"Filter": {"Bundles": ["com.apple.springboard"]}}, "unexpected injection filter")
-    dylib = by_name["MangoUpsideDownFix.dylib"]
+    dylib = by_name["MangoUpsideDownWorld.dylib"]
     magic, cpu, subtype, kind, ncmds, sizeofcmds, flags, reserved = struct.unpack_from("<8I", dylib)
     require(magic == 0xfeedfacf and cpu == 0x0100000c and subtype & 0xffffff == 2 and kind == 6,
             "expected a thin arm64e Mach-O dylib")
@@ -89,3 +89,4 @@ if __name__ == "__main__":
     require(len(sys.argv) > 1, "provide one or more .deb paths")
     for filename in sys.argv[1:]:
         check(Path(filename))
+

@@ -1,9 +1,10 @@
-Package: com.chenxun.mangoupsidedownfix
-Name: MangoUpsideDownFix
-Version: 0.2.0~alpha2
+Package: com.chenxun.mangoupsidedownworld
+Name: MangoUpsideDownWorld
+Version: 0.1.0~alpha1
 Architecture: iphoneos-arm64e
-Description: Experimental upside-down placement fix for the verified Mango System Aperture path, with pending host tracking and a read-only touch probe.
+Description: Experimental whole-aperture upside-down compatibility for Mango on iOS 16.5.
 Maintainer: Chen Xun
 Author: Chen Xun
 Section: Tweaks
-Depends: mobilesubstrate, firmware (>= 16.0)
+Depends: mobilesubstrate, firmware (= 16.5)
+Conflicts: com.chenxun.mangoupsidedownfix
