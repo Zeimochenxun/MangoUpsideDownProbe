@@ -21,6 +21,11 @@ jobs:
           xcrun clang -std=c11 -Wall -Wextra -Werror tests/geometry_test.c -o "$RUNNER_TEMP/geometry-test"
           "$RUNNER_TEMP/geometry-test"
 
+      - name: Check tweak structure and probe read-only discipline
+        run: |
+          set -eu
+          python3 tools/static_check.py
+
       - name: Install Procursus tools
         uses: dhinakg/procursus-action@main
         with:
@@ -75,7 +80,7 @@ jobs:
       - name: Upload package and build information
         uses: actions/upload-artifact@v4
         with:
-          name: MangoUpsideDownFix-0.1.0-alpha1
+          name: MangoUpsideDownFix-0.2.0-alpha2
           if-no-files-found: error
           path: |
             packages/*.deb

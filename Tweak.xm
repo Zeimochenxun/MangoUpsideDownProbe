@@ -16,12 +16,19 @@
 #include "Geometry.h"
 
 static const char *kDisabled = "/var/mobile/Library/Preferences/MangoUpsideDownFix.disabled";
+static const char *kNoProbe = "/var/mobile/Library/Preferences/MangoUpsideDownFix.noprobe";
 static const char *kLogPath = "/var/mobile/Library/Logs/MangoUpsideDownFix.log";
+// A host that never reaches the aperture path is released instead of being
+// retried forever; the cap bounds work if Mango churns short-lived hosts.
+static const NSUInteger kPendingCap = 64;
+static const double kPendingTTL = 30.0;
 static Class gContainerClass, gWindowClass, gContentClass;
 static NSHashTable<UIView *> *gContainers;
+static NSMutableArray *gPending;
 static dispatch_source_t gTimer;
-static BOOL gInstalled, gEnabled;
-static unsigned gOwnWrite, gAttempts, gLayoutDepth;
+static BOOL gInstalled, gEnabled, gProbe, gResolving, gProbeQuery;
+static unsigned gOwnWrite, gAttempts, gLayoutDepth, gPendingSeen, gPendingExpired;
+static double gPendingLog, gExpiryLog, gInsideLog, gWindowHitLog, gWindowInsideLog;
 static char kStateKey;
 
 // Our own class, not a Mango class. References to the private hierarchy are weak.
@@ -34,8 +41,19 @@ static char kStateKey;
 @property(nonatomic) BOOL suspended;
 @property(nonatomic) unsigned mutationDepth;
 @property(nonatomic) double lastLog;
+@property(nonatomic) double lastChainLog;
+@property(nonatomic) BOOL loggedInteraction;
 @end
 @implementation MUDFFixState
+@end
+
+// A Mango host seen before it was attached to the aperture window. The weak
+// reference means a discarded host cannot keep a private view alive.
+@interface MUDFPendingHost : NSObject
+@property(nonatomic, weak) UIView *host;
+@property(nonatomic) double firstSeen;
+@end
+@implementation MUDFPendingHost
 @end
 
 static void Log(NSString *message) {
@@ -83,6 +101,12 @@ static void StateLog(MUDFFixState *s, NSString *message) {
     double now = CACurrentMediaTime();
     if (now-s.lastLog < 1.0) return;
     s.lastLog = now; Log(message);
+}
+// Rate limiter for diagnostics that can fire at event or layout frequency.
+static void RateLog(double *slot, double interval, NSString *message) {
+    double now = CACurrentMediaTime();
+    if (now-*slot < interval) return;
+    *slot = now; Log(message);
 }
 
 static NSInteger MangoOrientation(void) {
@@ -222,7 +246,9 @@ static void UpdateAll(void) {
 
 static void RefreshEnabled(void) {
     if (gEnabled && access(kDisabled,F_OK)==0) {
-        gEnabled=NO; UpdateAll();
+        gEnabled=NO; gProbe=NO;
+        [gPending removeAllObjects];
+        UpdateAll();
         Log(@"DISABLED marker detected; known translations restored; remove marker and respring to re-enable");
     }
 }
@@ -282,26 +308,232 @@ static void HookMove(id self,SEL cmd) {
     @try { OrigMove(self,cmd); } @finally { EndMutation(self,s); }
 }
 
-static void (*OrigHostLayout)(id,SEL,id);
-static void HookHostLayout(id self,SEL cmd,id object) {
-    OrigHostLayout(self,cmd,object);
-    if (!gEnabled || ![NSThread isMainThread] || ![object isKindOfClass:[UIView class]]) return;
-    UIView *host=(UIView *)object;
-    UIView *v=FindAncestor(host,gContainerClass);
-    if (!v || ![v.window isKindOfClass:gWindowClass]) return;
-    MUDFFixState *s=State(v);
+// Associates a Mango host with its aperture container. Returns NO while the
+// host is not yet under a container inside the aperture window, which is the
+// state the compact island was previously discarded in.
+static BOOL TrackHost(UIView *host) {
+    UIView *v = FindAncestor(host, gContainerClass);
+    if (!v || ![v.window isKindOfClass:gWindowClass]) return NO;
+    MUDFFixState *s = State(v);
     if (!s) {
-        s=[MUDFFixState new]; s.hosts=[NSHashTable weakObjectsHashTable];
-        objc_setAssociatedObject(v,&kStateKey,s,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        s = [MUDFFixState new]; s.hosts = [NSHashTable weakObjectsHashTable];
+        objc_setAssociatedObject(v, &kStateKey, s, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [gContainers addObject:v];
-        Log([NSString stringWithFormat:@"TRACK Mango host=%p container=%p",(__bridge void *)host,(__bridge void *)v]);
+        Log([NSString stringWithFormat:@"TRACK Mango host=%p container=%p",
+             (__bridge void *)host, (__bridge void *)v]);
     }
     [s.hosts addObject:host];
     // A layout in progress can have intermediate geometry; validate again after
     // it returns. Immediate update is guarded by the container mutation depth.
     Update(v);
-    __weak UIView *weakView=v;
+    __weak UIView *weakView = v;
     dispatch_async(dispatch_get_main_queue(), ^{ if (weakView) Update(weakView); });
+    return YES;
+}
+
+static void AddPending(UIView *host) {
+    for (MUDFPendingHost *p in gPending) if (p.host == host) return;
+    if (gPending.count >= kPendingCap) {
+        RateLog(&gPendingLog, 5.0, [NSString stringWithFormat:
+            @"PENDING cap %lu reached; not queueing more unattached hosts this cycle",
+            (unsigned long)kPendingCap]);
+        return;
+    }
+    MUDFPendingHost *p = [MUDFPendingHost new];
+    p.host = host; p.firstSeen = CACurrentMediaTime();
+    [gPending addObject:p];
+    ++gPendingSeen;
+    RateLog(&gPendingLog, 1.0, [NSString stringWithFormat:
+        @"PENDING host=%p queued (no aperture container yet); queued=%lu seen=%u",
+        (__bridge void *)host, (unsigned long)gPending.count, gPendingSeen]);
+}
+
+// Re-checks queued hosts on the main queue. Hosts that attach later get the
+// same treatment as hosts that were already attached at callback time.
+// TrackHost can re-enter this through layout, so the queue is walked over a
+// snapshot and entries are removed by identity, never by index.
+static void ResolvePending(void) {
+    if (!gPending.count || gResolving || ![NSThread isMainThread]) return;
+    gResolving = YES;
+    @try {
+        double now = CACurrentMediaTime();
+        for (MUDFPendingHost *p in [gPending copy]) {
+            UIView *host = p.host;
+            if (!host) { [gPending removeObject:p]; continue; }
+            if (gEnabled && TrackHost(host)) {
+                [gPending removeObject:p];
+                Log([NSString stringWithFormat:@"PENDING host=%p resolved after %.2fs",
+                     (__bridge void *)host, now-p.firstSeen]);
+                continue;
+            }
+            if (now-p.firstSeen > kPendingTTL) {
+                [gPending removeObject:p]; ++gPendingExpired;
+                RateLog(&gExpiryLog, 5.0, [NSString stringWithFormat:
+                    @"PENDING host=%p expired after %.0fs without an aperture container; expired=%u",
+                    (__bridge void *)host, kPendingTTL, gPendingExpired]);
+            }
+        }
+    } @finally { gResolving = NO; }
+}
+
+// ---- Touch diagnosis (observation only) ----
+// These hooks never change a return value. They answer three questions from
+// the alpha1 report: does the event reach the moved container, does the
+// aperture window claim the touch region, and is the container's own reported
+// hit area where the pixels are.
+
+static NSString *InteractionSummary(UIView *v) {
+    NSMutableString *out = [NSMutableString string];
+    [out appendFormat:@"userInteraction=%d hidden=%d alpha=%.3f recognizers=%lu",
+        v.isUserInteractionEnabled, v.isHidden, v.alpha,
+        (unsigned long)v.gestureRecognizers.count];
+    for (UIView *a = v; a; a = a.superview) {
+        if (!a.isUserInteractionEnabled || a.isHidden || a.alpha < 0.01) {
+            [out appendFormat:@" firstNonInteractive=%s(%p)",
+                class_getName([a class]), (__bridge void *)a];
+            break;
+        }
+        if ([a isKindOfClass:[UIWindow class]]) break;
+    }
+    return out;
+}
+
+// Asks each ancestor, by public API, whether it accepts the same touch point
+// after the container moved. This identifies an ancestor that owns a touch
+// region a translation cannot move -- SBFTouchPassThroughView is the parent in
+// the evidenced chain -- without hooking those shared SpringBoard classes.
+static NSString *AncestorAcceptance(UIView *v, CGPoint local, UIEvent *event) {
+    NSMutableString *out = [NSMutableString stringWithString:@" chain="];
+    UIView *first = nil;
+    // These queries re-enter the hooked pointInside:, so suppress nested
+    // probe logging rather than reporting our own questions as real events.
+    gProbeQuery = YES;
+    @try {
+        for (UIView *a = v.superview; a; a = a.superview) {
+            CGPoint p = [v convertPoint:local toView:a];
+            BOOL accepts = [a pointInside:p withEvent:event];
+            [out appendFormat:@"%s%s ", class_getName([a class]), accepts ? ":yes" : ":NO"];
+            if (!accepts && !first) first = a;
+            if ([a isKindOfClass:[UIWindow class]]) break;
+        }
+    } @finally { gProbeQuery = NO; }
+    if (first)
+        [out appendFormat:@"firstRejectingAncestor=%s(%p)",
+            class_getName([first class]), (__bridge void *)first];
+    else
+        [out appendString:@"allAncestorsAcceptPoint"];
+    return out;
+}
+
+// Logs where the container reports its own hit region versus where its model
+// geometry now is, in fixed screen coordinates.
+static void LogHitChain(UIView *v, MUDFFixState *s, CGPoint local, UIView *result, UIEvent *event) {
+    UIWindow *window = v.window;
+    if (!window) return;
+    double now = CACurrentMediaTime();
+    // The first hit on a tracked container is always logged, then rate-limited,
+    // so the ancestor queries below run at most about twice a second.
+    if (s.loggedInteraction && now-s.lastChainLog < 0.5) return;
+    s.loggedInteraction = YES; s.lastChainLog = now;
+    id<UICoordinateSpace> fixed = window.screen.fixedCoordinateSpace;
+    CGRect rect = [v convertRect:v.bounds toCoordinateSpace:fixed];
+    CGPoint fixedPoint = [v convertPoint:local toCoordinateSpace:fixed];
+    Log([NSString stringWithFormat:
+        @"PROBE hitTest container=%p applied=%d localPoint={%.2f,%.2f} fixedPoint={%.2f,%.2f} "
+        @"containerFixed=%@ insideBounds=%d result=%s(%p) %@%@",
+        (__bridge void *)v, s.applied, local.x, local.y, fixedPoint.x, fixedPoint.y,
+        NSStringFromCGRect(rect), CGRectContainsPoint(v.bounds, local),
+        result ? class_getName([result class]) : "nil", (__bridge void *)result,
+        InteractionSummary(v), AncestorAcceptance(v, local, event)]);
+}
+
+static UIView *(*OrigHitTest)(id,SEL,CGPoint,UIEvent *);
+static UIView *HookHitTest(id self,SEL cmd,CGPoint point,UIEvent *event) {
+    UIView *result = OrigHitTest(self,cmd,point,event);
+    if (!gProbe || gProbeQuery || ![NSThread isMainThread]) return result;
+    MUDFFixState *s = State(self);
+    if (s) @try { LogHitChain(self,s,point,result,event); } @catch (__unused id e) {}
+    return result;
+}
+
+static BOOL (*OrigPointInside)(id,SEL,CGPoint,UIEvent *);
+static BOOL HookPointInside(id self,SEL cmd,CGPoint point,UIEvent *event) {
+    BOOL inside = OrigPointInside(self,cmd,point,event);
+    if (!gProbe || gProbeQuery || ![NSThread isMainThread]) return inside;
+    MUDFFixState *s = State(self);
+    if (s && s.applied) @try {
+        UIView *v = (UIView *)self;
+        BOOL boundsSays = CGRectContainsPoint(v.bounds, point);
+        // A disagreement here means the container overrides its hit region
+        // rather than deriving it from bounds, which a translation cannot move.
+        if (inside != boundsSays)
+            RateLog(&gInsideLog, 1.0, [NSString stringWithFormat:
+                @"PROBE pointInside container=%p DISAGREES point={%.2f,%.2f} returned=%d bounds=%d bounds=%@",
+                (__bridge void *)v, point.x, point.y, inside, boundsSays,
+                NSStringFromCGRect(v.bounds)]);
+    } @catch (__unused id e) {}
+    return inside;
+}
+
+// Window-level probe: shows whether the event even descends into the moved
+// container, or is claimed/rejected above it.
+static BOOL AnyAppliedInWindow(UIWindow *window) {
+    for (UIView *c in gContainers.allObjects) {
+        MUDFFixState *s = State(c);
+        if (s.applied && c.window == window) return YES;
+    }
+    return NO;
+}
+
+static UIView *(*OrigWindowHitTest)(id,SEL,CGPoint,UIEvent *);
+static UIView *HookWindowHitTest(id self,SEL cmd,CGPoint point,UIEvent *event) {
+    UIView *result = OrigWindowHitTest(self,cmd,point,event);
+    if (!gProbe || gProbeQuery || ![NSThread isMainThread]) return result;
+    @try {
+        UIWindow *window = (UIWindow *)self;
+        if (!AnyAppliedInWindow(window)) return result;
+        BOOL reachedTracked = NO;
+        for (UIView *a = result; a; a = a.superview) if (State(a)) { reachedTracked = YES; break; }
+        id<UICoordinateSpace> fixed = window.screen.fixedCoordinateSpace;
+        CGPoint fixedPoint = [window convertPoint:point toCoordinateSpace:fixed];
+        RateLog(&gWindowHitLog, 0.5, [NSString stringWithFormat:
+            @"PROBE windowHitTest window=%p point={%.2f,%.2f} fixedPoint={%.2f,%.2f} "
+            @"result=%s(%p) reachedTrackedContainer=%d",
+            (__bridge void *)window, point.x, point.y, fixedPoint.x, fixedPoint.y,
+            result ? class_getName([result class]) : "nil", (__bridge void *)result,
+            reachedTracked]);
+    } @catch (__unused id e) {}
+    return result;
+}
+
+static BOOL (*OrigWindowPointInside)(id,SEL,CGPoint,UIEvent *);
+static BOOL HookWindowPointInside(id self,SEL cmd,CGPoint point,UIEvent *event) {
+    BOOL inside = OrigWindowPointInside(self,cmd,point,event);
+    if (!gProbe || gProbeQuery || ![NSThread isMainThread]) return inside;
+    @try {
+        UIWindow *window = (UIWindow *)self;
+        // If the window rejects a point over the moved island, the touch region
+        // is owned above the container and moving geometry cannot fix it.
+        if (!inside && AnyAppliedInWindow(window))
+            RateLog(&gWindowInsideLog, 1.0, [NSString stringWithFormat:
+                @"PROBE windowPointInside window=%p REJECTED point={%.2f,%.2f} while a moved container is present; bounds=%@",
+                (__bridge void *)window, point.x, point.y, NSStringFromCGRect(window.bounds)]);
+    } @catch (__unused id e) {}
+    return inside;
+}
+
+static void (*OrigHostLayout)(id,SEL,id);
+static void HookHostLayout(id self,SEL cmd,id object) {
+    OrigHostLayout(self,cmd,object);
+    if (!gEnabled || ![NSThread isMainThread] || ![object isKindOfClass:[UIView class]]) return;
+    UIView *host=(UIView *)object;
+    if (TrackHost(host)) return;
+    // Previously dropped here. The compact and media islands report their host
+    // before it is attached, so queue it and re-check instead. Attachment often
+    // completes within the same turn of the run loop, so try once more soon
+    // rather than waiting for the next timer tick.
+    AddPending(host);
+    dispatch_async(dispatch_get_main_queue(), ^{ ResolvePending(); });
 }
 
 static BOOL Signature(Class cls,SEL sel,const char *ret,NSArray<NSString *> *args) {
@@ -365,6 +597,8 @@ static void Install(void) {
     NSArray *rectArgs=@[[NSString stringWithUTF8String:@encode(CGRect)]];
     NSArray *pointArgs=@[[NSString stringWithUTF8String:@encode(CGPoint)]];
     NSArray *transformArgs=@[[NSString stringWithUTF8String:@encode(CGAffineTransform)]];
+    NSArray *hitArgs=@[[NSString stringWithUTF8String:@encode(CGPoint)],@"@"];
+    const char *boolRet=@encode(BOOL);
     if(!Signature(element,host,"v",@[@"@"]) ||
        !Signature(gContainerClass,@selector(layoutSubviews),"v",@[]) ||
        !Signature(gContainerClass,@selector(setFrame:),"v",rectArgs) ||
@@ -374,7 +608,9 @@ static void Install(void) {
        !Signature(gContainerClass,@selector(didMoveToWindow),"v",@[])) {
         Log(@"NO HOOKS method signature mismatch");return;
     }
-    gContainers=[NSHashTable weakObjectsHashTable];gEnabled=YES;
+    gContainers=[NSHashTable weakObjectsHashTable];
+    gPending=[NSMutableArray array];
+    gEnabled=YES;
     MSHookMessageEx(gContainerClass,@selector(layoutSubviews),(IMP)HookLayout,(IMP *)&OrigLayout);
     MSHookMessageEx(gContainerClass,@selector(setFrame:),(IMP)HookFrame,(IMP *)&OrigFrame);
     MSHookMessageEx(gContainerClass,@selector(setBounds:),(IMP)HookBounds,(IMP *)&OrigBounds);
@@ -382,23 +618,43 @@ static void Install(void) {
     MSHookMessageEx(gContainerClass,@selector(setTransform:),(IMP)HookTransform,(IMP *)&OrigTransform);
     MSHookMessageEx(gContainerClass,@selector(didMoveToWindow),(IMP)HookMove,(IMP *)&OrigMove);
     MSHookMessageEx(element,host,(IMP)HookHostLayout,(IMP *)&OrigHostLayout);
+    // Observation-only touch probe. Separate opt-out, because a diagnostic
+    // should be removable without giving up the placement fix. Like the alpha1
+    // geometry hooks, these are hooked on the specific aperture subclasses;
+    // MSHookMessageEx adds the override there rather than editing UIView.
+    if(access(kNoProbe,F_OK)==0) {
+        Log(@"PROBE disabled by marker; placement fix active without touch diagnostics");
+    } else if(!Signature(gContainerClass,@selector(hitTest:withEvent:),"@",hitArgs) ||
+              !Signature(gContainerClass,@selector(pointInside:withEvent:),boolRet,hitArgs) ||
+              !Signature(gWindowClass,@selector(hitTest:withEvent:),"@",hitArgs) ||
+              !Signature(gWindowClass,@selector(pointInside:withEvent:),boolRet,hitArgs)) {
+        Log(@"PROBE not installed; hit-test signature mismatch");
+    } else {
+        MSHookMessageEx(gContainerClass,@selector(hitTest:withEvent:),(IMP)HookHitTest,(IMP *)&OrigHitTest);
+        MSHookMessageEx(gContainerClass,@selector(pointInside:withEvent:),(IMP)HookPointInside,(IMP *)&OrigPointInside);
+        MSHookMessageEx(gWindowClass,@selector(hitTest:withEvent:),(IMP)HookWindowHitTest,(IMP *)&OrigWindowHitTest);
+        MSHookMessageEx(gWindowClass,@selector(pointInside:withEvent:),(IMP)HookWindowPointInside,(IMP *)&OrigWindowPointInside);
+        gProbe=YES;
+        Log(@"PROBE installed on the aperture container and window; returns are unchanged");
+    }
     gInstalled=YES;
     [NSNotificationCenter.defaultCenter addObserverForName:@"MangoInterfaceOrientationDidChange"
         object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
-            RefreshEnabled();UpdateAll();
-            dispatch_async(dispatch_get_main_queue(),^{UpdateAll();});
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,350*NSEC_PER_MSEC),dispatch_get_main_queue(),^{UpdateAll();});
+            RefreshEnabled();ResolvePending();UpdateAll();
+            dispatch_async(dispatch_get_main_queue(),^{ResolvePending();UpdateAll();});
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,350*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
+                ResolvePending();UpdateAll();});
         }];
     // Low-rate recovery/reconciliation, not an animation driver or touch hook.
     gTimer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
     dispatch_source_set_timer(gTimer,dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),
                               250*NSEC_PER_MSEC,50*NSEC_PER_MSEC);
     dispatch_source_set_event_handler(gTimer,^{
-        RefreshEnabled();UpdateAll();
+        RefreshEnabled();ResolvePending();UpdateAll();
         if(!gEnabled)dispatch_source_cancel(gTimer);
     });
     dispatch_resume(gTimer);
-    Log(@"INSTALLED 0.1.0-alpha1; scoped translation only; waiting for a verified Mango host");
+    Log(@"INSTALLED 0.2.0-alpha2; scoped translation, pending host tracking, read-only touch probe");
 }
 
 __attribute__((constructor)) static void StartFix(void) {
