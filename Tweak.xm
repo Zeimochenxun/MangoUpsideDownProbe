@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.6.0-alpha6. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 0.7.0-alpha7. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -442,6 +442,63 @@ static void ProbeMangoPillManager(void){
         free(methods);
     }
 }
+// Device result of the probes above: MangoPillManager's complete method list
+// is lifecycle and notification handling only (init/dealloc, foreground/lock/
+// orientation notification handlers, show/dismiss/query) -- nothing reads a
+// gesture or touch. That rules Mango's own code out as the direction bug's
+// source at this class, and static introspection has no further named lead:
+// the pan/swipe/translation selectors found earlier in the string dump most
+// likely belong to unrelated Mango surfaces (settings, launcher), not this
+// one. Guessing more class names from here is low yield; the direct approach
+// is to watch the actual call in the moment it happens.
+//
+// This hooks UIPanGestureRecognizer's own translationInView:/velocityInView:
+// -- public, documented UIKit API, not a private or Mango-owned method -- and
+// logs the caller's view and the returned value, but only while the
+// recognizer's .view is root or a descendant of a root World is actively
+// turning (checked via Roots; a global hash-table lookup, not a Mango-, name-
+// or signature-based guess). Outside that condition (Roots empty, or any pan
+// gesture anywhere else in SpringBoard) this adds a single count check and
+// returns, same class of overhead the existing per-frame geometry hooks
+// already carry. The real value is always returned unmodified; nothing this
+// reads is changed. One caveat: if the actual recognizer at play is a private
+// subclass that overrides these two methods with its own implementation,
+// hooking the base class's IMP will not see those calls -- a quiet run
+// (nothing logged during a real swipe) would mean that, not that no gesture
+// happened.
+static BOOL IsInsideTrackedRoot(UIView *v){
+    if(!Roots.count)return NO;
+    for(;v;v=v.superview)
+        if([Roots containsObject:v])return YES;
+    return NO;
+}
+static void LogGestureRead(NSString *api,UIView *targetView,CGPoint p){
+    static double last;double now=CACurrentMediaTime();
+    if(now-last<=0.05)return;    // a drag calls this many times per frame
+    last=now;
+    Log([NSString stringWithFormat:@"GESTURE api=%@ targetView=%@ value={%.2f,%.2f}",api,NSStringFromClass(targetView.class),p.x,p.y]);
+}
+static CGPoint (*OrigTranslation)(id,SEL,UIView *);
+static CGPoint HookTranslation(UIGestureRecognizer *self,SEL cmd,UIView *view){
+    CGPoint v=OrigTranslation(self,cmd,view);
+    if(IsInsideTrackedRoot(self.view))LogGestureRead(@"translationInView:",view,v);
+    return v;
+}
+static CGPoint (*OrigVelocity)(id,SEL,UIView *);
+static CGPoint HookVelocity(UIGestureRecognizer *self,SEL cmd,UIView *view){
+    CGPoint v=OrigVelocity(self,cmd,view);
+    if(IsInsideTrackedRoot(self.view))LogGestureRead(@"velocityInView:",view,v);
+    return v;
+}
+static void InstallGestureProbe(void){
+    Class pan=objc_getClass("UIPanGestureRecognizer");
+    NSArray *args=@[@"@"];
+    if(!pan||!Signature(pan,@selector(translationInView:),@encode(CGPoint),args)||
+       !Signature(pan,@selector(velocityInView:),@encode(CGPoint),args)){
+        Log(@"NO GESTURE PROBE: signature mismatch");return;}
+    MSHookMessageEx(pan,@selector(translationInView:),(IMP)HookTranslation,(IMP *)&OrigTranslation);
+    MSHookMessageEx(pan,@selector(velocityInView:),(IMP)HookVelocity,(IMP *)&OrigVelocity);
+}
 #define INSTALL_HOOKS(C,P) \
 MSHookMessageEx(C,@selector(layoutSubviews),(IMP)P##HookLayout,(IMP *)&P##Layout); \
 MSHookMessageEx(C,@selector(setFrame:),(IMP)P##HookFrame,(IMP *)&P##Frame); \
@@ -479,6 +536,7 @@ static void Install(void){
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
     ProbeMangoSelectors();
     ProbeMangoPillManager();
-    Log(@"INSTALLED World 0.6.0-alpha6: window turn + content normalization + skip reasons + selector probe + window hit fallback");Reconcile();
+    InstallGestureProbe();
+    Log(@"INSTALLED World 0.7.0-alpha7: window turn + content normalization + skip reasons + selector probe + gesture probe + window hit fallback");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}

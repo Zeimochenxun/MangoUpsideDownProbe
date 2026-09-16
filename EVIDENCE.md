@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 0.6.0-alpha6：证据与边界
+# MangoUpsideDownWorld 0.7.0-alpha7：证据与边界
 
 这是本次新实现，不是从关联对话中取回的既有 World 源码，也不是给 Fix alpha2 改名。
 
@@ -88,6 +88,28 @@ PROBE class=DecoratedAppSceneView sel=mango_orientationDidChange:
 唯一落到实处的：**`MangoPillManager`** 确认已加载，定义了 `dismissPill`/`dismissPillAnimated:`，是灵动岛（pill）控制器类的强候选。但只探测了 8 个猜的名字，没有看这个类真正暴露了哪些方法。
 
 本版新增 `ProbeMangoPillManager()`：直接用 `objc_getClass("MangoPillManager")` 取类，沿它自己的父类链（遇到 `NS`/`UI`/`OS_` 前缀的苹果框架类就停，避免把 `NSObject`/`UIResponder` 几千个无关方法也倒出来，最多走 8 层）用 `class_copyMethodList` 列出每一层**直接定义**的全部方法，记入日志。不再猜名字，直接看这个类真实暴露了什么。仍然纯只读，不 hook 任何东西。
+
+## 0.7.0-alpha7：`MangoPillManager` 真机结果——不是手势代码，改成实时抓真正的调用方
+
+真机日志给出了 `MangoPillManager` 的完整方法列表(17 个):
+
+```
+init / dealloc / .cxx_destruct
+setupNotificationObservers
+handleAppForegroundChange: / handleLockStateChange: / handleInterfaceOrientationChange:
+showPillForBundleID:primaryText:secondaryText:(两个重载) / showFallbackPill:
+dismissPill / dismissPillAnimated:
+isPillVisible / activePillForBundleID: / removeActivePillForBundleID:
+activePills / setActivePills:
+```
+
+没有任何 pan/swipe/touch/gesture 方法。`MangoPillManager` 是纯粹的内容生命周期协调器——靠监听通知(前后台切换、锁屏、方向变化)决定何时显示/收起什么内容，完全不碰手势识别器或触摸坐标。
+
+这排除了 `MangoPillManager`,也意味着处理灵动岛拖动方向的代码大概率不在 Mango 自己的类里——很可能是苹果自己在 SpringBoard/UIKit 里的私有代码，World 一直是"绕着走"而不是"拥有"它。之前静态字符串扫描找到的 `handlePan:`/`panGestureRecognizer`/`translationInView:` 等名字，现在看更可能属于 Mango 里别的界面(设置面板、启动台)，与灵动岛拖动无关。
+
+继续按名字猜类、列方法这条路已经把最有希望的候选都查完了，收益递减。本版改用运行时实时抓取:新增 `IsInsideTrackedRoot()`(检查一个视图是否是某个已跟踪 root 或其后代，通过 `Roots` 哈希表查找，不依赖任何名字或签名猜测)，以及对 `UIPanGestureRecognizer` 的公开、有文档的 UIKit API `translationInView:`/`velocityInView:` 的只读 hook:调用原始实现拿到真实返回值、原样返回(不改变任何行为)，只在这个手势的 `.view` 落在已跟踪的 root 子树内时才把调用方视图和返回值记入日志(限频，同一 0.05 秒内只记一次)。`Roots` 为空时(即世界未处于倒置激活状态)这段代码只做一次 count 检查就返回，和现有的逐帧几何 hook 是同一量级的开销。
+
+已知的局限:如果真正起作用的识别器是一个重写了这两个方法的私有子类，hook 基类的实现就看不到那次调用——真机测试如果完全没有 `GESTURE` 行，说明的是这一点，不是"没有手势发生"。
 
 ## 尚未处理
 
