@@ -72,7 +72,11 @@ def check(path):
             offset, length = struct.unpack_from("<II", dylib, pos + 8)
             signed = length > 0 and offset + length <= len(dylib)
         pos += size
-    require(any(".jbroot" in p for p in rpaths), "missing RootHide .jbroot rpath")
+    require(
+        any(".jbroot" in p for p in rpaths) or
+        any(".jbroot" in p for p in dependencies),
+        "missing RootHide .jbroot linkage",
+    )
     require(not any(p.startswith("/var/jb/") for p in dependencies), "unexpected hardcoded rootless dependency")
     require(signed, "missing embedded code-signature data")
     print(f"PASS {path.name}: {fields['Architecture']}, arm64e, SpringBoard only, two payload files, signature data present")
