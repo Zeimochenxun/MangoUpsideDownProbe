@@ -1,6 +1,4 @@
-    }
-    return result; // Do not swap top/bottom or reinterpret insets as a frame.
-}
+
 static void (*OrigFallback)(id, SEL, id);
 static void HookFallback(id self, SEL cmd, id element) {
     BOOL observe = Enabled() && [NSThread isMainThread];
@@ -119,3 +117,4 @@ __attribute__((constructor)) static void StartProbe(void) {
         if (!Enabled()) return;
         dispatch_async(dispatch_get_main_queue(), ^{ TryInstall(); });
     }
+}
