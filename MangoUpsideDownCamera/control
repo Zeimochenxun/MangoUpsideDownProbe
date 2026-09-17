@@ -1,0 +1,9 @@
+Package: com.chenxun.mangoupsidedowncamera
+Name: MangoUpsideDownCamera
+Version: 1.1.0
+Architecture: iphoneos-arm64e
+Description: Forces AVCapture video connections into PortraitUpsideDown while the device is physically upside down.
+Maintainer: ChenXun
+Author: ChenXun
+Section: Tweaks
+Depends: firmware (>= 16.0), libsubstrate
