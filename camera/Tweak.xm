@@ -1,4 +1,4 @@
-// MangoUpsideDownCamera 1.0.0. Experimental; see EVIDENCE.md.
+// MangoUpsideDownCamera 1.1.0. Experimental; see EVIDENCE.md.
 //
 // Separate package from MangoUpsideDownWorld, deliberately: that dylib only
 // injects into com.apple.springboard and its entire job is making Mango
@@ -13,15 +13,74 @@
 // dylib/plist/control/disable-file rather than folding into the existing
 // project -- see EVIDENCE.md for the full reasoning and the research this
 // was based on.
+//
+// 1.1.0 real-device result: with 1.0.0 installed, Camera.app's preview did
+// NOT follow inversion, in both tested configurations -- a cold launch
+// performed while already physically inverted, and a live flip while
+// Camera.app was already open in the foreground. Both failing rules out an
+// iOS-16-specific "the system never re-queries orientation live" theory
+// (a cold launch queries fresh regardless of that), and points at the
+// limitation this file's own 1.0.0 comments already disclosed up front:
+// Camera.app's real view controller (or something wrapping it) very likely
+// overrides -supportedInterfaceOrientations itself, bypassing a hook on
+// UIViewController's own base implementation entirely. Rather than jump
+// straight to blindly hooking every class in every process that overrides
+// this method (the actual "Tier B" this file's own history already
+// disclosed as the next, riskier step), this version adds a read-only,
+// toggle-gated diagnostic that names the REAL overriding class(es) in
+// whatever process it runs in -- the same "log real runtime state before
+// hooking anything new" discipline the sibling MangoUpsideDownWorld project
+// already used (alpha5/6/11's CLASSDUMP) to turn blind guesses on the pill
+// into a single confirmed class name, rather than repeating alpha1-8's
+// mistake of hooking based on inference alone.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <substrate.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <string.h>
 
 static const char *Disabled="/var/mobile/Library/Preferences/MangoUpsideDownCamera.disabled";
+// 1.1.0: same toggle-file mechanism the sibling project's TracePath already
+// uses, checked once at Install() time -- this is a one-shot per-process
+// diagnostic (the runtime class scan below), not a continuous poll loop
+// like the sibling's Reconcile(), so there is no periodic re-check here.
+static const char *TracePath="/var/mobile/Library/Preferences/MangoUpsideDownCamera.trace";
 static BOOL InvertOrientations=YES;
+static BOOL Tracing=NO;
+// Cached once at Install() time rather than re-queried on every hook call:
+// NSBundle.mainBundle.bundleIdentifier does not change for the lifetime of
+// a process, and this hook can fire from any app on the device, so caching
+// it once avoids repeated Foundation calls in what is meant to be a cheap,
+// frequently-reachable hook -- and lets every log line from a given
+// process's shared, cross-app log file be attributed to the right app.
+static NSString *BundleID;
+
+// 1.1.0: this file has no periodic reconciliation loop and (until now) no
+// persistent log -- unlike the sibling project, whose Log() is the single
+// chokepoint every one of its 25+ log call sites already goes through, this
+// file previously only used bare NSLog(), which requires a Mac/Console.app
+// or an on-device syslog viewer to read. Since every process this dylib
+// injects into shares the SAME log file path, lines are tagged with
+// BundleID so a mixed log (many apps writing to it over time) stays
+// attributable. Mirrors the sibling's Log() structure (mkdir, O_APPEND,
+// 512KB truncation) as an independent, self-contained implementation --
+// this file still shares no code with the sibling's Tweak.xm.
+static void Log(NSString *s){
+    NSString *tagged=[NSString stringWithFormat:@"[%@] %@",BundleID?:@"?",s];
+    NSLog(@"[MangoUDCamera] %@",tagged);
+    mkdir("/var/mobile/Library/Logs",0755);
+    int fd=open("/var/mobile/Library/Logs/MangoUpsideDownCamera.log",O_WRONLY|O_CREAT|O_APPEND|O_NOFOLLOW,0600);
+    if(fd<0)return;
+    struct stat st;
+    if(fstat(fd,&st)||!S_ISREG(st.st_mode)){close(fd);return;}
+    if(st.st_size>512*1024)ftruncate(fd,0);
+    NSData *b=[[NSString stringWithFormat:@"%.3f %@\n",NSDate.timeIntervalSinceReferenceDate,tagged] dataUsingEncoding:NSUTF8StringEncoding];
+    (void)write(fd,b.bytes,b.length);close(fd);
+}
 
 // Self-contained: this is a fully separate binary from MangoUpsideDownWorld's
 // Tweak.xm and shares no code with it (each package is compiled and injected
@@ -37,6 +96,7 @@ static BOOL Signature(Class c,SEL sel,const char *ret,NSArray<NSString *> *args)
     for(NSUInteger i=0;i<args.count;i++){method_getArgumentType(m,(unsigned)i+2,buf,sizeof(buf));if(strcmp(buf,args[i].UTF8String))return NO;}
     return YES;
 }
+static BOOL ValidClass(Class c,Class base){for(;c;c=class_getSuperclass(c))if(c==base)return YES;return NO;}
 
 // -[UIViewController supportedInterfaceOrientations] decides, per view
 // controller, whether that view is even allowed to rotate to
@@ -57,17 +117,15 @@ static BOOL Signature(Class c,SEL sel,const char *ret,NSArray<NSString *> *args)
 // dispatch to this base implementation. Apple's own guidance treats
 // supportedInterfaceOrientations as meant to be fully replaced, not chained
 // with super -- so any view controller that declares its own orientation
-// mask (plausibly including Apple's own Camera.app) bypasses this hook
-// entirely; there is no single hook point that transparently reaches every
-// possible override in every app. Confirming whether Camera.app itself is
-// covered by this first pass requires a real-device test (see README.md);
-// if it isn't, the next step is a broader, riskier pass that finds and
-// patches every overriding subclass individually at install time, held
-// back until this simpler pass is confirmed insufficient rather than built
-// up front.
+// mask bypasses this hook entirely; there is no single hook point that
+// transparently reaches every possible override in every app. 1.1.0's
+// real-device result (see the file-header comment) confirms Camera.app is
+// one such case; LogOverridingClasses() below exists to name the real
+// class responsible instead of guessing one to hook next.
 static UIInterfaceOrientationMask (*OrigSupportedOrientations)(id,SEL);
 static UIInterfaceOrientationMask HookSupportedOrientations(UIViewController *self,SEL cmd){
     UIInterfaceOrientationMask orig=OrigSupportedOrientations(self,cmd);
+    if(Tracing)Log([NSString stringWithFormat:@"CALL class=%@ orig=0x%lx",NSStringFromClass(self.class),(unsigned long)orig]);
     if(!InvertOrientations||![NSThread isMainThread])return orig;
     // Re-checked live on every call, not just once at Install() time: this
     // file has no periodic reconciliation loop the way the sibling
@@ -89,8 +147,45 @@ static UIInterfaceOrientationMask HookSupportedOrientations(UIViewController *se
     // in every process, with no dependency on any inversion plugin's own
     // state: the phone being physically upside-down is a fact about the
     // phone, not about what any plugin has done to a UI.
-    if(UIDevice.currentDevice.orientation!=UIDeviceOrientationPortraitUpsideDown)return orig;
-    return orig|UIInterfaceOrientationMaskPortraitUpsideDown;
+    UIDeviceOrientation device=UIDevice.currentDevice.orientation;
+    if(device!=UIDeviceOrientationPortraitUpsideDown)return orig;
+    UIInterfaceOrientationMask patched=orig|UIInterfaceOrientationMaskPortraitUpsideDown;
+    if(Tracing)Log([NSString stringWithFormat:@"HIT class=%@ device=%ld patched=0x%lx",NSStringFromClass(self.class),(long)device,(unsigned long)patched]);
+    return patched;
+}
+
+// 1.1.0: read-only, toggle-gated. Runs once per process, only when
+// TracePath exists, and never modifies anything it finds -- it walks every
+// currently-loaded class, keeps the ones that are UIViewController
+// subclasses (excluding UIViewController itself, already covered by the
+// hook above) AND directly define (not inherit) their own
+// -supportedInterfaceOrientations, and logs their real names. This answers
+// directly, for whatever process it runs in, which concrete class(es) --
+// if any -- bypass the base-class hook, the same way the sibling project's
+// CLASSDUMP turned "some private subclass probably overrides this" into a
+// single confirmed name (SBSystemApertureLongPressGestureRecognizer)
+// instead of guessing and hooking blindly. Bounded like every runtime walk
+// in the sibling project's own Tweak.xm: capped list length so a class with
+// an unexpectedly large number of matches cannot flood the log.
+static void LogOverridingClasses(void){
+    unsigned count=0;
+    Class *classes=objc_copyClassList(&count);
+    if(!classes){Log(@"CLASSDUMP scan-failed");return;}
+    NSMutableArray<NSString *> *overriders=[NSMutableArray array];
+    SEL sel=@selector(supportedInterfaceOrientations);
+    for(unsigned i=0;i<count&&overriders.count<40;i++){
+        Class c=classes[i];
+        if(c==UIViewController.class||!ValidClass(c,UIViewController.class))continue;
+        unsigned mcount=0;
+        Method *methods=class_copyMethodList(c,&mcount);
+        BOOL defines=NO;
+        for(unsigned j=0;j<mcount;j++)if(method_getName(methods[j])==sel){defines=YES;break;}
+        free(methods);
+        if(defines)[overriders addObject:NSStringFromClass(c)];
+    }
+    free(classes);
+    Log([NSString stringWithFormat:@"CLASSDUMP overriders=%lu classes=%@",
+        (unsigned long)overriders.count,overriders.count?[overriders componentsJoinedByString:@","]:@"none"]);
 }
 
 static void Install(void){
@@ -111,18 +206,20 @@ static void Install(void){
     // UIKit, which happens before constructors run) is the check that is
     // actually meaningful this early.
     if(!objc_getClass("UIApplication"))return;
+    BundleID=NSBundle.mainBundle.bundleIdentifier?:@"(unknown bundle)";
     // Never run inside SpringBoard: that process's own upside-down handling
     // is MangoUpsideDownWorld's job end to end, and two independently
     // written pieces of code both adjusting orientation logic in the same
     // process is exactly the kind of conflict this project's own
     // Conflicts: field (between MangoUpsideDownWorld and the older
     // MangoUpsideDownFix) already guards against elsewhere.
-    NSString *bundleID=NSBundle.mainBundle.bundleIdentifier;
-    if([bundleID isEqualToString:@"com.apple.springboard"])return;
+    if([BundleID isEqualToString:@"com.apple.springboard"])return;
+    Tracing=access(TracePath,F_OK)==0;
+    if(Tracing)LogOverridingClasses();
     Class vc=UIViewController.class;
     SEL sel=@selector(supportedInterfaceOrientations);
     if(!Signature(vc,sel,@encode(UIInterfaceOrientationMask),@[])){
-        InvertOrientations=NO;NSLog(@"[MangoUDCamera] NO HOOK: signature mismatch");return;}
+        InvertOrientations=NO;Log(@"NO HOOK: signature mismatch");return;}
     MSHookMessageEx(vc,sel,(IMP)HookSupportedOrientations,(IMP *)&OrigSupportedOrientations);
     // Deferred to the main queue, not called directly here: unlike the
     // method swizzle above (which only patches a class's IMP and needs no
@@ -136,6 +233,6 @@ static void Install(void){
     dispatch_async(dispatch_get_main_queue(),^{
         [UIDevice.currentDevice beginGeneratingDeviceOrientationNotifications];
     });
-    NSLog(@"[MangoUDCamera] INSTALLED 1.0.0 in %@",bundleID?:@"(unknown bundle)");
+    Log(@"INSTALLED 1.1.0");
 }
 __attribute__((constructor)) static void StartCamera(void){@autoreleasepool{Install();}}

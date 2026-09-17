@@ -107,7 +107,7 @@ jobs:
       - name: Upload camera package and build information
         uses: actions/upload-artifact@v4
         with:
-          name: MangoUpsideDownCamera-1.0.0
+          name: MangoUpsideDownCamera-1.1.0
           if-no-files-found: error
           path: |
             camera/packages/*.deb
