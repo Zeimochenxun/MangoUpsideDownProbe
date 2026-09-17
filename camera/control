@@ -1,8 +1,8 @@
 Package: com.chenxun.mangoupsidedowncamera
 Name: MangoUpsideDownCamera
-Version: 1.1.0
+Version: 2.0.0
 Architecture: iphoneos-arm64e
-Description: Experimental: lets any app's camera-facing UI follow physical device inversion on iOS 16.5.
+Description: Experimental AVFoundation capture-orientation fix for portrait-upside-down camera use on iOS 16.5.
 Maintainer: Chen Xun
 Author: Chen Xun
 Section: Tweaks
