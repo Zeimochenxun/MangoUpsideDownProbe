@@ -486,6 +486,7 @@ static UIWindowScene *MainWindowScene(void){
 @interface MWDebugController : NSObject
 - (void)onTap:(UITapGestureRecognizer *)g;
 - (void)onPan:(UIPanGestureRecognizer *)g;
+- (void)onLongPress:(UILongPressGestureRecognizer *)g;
 @end
 static UIWindow *DebugWindow;
 static UIView *DebugBubble;
@@ -521,6 +522,13 @@ static void DebugLayout(void){
     [g setTranslation:CGPointZero inView:DebugWindow];
     if(g.state==UIGestureRecognizerStateEnded||g.state==UIGestureRecognizerStateCancelled)DebugLayout();
 }
+- (void)onLongPress:(UILongPressGestureRecognizer *)g {
+    if(g.state!=UIGestureRecognizerStateBegan)return;
+    UIPasteboard.generalPasteboard.string=DebugPanel.text?:@"";
+    UIColor *was=DebugPanel.backgroundColor;
+    DebugPanel.backgroundColor=[UIColor colorWithWhite:1 alpha:.4];
+    [UIView animateWithDuration:.3 animations:^{DebugPanel.backgroundColor=was;}];
+}
 @end
 static MWDebugController *DebugController;
 static void DebugCreate(void){
@@ -546,13 +554,19 @@ static void DebugCreate(void){
     DebugPanel.backgroundColor=[UIColor colorWithWhite:0 alpha:.85];
     DebugPanel.textColor=UIColor.greenColor;
     DebugPanel.font=[UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightRegular];
-    DebugPanel.editable=NO;DebugPanel.selectable=YES;
+    // Not selectable: long-press below copies everything at once, so
+    // per-character selection (and the loupe UI that would otherwise
+    // contend with our own long-press recognizer for the same gesture)
+    // is unneeded. Scrolling is UIScrollView's own pan recognizer and is
+    // unaffected by selectable.
+    DebugPanel.editable=NO;DebugPanel.selectable=NO;
     DebugPanel.layer.cornerRadius=8;DebugPanel.clipsToBounds=YES;
     DebugPanel.hidden=YES;
     [DebugWindow addSubview:DebugPanel];
     DebugController=[MWDebugController new];
     [DebugBubble addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:DebugController action:@selector(onTap:)]];
     [DebugBubble addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:DebugController action:@selector(onPan:)]];
+    [DebugPanel addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:DebugController action:@selector(onLongPress:)]];
 }
 // Called from Reconcile() on every Tracing transition. Lazily creates the
 // overlay once, then only toggles hidden -- history and bubble position

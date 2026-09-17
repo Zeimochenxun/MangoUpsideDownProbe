@@ -147,7 +147,8 @@ alpha8 的置信度说明留了一个未闭合的问题：`GESTURE` 探测在用
 
 - 新增一个独立的 `UIWindow`（子类 `MWDebugWindow`），窗口层级设到 `UIWindowLevelAlert+100000`，确保盖在系统其它界面之上。窗口本身铺满全屏，但重写了 `hitTest:withEvent:`：只有悬浮球和展开面板这两个真实子视图能接住触摸，其它区域命中到窗口自己时一律返回 `nil`，让触摸穿透到下面的正常界面——这和文件里 `SBFTouchPassThroughView` 这个类名本身要求的行为是同一件事，只是这次是我们自己新建的窗口需要自己满足这个要求。
 - **这个窗口从未被 `Discover()` 登记进 `Roots`**，所以 `ApplyWorld`/`RestoreWorld`/`OwnedContent`/`InsideTurnedRoot` 都不会碰到它：它始终按正常方向渲染，拖动它自己的 `UIPanGestureRecognizer` 也不会被 `TurnDelta`取反（`InsideTurnedRoot` 沿 superview 链找的是带 `MWWorldState` 的 Root，这棵视图树里没有）。这是设计使然，不是需要验证的假设——诊断工具本身必须在被诊断的东西行为异常时仍然可用。
-- 悬浮球可拖动（`UIPanGestureRecognizer`，纯本地状态更新，不涉及任何 World 几何）、点按展开/收起（`UITapGestureRecognizer`）。历史缓冲是一个上限 300 条的 `NSMutableArray`，超出后从最旧的开始丢弃；展开时把整个缓冲拼接显示在一个不可编辑但可选中复制的 `UITextView` 里，每次新记录自动滚动到底部。
+- 悬浮球可拖动（`UIPanGestureRecognizer`，纯本地状态更新，不涉及任何 World 几何）、点按展开/收起（`UITapGestureRecognizer`）。历史缓冲是一个上限 300 条的 `NSMutableArray`，超出后从最旧的开始丢弃；展开时把整个缓冲拼接显示在一个不可编辑的 `UITextView` 里，每次新记录自动滚动到底部。
+- 面板本身设为 `selectable=NO`：长按面板会把当前 `.text`（也就是整份历史）一次性写入 `UIPasteboard.generalPasteboard`，比逐字选择再复制更直接。选择/放大镜交互和这个长按手势是同一类手势（都基于长按），两者同时挂在同一个 `UITextView` 上会相互抢夺识别，所以关掉了前者，只留复制这一个用途；`selectable=NO` 不影响滚动，滚动是 `UITextView` 继承自 `UIScrollView` 的独立手势。复制后面板背景闪一下白色再淡回原色，作为唯一的成功反馈（没有引入 toast/alert 这类更重的 UI）。
 - 只在 `Tracing`（同 alpha9 的文件开关）为真时才创建/显示；关闭时隐藏但不销毁，历史和悬浮球位置保留，重新开启不会重置。创建本身是幂等的（`if(DebugWindow)return;`），从 `Reconcile()`（恒在主线程）里被调用，不会重复初始化。
 - 与几何测试同理，这里全部是运行时 UIKit 对象操作（窗口层级、hitTest、手势、文本视图），不是新的坐标数学，`WorldMath.h`/`world_math_test.c` 不变，无法脱离设备真机验证。
 
