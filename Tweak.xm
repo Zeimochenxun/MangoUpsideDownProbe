@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.10.0-alpha10. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 0.11.0-alpha11. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -717,6 +717,75 @@ static void WindowHookSendEvent(UIWindow *s,SEL c,UIEvent *e){
     WindowSendEvent(s,c,e);
     if(Tracing)TraceTouches(s,e);
 }
+
+// 0.11.0-alpha11: the TOUCH trace above named the real class handling pill
+// drags -- SBSystemApertureLongPressGestureRecognizer, not any
+// UIPanGestureRecognizer subclass. That single fact already explains why
+// alpha7's read-only probe on UIPanGestureRecognizer's translationInView:/
+// velocityInView: logged nothing, and it means alpha8's negation of those
+// same two methods was hooking the wrong class -- it cannot have touched
+// the real swipe-direction bug. This does for the newly-named classes what
+// alpha5/6 did for MangoPillManager: list what each one actually defines,
+// so the next step is reading real method names instead of guessing again.
+static void LogOwnMethods(Class start,NSString *label){
+    if(!start){Log([NSString stringWithFormat:@"CLASSDUMP %@ not-loaded",label]);return;}
+    NSMutableArray<NSString *> *lines=[NSMutableArray array];
+    Class c=start;
+    for(unsigned n=0;c&&n++<8;c=class_getSuperclass(c)){
+        const char *name=class_getName(c);
+        if(!strncmp(name,"NS",2)||!strncmp(name,"UI",2)||!strncmp(name,"OS_",3))break;
+        unsigned count=0;
+        Method *methods=class_copyMethodList(c,&count);
+        for(unsigned i=0;i<count;i++)
+            [lines addObject:[NSString stringWithFormat:@"%s.%s",name,sel_getName(method_getName(methods[i]))]];
+        free(methods);
+    }
+    Log([NSString stringWithFormat:@"CLASSDUMP %@ methods=%@",label,lines.count?[lines componentsJoinedByString:@","]:@"none"]);
+}
+// Read-only probe of the one position API every UIGestureRecognizer
+// subclass responds to regardless of its own class -- locationInView:/
+// locationOfTouch:inView:, both defined on the UIGestureRecognizer base
+// class, unlike translationInView:/velocityInView: which only
+// UIPanGestureRecognizer has. Hooked specifically on
+// SBSystemApertureLongPressGestureRecognizer (MSHookMessageEx scopes the
+// override to this one class even though the real implementation is
+// inherited, the same technique already used elsewhere in this file for
+// setFrame:/setBounds:/setCenter:/setTransform: on PassClass/ContentClass/
+// WindowClass). Calls through unmodified and only logs -- unlike TurnDelta,
+// this makes no claim yet about what a fix here would even mean.
+static void LogLongPressProbe(NSString *api,CGPoint p,NSString *state){
+    static double last;double now=CACurrentMediaTime();
+    if(now-last<=0.05)return;    // a drag calls this many times per frame
+    last=now;
+    NSString *s=[NSString stringWithFormat:@"LPROBE api=%@ point={%.2f,%.2f} state=%@",api,p.x,p.y,state];
+    Log(s);DebugRecord(s);
+}
+static CGPoint (*OrigLongPressLocation)(id,SEL,UIView *);
+static CGPoint HookLongPressLocation(UIGestureRecognizer *self,SEL cmd,UIView *view){
+    CGPoint p=OrigLongPressLocation(self,cmd,view);
+    LogLongPressProbe(@"locationInView:",p,StateName(self.state));
+    return p;
+}
+static CGPoint (*OrigLongPressTouchLocation)(id,SEL,NSUInteger,UIView *);
+static CGPoint HookLongPressTouchLocation(UIGestureRecognizer *self,SEL cmd,NSUInteger idx,UIView *view){
+    CGPoint p=OrigLongPressTouchLocation(self,cmd,idx,view);
+    LogLongPressProbe(@"locationOfTouch:inView:",p,StateName(self.state));
+    return p;
+}
+static void InstallLongPressProbe(void){
+    Class cls=objc_getClass("SBSystemApertureLongPressGestureRecognizer");
+    LogOwnMethods(cls,@"SBSystemApertureLongPressGestureRecognizer");
+    LogOwnMethods(objc_getClass("_SAUIPortalView"),@"_SAUIPortalView");
+    if(!cls)return;
+    NSArray *viewArg=@[@"@"];
+    if(Signature(cls,@selector(locationInView:),@encode(CGPoint),viewArg))
+        MSHookMessageEx(cls,@selector(locationInView:),(IMP)HookLongPressLocation,(IMP *)&OrigLongPressLocation);
+    else Log(@"NO LPROBE: locationInView: signature mismatch");
+    NSArray *touchArgs=@[@(@encode(NSUInteger)),@"@"];
+    if(Signature(cls,@selector(locationOfTouch:inView:),@encode(CGPoint),touchArgs))
+        MSHookMessageEx(cls,@selector(locationOfTouch:inView:),(IMP)HookLongPressTouchLocation,(IMP *)&OrigLongPressTouchLocation);
+    else Log(@"NO LPROBE: locationOfTouch:inView: signature mismatch");
+}
 #define INSTALL_HOOKS(C,P) \
 MSHookMessageEx(C,@selector(layoutSubviews),(IMP)P##HookLayout,(IMP *)&P##Layout); \
 MSHookMessageEx(C,@selector(setFrame:),(IMP)P##HookFrame,(IMP *)&P##Frame); \
@@ -755,6 +824,7 @@ static void Install(void){
     dispatch_source_set_timer(Timer,dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),250*NSEC_PER_MSEC,50*NSEC_PER_MSEC);
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
     InstallGestureFix();
-    Log(@"INSTALLED World 0.10.0-alpha10: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay");Reconcile();
+    InstallLongPressProbe();
+    Log(@"INSTALLED World 0.11.0-alpha11: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay + long-press class probe");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}

@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 0.10.0-alpha10
+# MangoUpsideDownWorld 0.11.0-alpha11
 
 新编写的实验兼容补丁。目标：iPhone 13 mini / iOS 16.5 / Dopamine RootHide / 已核对的 Mango 版本。尚未真机验证，不宣称全场景已修复。
 
@@ -18,7 +18,8 @@ alpha1 真机结果：收起态的岛已经能在倒置下显示在正确位置�
 - alpha7 的真机结果：滑动期间**一行 `GESTURE` 都没记到**，无法区分是没测到还是被私有子类绕过。但另一条推理已足以否定前四版的整条思路：视图的渲染矩阵和触摸坐标矩阵是同一个，所以转任何一层都不可能只翻画面而不同等翻转同子树内读到的坐标——而转 root（alpha1–3）和转窗口（alpha4，窗口已是 World 能触及的最顶层）方向都仍是反的。唯一自洽的解释是：判断方向的代码读的是屏幕**固定坐标系**（物理位置），窗口的 transform 只把窗口摆在那个空间之内、无法重定义它，所以它永远看到手指的真实物理位置，而 World 把岛从物理顶部搬到了物理底部——它仍按"岛在顶部"判断，于是必然一直反。这也解释了"拖动跟手、但上下判定不跟手"：前者持续读位置并经翻转子树渲染、两半相互抵消，后者在固定坐标系里只取一次符号、从不经过那次翻转。
 - 所以 alpha8 **第一次真正尝试修复方向**，且不再动几何：在那个固定坐标系增量进入岛手势处理的唯一入口处取反——仅当 `UIPanGestureRecognizer` 自身的 `.view` 位于某个正在翻转的 root 子树内时，对 `translationInView:`/`velocityInView:` 的返回值取反（x/y 都取，因为半周旋转同时反转两轴）。世界未翻转、已 SUSPEND、非主线程或非有限值一律原样透传。**这个修复基于推理而非观测**：如果真正的读数者是重写了这两个方法的私有子类、或读的是 `UITouch` 原始位置，alpha8 不会有任何可观测变化、方向依旧反——那是有信息量的结果而不是回归。
 - alpha9 是纯诊断工具，不改变任何已有行为、不是新的修复尝试：新增运行时开关 `MangoUpsideDownWorld.trace`（建法同 `.disabled`），开启后在灵动岛所在窗口的 `sendEvent:` **之后**（不影响命中测试和分发本身）记录每次触摸的阶段、window/fixed 两种坐标、命中视图类名，以及该视图沿父链收集到的全部手势识别器——每个都带真实运行时类名、state、numberOfTouches。已有的 `GESTURE` 行也补上了识别器的真实类名。这样不必再靠推理：即使真正处理拖动的是重写了 `translationInView:`/`velocityInView:` 的私有子类，也能直接从 `TOUCH` 行的 `recognizers` 列表里看到那个类名。
-- alpha10 同样是纯诊断工具：把 alpha9 这些记录同时喂给一个新增的屏幕悬浮球，不用再靠 Filza/SSH 事后去翻日志文件。悬浮球可拖动、显示已捕获行数，点一下展开成一块可滚动的面板，直接在屏幕上看完整历史；再点一下收起。这个悬浮窗是完全独立的 `UIWindow`，World 从不把它当作 Root 登记，因此本文件里所有几何/手势 hook 都不会作用到它自己身上。详见 EVIDENCE.md。
+- alpha10 同样是纯诊断工具：把 alpha9 这些记录同时喂给一个新增的屏幕悬浮球，不用再靠 Filza/SSH 事后去翻日志文件。悬浮球可拖动、显示已捕获行数，点一下展开成一块可滚动的面板，直接在屏幕上看完整历史；再点一下收起；长按面板一次性复制全部历史到剪切板。这个悬浮窗是完全独立的 `UIWindow`，World 从不把它当作 Root 登记，因此本文件里所有几何/手势 hook 都不会作用到它自己身上。
+- **alpha11 的关键突破**：真机 `TOUCH` 追踪日志第一次给出了处理灵动岛拖动的真实类名——`SBSystemApertureLongPressGestureRecognizer`，不是任何 `UIPanGestureRecognizer` 子类。这一件事本身就解释了 alpha7 那次"一行 GESTURE 都没记到"的空探测：不是没测到，是 hook 打错了类——`translationInView:`/`velocityInView:` 是 `UIPanGestureRecognizer` 专有的方法，这个真正干活的类根本不响应它们。也意味着 alpha8 那次取反修复，即使真机上"看起来"方向对了，理论上也不可能是那次取反本身在起作用（它 hook 的方法在这条路径上从未被调用）。本版新增对新发现的两个类（`SBSystemApertureLongPressGestureRecognizer`、日志里同时出现的 `_SAUIPortalView`）做一次性方法列表探测（做法同 alpha5/6 对 `MangoPillManager` 那次），以及对这个手势类的 `locationInView:`/`locationOfTouch:inView:`（`UIGestureRecognizer` 基类都有的公开方法，不像 `translationInView:` 那样专属于 pan）加了只读探测 hook——纯读、不改行为，看它是否真的走这两个方法读位置。详见 EVIDENCE.md。
 
 ## 先准备恢复途径，再安装
 
@@ -64,6 +65,11 @@ TOUCH phase=Moved window={187.3,42.1} fixed={187.3,769.9} view=SomeClass recogni
 - 已有的 `GESTURE` 行现在也带上了 `class=`，同样是识别器的真实运行时类名，一并显示在悬浮面板里。
 
 全程只读：`sendEvent:` 的 hook 在调用原始实现**之后**才读取，不改变命中测试、分发顺序或任何返回值；悬浮球本身是一个独立的 `UIWindow`，World 从不把它登记为 Root，因此本文件其它几何/手势修正逻辑都不会作用到它，与修复逻辑完全独立。悬浮面板最多保留最近 300 条，文件日志仍受现有 512KB 轮转限制。
+
+alpha11 额外新增两类日志，装上后自动记一次/持续记录，不需要额外开关：
+
+- `CLASSDUMP <类名> methods=...`：装上时记一次，列出 `SBSystemApertureLongPressGestureRecognizer` 和 `_SAUIPortalView` 各自真正定义（不是继承）的全部方法名。
+- `LPROBE api=... point={x,y} state=...`：只要这个真实的手势类调用了 `locationInView:` 或 `locationOfTouch:inView:`（`UIGestureRecognizer` 所有子类都有的公开取位置方法），就会记一条，同时也会出现在悬浮面板里。**如果拖动灵动岛时这一行完全不出现**，说明这个类读位置根本不走这两个方法（很可能是重写了 `touchesMoved:` 之类，直接用原始 `UITouch` 坐标）——这本身就是有价值的结果，不是探测失败。
 
 ## 编译
 

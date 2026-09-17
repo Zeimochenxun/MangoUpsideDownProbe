@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 0.10.0-alpha10：证据与边界
+# MangoUpsideDownWorld 0.11.0-alpha11：证据与边界
 
 这是本次新实现，不是从关联对话中取回的既有 World 源码，也不是给 Fix alpha2 改名。
 
@@ -151,6 +151,31 @@ alpha8 的置信度说明留了一个未闭合的问题：`GESTURE` 探测在用
 - 面板本身设为 `selectable=NO`：长按面板会把当前 `.text`（也就是整份历史）一次性写入 `UIPasteboard.generalPasteboard`，比逐字选择再复制更直接。选择/放大镜交互和这个长按手势是同一类手势（都基于长按），两者同时挂在同一个 `UITextView` 上会相互抢夺识别，所以关掉了前者，只留复制这一个用途；`selectable=NO` 不影响滚动，滚动是 `UITextView` 继承自 `UIScrollView` 的独立手势。复制后面板背景闪一下白色再淡回原色，作为唯一的成功反馈（没有引入 toast/alert 这类更重的 UI）。
 - 只在 `Tracing`（同 alpha9 的文件开关）为真时才创建/显示；关闭时隐藏但不销毁，历史和悬浮球位置保留，重新开启不会重置。创建本身是幂等的（`if(DebugWindow)return;`），从 `Reconcile()`（恒在主线程）里被调用，不会重复初始化。
 - 与几何测试同理，这里全部是运行时 UIKit 对象操作（窗口层级、hitTest、手势、文本视图），不是新的坐标数学，`WorldMath.h`/`world_math_test.c` 不变，无法脱离设备真机验证。
+
+## 0.11.0-alpha11：真机 TOUCH 日志给出真实类名，否定了 alpha8 赖以成立的前提
+
+用户用 alpha10 的悬浮追踪工具在真机上做了多次点按/拖动，日志里的 `TOUCH` 行第一次给出了处理灵动岛触摸的真实类名：
+
+```
+TOUCH phase=Began window={164.8,65.0} fixed={203.3,744.3} view=_SAUIPortalView recognizers=SBSystemApertureLongPressGestureRecognizer(state=Began,touches=1),_UISystemGestureGateGestureRecognizer(state=Possible,touches=1),_UISystemGestureGateGestureRecognizer(state=Possible,touches=0)
+```
+
+两个新事实：
+
+1. **`SBSystemApertureLongPressGestureRecognizer`**——命中视图父链上真实挂载的手势识别器之一，从类名判断极可能是 `UILongPressGestureRecognizer` 的私有子类，**不是** `UIPanGestureRecognizer` 的子类。Objective-C 是单继承，一个类不可能同时是这两者的子类；如果这个类名判断成立，它就根本不会响应 `translationInView:`/`velocityInView:`——这两个方法只在 `UIPanGestureRecognizer` 上有定义，不在 `UIGestureRecognizer` 基类上。
+2. **`_SAUIPortalView`**——命中视图的真实类名，此前从未在任何日志或静态分析里出现过。`SA` 前缀与已知的 `SBSystemAperture*` 系列命名一致（`SBSystemApertureWindow`/`SBSystemApertureContainerView`），说明灵动岛的可视内容除了已知的 `_SBSystemApertureContainerViewContentView` 之外，触摸命中的还有这一层，此前完全未知。
+
+**这两件事一起，直接否定了 alpha8 赖以成立的前提**：alpha8 的整套推理建立在"读数者是某个 `UIPanGestureRecognizer`（或其未覆写这两个方法的子类）"之上，据此把 hook 打在了 `UIPanGestureRecognizer` 类对象本身。如果真正处理拖动的识别器是 `SBSystemApertureLongPressGestureRecognizer`，它的方法解析完全在 `UILongPressGestureRecognizer → UIGestureRecognizer` 这条独立的继承链上，与 `UIPanGestureRecognizer` 的类对象和方法表毫无关联（Objective-C 的方法调度按接收者自身的类走各自的继承链，两条链之间不存在任何交叉）——`InsideTurnedRoot`/`TurnDelta` 挂的 hook 在这条路径上不可能被调用一次。这也是本次日志里**完全没有出现 `GESTURE` 行**的直接解释：不是没有做拖动测试，是这两个 hook 打在了错的类上，从一开始就不可能被触发。同时这也让 alpha7 那次"一行都没记到"的空探测第一次有了确定的解释，而不再是"没测到"和"被私有子类绕过"两种可能之间悬而未决——现在可以确定是后者，而且知道了具体是哪个类。
+
+**alpha8 的修复本身不必回退**：`TurnDelta` 的取反逻辑只在 `InsideTurnedRoot(view)` 为真时生效，而这个判定走的是 `view.superview` 链找 `MWWorldState`，与被 hook 的是哪个手势类无关——但既然这条 hook 路径本身从未被调用，它在实际拖动时从未执行取反，"是否触发过取反"和"手指方向是否已经修好"这两件事目前完全没有被这份日志验证过，仍然是悬案。
+
+本版新增两类只读探测，做法沿用本文件一直坚持的方法论（先看真实运行时状态，再决定往哪一步走，不猜测行为语义）：
+
+- `LogOwnMethods()`：对 `SBSystemApertureLongPressGestureRecognizer` 和 `_SAUIPortalView` 各做一次方法列表转储，用法与 alpha6 对 `MangoPillManager` 的 `ProbeMangoPillManager()`（该函数本身在 alpha7 被移除，但方法沿用）完全一致：沿类自身的 superclass 链，遇到 `NS`/`UI`/`OS_` 前缀的苹果框架类就停（最多 8 层），只列每一层**直接定义**（`class_copyMethodList`，不含继承）的方法名，装上后各跑一次，不区分是否开启 `Tracing`。
+- `LogLongPressProbe()` + 对 `SBSystemApertureLongPressGestureRecognizer` 的 `locationInView:`/`locationOfTouch:inView:` 的只读 hook：这两个方法定义在 `UIGestureRecognizer` 基类上，任何子类（不论是 pan 还是 long press）都响应，不像 `translationInView:` 那样专属于某一个具体子类——如果这个类的方向判断代码是靠反复调用这两个方法读位置、自己在内部做差分，这里就会看到调用；如果完全看不到，说明它走的是别的路径（大概率是重写了 `touchesBegan:`/`touchesMoved:` 之类的私有实现，直接用原始 `UITouch` 坐标）。用 `MSHookMessageEx` 直接把 hook 挂在这个具体的类对象上——即使这两个方法的真实实现是继承自 `UIGestureRecognizer` 从未被这个子类覆写，`MSHookMessageEx` 也只影响这一个类，不会波及其他任何调用同名继承方法的类；这正是本文件里 `INSTALL_HOOKS` 宏一直在用的同一个技术（`layoutSubviews`/`setFrame:`/`setBounds:`/`setCenter:`/`setTransform:` 在 `PassClass`/`ContentClass`/`WindowClass` 上大多也是继承自 `UIView` 而非自己覆写的）。调用原始实现、原样返回，不改变任何行为，只记录：`LPROBE api=... point={x,y} state=...`。
+- 两者都是新增的诊断能力，不修改 `WorldMath.h`/`world_math_test.c`，也不修改任何几何/手势修正逻辑本身——`TurnDelta`/`ApplyWorld`/`ContentHookTransform` 未变。
+
+**下一步该看什么**：真机装上本版后重新做一次拖动测试，重点看两类新日志：`CLASSDUMP` 会给出这两个类真正暴露的方法名（如果其中有类似 `_updateWithTranslation`/`handleDrag` 之类看起来像方向判断入口的名字，就是下一个该 hook 的候选）；`LPROBE` 有没有出现决定了"这个类到底怎么读位置"——有的话说明确实经过 `locationInView:`/`locationOfTouch:inView:`，可以在这个入口上重复 alpha8 的取反逻辑；完全没有则说明要换成 hook 这个类自己的私有方法（`CLASSDUMP` 列出的名字就是候选来源），而不是任何 `UIGestureRecognizer` 公开 API。
 
 ## 尚未处理
 
