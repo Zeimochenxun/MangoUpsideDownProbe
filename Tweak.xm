@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 1.0.0. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 1.0.1. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -343,42 +343,18 @@ static void ProbeContentStructure(void){
         }
     }
 }
-// 1.0.0: read-only diagnostic for the Face ID lock-screen ask -- no confirmed
-// private class name for the biometric prompt view was found ahead of time,
-// so per this file's own established rule (guess a class and hook it blind
-// only after a real device log names it, never before -- alpha1-8's whole
-// lesson on the pill), this only looks and logs. Reuses CollectClasses
-// exactly as ProbeContentStructure does, just rooted at a different window
-// instead of Mango's content view. Independent of Enabled/active/orientation
-// entirely (unlike ProbeContentStructure): the lock screen exists and can be
-// probed regardless of whether the pill itself is currently being tracked or
-// turned, so this is gated only by Tracing, the same as ProbeOtherWindows.
-// Filtered to window class names containing "CoverSheet" or "DashBoard" --
-// SBCoverSheetWindow is confirmed present on this exact device from this
-// repo's own alpha14 SPLITPROBE log data; "DashBoard" is an unconfirmed
-// second candidate family since the window actually hosting the Face ID
-// prompt is unknown. Rate-limited independently (~2s) rather than sharing
-// TraceTouches'/LogGestureFix's 0.05s throttle: this has nothing to do with
-// touch/frame cadence, and windows worth walking here don't change that
-// fast.
-static NSMutableSet<NSString *> *SeenLockScreenShapes;
-static void ProbeLockScreenViews(void){
-    static double last;double now=CACurrentMediaTime();
-    if(now-last<=2)return;
-    last=now;
-    if(!SeenLockScreenShapes)SeenLockScreenShapes=[NSMutableSet set];
-    for(UIWindow *w in ExistingWindows()){
-        NSString *wcls=NSStringFromClass(w.class);
-        if(![wcls containsString:@"CoverSheet"]&&![wcls containsString:@"DashBoard"])continue;
-        NSMutableSet<NSString *> *classes=[NSMutableSet set];
-        CollectClasses(w,0,classes);
-        NSString *joined=[[classes.allObjects sortedArrayUsingSelector:@selector(compare:)] componentsJoinedByString:@","];
-        NSString *key=[wcls stringByAppendingString:joined];
-        if([SeenLockScreenShapes containsObject:key])continue;
-        [SeenLockScreenShapes addObject:key];
-        Log([NSString stringWithFormat:@"LOCKPROBE window=%@ classes=%@",wcls,joined]);
-    }
-}
+// 1.0.0 added a read-only LOCKPROBE diagnostic here to hunt for the Face ID
+// lock-screen prompt's real class name. Real-device research after that
+// (see EVIDENCE.md) found that iPhone's Face ID has never supported the
+// upside-down orientation at all -- unlike iPad, and unlike iPhone 13+'s
+// landscape support added in iOS 16 -- and that the actual face/depth
+// matching happens inside the Secure Enclave, a boundary this file (or any
+// SpringBoard-level code) cannot see into or affect. Finding the prompt
+// view's class name would only ever have enabled a cosmetic fix; it could
+// never make authentication itself succeed while inverted. Once that made
+// the diagnostic's target moot, it was removed here -- the same call this
+// file already made for ProbeMangoPillManager() once alpha7 ruled out
+// MangoPillManager as unrelated to the pill's gesture handling.
 static void Reconcile(void){
     if(Busy||Depth||![NSThread isMainThread])return;
     Busy=YES;
@@ -393,7 +369,6 @@ static void Reconcile(void){
             BOOL active=Enabled&&Orientation()==UIInterfaceOrientationPortraitUpsideDown;
             DebugSetTurned(active);
             if(Tracing)ProbeOtherWindows();
-            if(Tracing)ProbeLockScreenViews();
             if(!active)return;
             for(UIWindow *w in ExistingWindows())Discover(w);
             for(UIWindow *w in Windows.allObjects)Discover(w);
@@ -827,6 +802,23 @@ static void InstallGestureFix(void){
 // while inverted); every other call is untouched. But the risk category
 // itself -- a system-wide singleton, not something private to Mango's own
 // UI -- is genuinely different from every prior hook in this file.
+//
+// 1.0.1 real-device feedback reversed the target this substitutes. The
+// original ask read as "lock while inverted should snap back to portrait,"
+// which is what the first cut did. A real-device test then clarified the
+// actual intent: World's whole purpose is comfortable use while physically
+// inverted, so orientation lock -- whose ordinary job, in every other
+// single orientation, is "stay where I currently am, don't auto-rotate away"
+// -- should keep the device locked AT the inverted orientation the user is
+// actually viewing, not force it back to portrait out from under them. The
+// same real-device pass also clarified why the Home Screen's own landscape
+// test forced portrait regardless of any hook: the Home Screen does not
+// support landscape at all in this project's scope (no homeScreenRotationStyle
+// hook here), so -lock had no valid landscape target and fell back --
+// which says nothing about what unmodified -lock would have done while
+// inverted, since PortraitUpsideDown genuinely IS a supported orientation
+// here (via the separate inversion plugin this project has always
+// cooperated with, never reimplemented). See EVIDENCE.md.
 static Class OrientationLockClass;
 static BOOL OrientationLockFixOK=YES;
 static SEL LockWithArgSel;
@@ -834,20 +826,22 @@ static void (*OrigLockNoArg)(id,SEL);
 static void (*OrigLockWithArg)(id,SEL,long long);
 // The no-arg -lock is the one a Control Center toggle almost certainly
 // calls, since the toggle itself has no orientation argument to pass. When
-// the device is currently inverted, calling the original no-arg
-// implementation would lock at that inverted orientation -- instead this
-// calls the ORIGINAL -lock: implementation directly (OrigLockWithArg, not
-// through self, so this does not re-enter HookLockWithArg's own logging as
-// though it were a distinct external call) with the public
-// UIInterfaceOrientationPortrait constant, correcting the lock target
-// itself to upright. Every other case (not inverted, or Orientation()
-// returns -1/unknown) calls straight through to the untouched original --
-// a byte-for-byte passthrough for the overwhelmingly common case.
+// the device is currently inverted, this calls the ORIGINAL -lock:
+// implementation directly (OrigLockWithArg, not through self, so this does
+// not re-enter HookLockWithArg's own logging as though it were a distinct
+// external call) with the public UIInterfaceOrientationPortraitUpsideDown
+// constant, explicitly pinning the lock target to the orientation the user
+// is actually viewing rather than leaving it to whatever the unmodified
+// no-arg implementation would have picked on its own (never independently
+// confirmed, since this hook has always intercepted it). Every other case
+// (not inverted, or Orientation() returns -1/unknown) calls straight
+// through to the untouched original -- a byte-for-byte passthrough for the
+// overwhelmingly common case.
 static void HookLockNoArg(id self,SEL cmd){
     if(!OrientationLockFixOK){OrigLockNoArg(self,cmd);return;}
     if(Orientation()==UIInterfaceOrientationPortraitUpsideDown){
-        Log(@"ORIENTATIONLOCK forced-to-portrait");
-        OrigLockWithArg(self,LockWithArgSel,(long long)UIInterfaceOrientationPortrait);
+        Log(@"ORIENTATIONLOCK forced-to-upsidedown");
+        OrigLockWithArg(self,LockWithArgSel,(long long)UIInterfaceOrientationPortraitUpsideDown);
         return;
     }
     OrigLockNoArg(self,cmd);
@@ -1055,6 +1049,6 @@ static void Install(void){
     InstallGestureFix();
     InstallLongPressProbe();
     InstallOrientationLockFix();
-    Log(@"INSTALLED World 1.0.0: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay (all log lines, now itself turned) + long-press class probe + other-window inversion probe (aperture window included) + content structure probe + orientation-lock fix + lock-screen probe");Reconcile();
+    Log(@"INSTALLED World 1.0.1: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay (all log lines, now itself turned) + long-press class probe + other-window inversion probe (aperture window included) + content structure probe + orientation-lock fix (locks at inverted, not portrait)");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}

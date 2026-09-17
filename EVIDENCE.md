@@ -1,8 +1,10 @@
-# MangoUpsideDownWorld 1.0.0：证据与边界
+# MangoUpsideDownWorld 1.0.1：证据与边界
 
 这是本次新实现，不是从关联对话中取回的既有 World 源码，也不是给 Fix alpha2 改名。
 
 **关于 1.0.0 这次版本重排**：alpha14 之后曾经有 alpha15/15b/15c 三个版本（手动开关 `ManualOn`、全局 `UITouch` 定位 hook、音量键长按改造），目的是继续追灵动岛拖动方向问题；但那个手动开关本身在真机上一直点不动（`ARM READY` 有、`ARM TAP` 没有），问题定位到"触摸没到这个视图还是识别器没触发"这一步就没再继续。用户决定放下这条还没查完的线，把代码内容退回到 alpha14（`git checkout <alpha14 commit> -- .`，新提交，不是重写历史，alpha15 系列的三个提交完整保留在 git log 里），在这个更简单、已经稳定的基础上做两个跟灵动岛无关的新需求。版本号相应从 `0.X.0-alphaN` 换成独立的 `1.0.0` 起点，避免跟仓库历史上已经用过的 `alpha2` 混淆。悬浮球、长按一键复制、`SPLITPROBE`/`CONTENTDUMP` 等诊断工具全部原样保留——这次两个新功能的日志同样都经过 `Log()`，会自动进入长按复制的历史里，不需要额外接线。
+
+**1.0.1 是 1.0.0 装机真机反馈后的一次修正**：方向锁定的目标从"倒置时强制转正"改成了"倒置时锁在倒置状态"；Face ID 锁屏诊断被证实此路不通（Face ID 本身在架构层面就不支持倒置，见下方对应小节），已从代码里移除，不再是"待完成"事项。
 
 ## 已证实的输入
 
@@ -237,32 +239,35 @@ alpha14 的修法分两处，而不是简单地"不再跳过这个窗口"：
 
 同时确认了网上最常被提到的强制转屏手法——`[UIDevice setValue:forKey:@"orientation"]`——**在 iOS 16 上已经被苹果官方明确废掉**（苹果论坛版主原话："这个技巧不应该被使用……现在已经被修复，不再有任何效果"），所以这次完全没有用这个思路。
 
-修法：新增 `InstallOrientationLockFix()`，hook `SBOrientationLockManager` 的无参数 `-lock`（Control Center 那个开关本身没有方向参数可传，大概率调的就是这个）。每次调用时读 `Orientation()`（这个文件已有的、读取 Mango 当前方向报告的函数）：
+修法（1.0.0 初版）：新增 `InstallOrientationLockFix()`，hook `SBOrientationLockManager` 的无参数 `-lock`（Control Center 那个开关本身没有方向参数可传，大概率调的就是这个）。每次调用时读 `Orientation()`（这个文件已有的、读取 Mango 当前方向报告的函数）：倒置状态下不调用原始无参数实现，改为直接调用原始的带参数实现 `-lock:`，传入 `UIInterfaceOrientationPortrait`，把锁定目标本身纠正成正向；其它情况原样调用原始实现。
 
-- **如果是倒置状态**：不调用原始的无参数实现，改为直接调用原始的带参数实现 `-lock:`，传入 `UIInterfaceOrientationPortrait`（公开 UIKit 枚举值），把锁定目标本身纠正成正向。
-- **其它情况**（不是倒置，或者 `Orientation()` 返回未知）：原样调用原始实现，完全不受影响。
+同时对带参数的 `-lock:` 单独挂了一个**只读观察 hook**，只记日志（`ORIENTATIONLOCK explicit-lock target=... currentOrientation=...`）、永远原样放行——用来收集真实数据：万一 Control Center 的开关实际调用的不是无参数版本，或者还有别的调用方（比如相机的方向锁定），这条日志能看出来。这个观察 hook 在 1.0.1 里原样保留，没有改动。
 
-同时对带参数的 `-lock:` 单独挂了一个**只读观察 hook**，只记日志（`ORIENTATIONLOCK explicit-lock target=... currentOrientation=...`）、永远原样放行——用来收集真实数据：万一 Control Center 的开关实际调用的不是无参数版本，或者还有别的调用方（比如相机的方向锁定），这条日志能看出来。
+**这次改动的性质需要单独说清楚**：`SBOrientationLockManager` 是**这个文件历史上第一个不属于 Mango、而是整台手机共用的系统级单例**——之前所有 hook（`PassClass`/`ContentClass`/`WindowClass`/`SBSystemApertureLongPressGestureRecognizer` 等）都严格限定在已用真机日志验证过、只服务于 Mango 灵动岛自己的私有类上，出错的影响面天生被限定在灵动岛身上；这次挂的方法是 Control Center 开关、相机方向锁定等任何东西调用 `-lock` 都会经过的同一个对象。缓解手段是行为上的、不是结构上的：只有真的检测到"当前是倒置状态"这一个条件成立时才会真的改变行为，其它时候是原样透传——但风险的**类别**本身（系统级单例 vs. Mango 专属类）跟之前任何一次 hook 都不一样，这一点已经在实现前明确告知用户，由用户自己判断可以接受。这条结论在 1.0.1 依然成立，1.0.1 只改了检测到倒置后具体锁定到哪个方向，风险类别本身没变。
 
-**这次改动的性质需要单独说清楚**：`SBOrientationLockManager` 是**这个文件历史上第一个不属于 Mango、而是整台手机共用的系统级单例**——之前所有 hook（`PassClass`/`ContentClass`/`WindowClass`/`SBSystemApertureLongPressGestureRecognizer` 等）都严格限定在已用真机日志验证过、只服务于 Mango 灵动岛自己的私有类上，出错的影响面天生被限定在灵动岛身上；这次挂的方法是 Control Center 开关、相机方向锁定等任何东西调用 `-lock` 都会经过的同一个对象。缓解手段是行为上的、不是结构上的：只有真的检测到"当前是倒置状态"这一个条件成立时才会真的改变行为，其它时候是原样透传——但风险的**类别**本身（系统级单例 vs. Mango 专属类）跟之前任何一次 hook 都不一样，这一点已经在实现前明确告知用户，由用户自己判断可以接受。
+**Face ID 锁屏：没查到确切类名，加了只读探测——后续证实这条路线走不通，1.0.1 已移除**
 
-**Face ID 锁屏：没查到确切类名，只加只读探测**
+两轮搜索都没找到锁屏 Face ID 提示界面对应的确切私有类名，所以最初不猜测下手，只加了诊断（`ProbeLockScreenViews()`，复用 `Tracing` 开关，扫描类名带 `CoverSheet`/`DashBoard` 的窗口，记录内部真实视图类名为 `LOCKPROBE` 日志）。真机测试拿到了完整的 `SBCoverSheetWindow` 视图树，逐个核对后没有任何类名带 "Biometric"/"FaceID"/"Auth"/"Nudge" 字样，`DashBoard` 前缀全程零命中。
 
-两轮搜索都没找到锁屏 Face ID 提示界面对应的确切私有类名，所以这次不猜测下手，只加诊断。新增 `ProbeLockScreenViews()`，复用已有的 `Tracing` 开关（跟 `TraceTouches`/`ProbeOtherWindows` 同一个开关，不需要新建文件），大约每 2 秒跑一次（这个探测跟触摸/帧率节奏无关，不需要用 `TraceTouches` 那种 0.05 秒节流）：
+用户随后指出一个更根本的问题：**iPhone 的 Face ID 摄像头本身是不是在识别倒置这件事上有硬性限制，不只是界面朝向问题**。查证结果确认了这一点：苹果官方支持文档明确写着 Face ID 在 iPhone 上只支持竖屏（早期机型）或竖屏+横屏（iPhone 13 及以后、iOS 16 及以后），从未提到支持倒置；iPad 则支持任意方向——这是平台级别的既有差异，不是这次装了什么补丁才出现的限制。更关键的是，真正的人脸/深度数据匹配发生在 **Secure Enclave**（跟主处理器物理隔离的独立安全协处理器）内部，SpringBoard 进程里的任何代码（包括这份文件能做的一切）从架构上就看不到、碰不到这个匹配过程。用户随后真机在倒置状态下实测面容解锁，确认识别失败，与这条限制的预期完全吻合。
 
-- 遍历 `ExistingWindows()`（已有函数），只挑类名里带 `CoverSheet` 或 `DashBoard` 的窗口——`SBCoverSheetWindow` 已经在这份仓库自己的 alpha14 `SPLITPROBE` 真机日志里确认存在过；`DashBoard` 是第二个未经证实的候选前缀，因为具体是哪个窗口在承载 Face ID 提示目前未知。
-- 命中的窗口，复用已有的 `CollectClasses()`（`ProbeContentStructure()` 已经在用的同一个函数）递归收集内部**真实存在**的全部视图类名，去重后记一条 `LOCKPROBE window=<类名> classes=<列表>`。
-- 去重键是"窗口类名+这次找到的完整类名集合"，跟 `CONTENTDUMP`/`SPLITPROBE` 同样的设计：如果这个集合后来变了（比如 Face ID 提示出现时新增了视图），会重新记一次，不会被更早、更短的一次记录挡住。
-- 独立于 `Enabled`/`active`/方向状态——锁屏界面的存在与否跟灵动岛本身是否在被追踪/转动完全无关，只要开着 trace 就会跑。
+结论：就算继续追下去、真的找到锁屏提示界面的类名并且改成正向显示，这也只能是纯视觉上的美化，无法让"倒置状态下解锁成功"这件事真的发生——这不是本文件的 hook 能力范围内能解决的问题，继续投入时间找类名不会带来任何实际效果。1.0.1 移除了 `ProbeLockScreenViews()` 及其调用点，跟 alpha7 发现 `MangoPillManager` 跟灵动岛手势无关后移除 `ProbeMangoPillManager()` 是同一个判断标准：一旦确认某条诊断的目标已经不可能达成，就不再留着占地方。
 
-这一步纯粹是诊断，不 hook、不改变任何行为，跟 `SPLITPROBE`/`ProbeOtherWindows` 是同一个安全等级。装机后需要真机验证：倒置状态下锁屏、触发一次 Face ID，把 `LOCKPROBE` 日志发回来，才能看出真正承载 Face ID 提示的类名，跟 alpha11 用 `CLASSDUMP`+`LPROBE` 把猜测变成 `SBSystemApertureLongPressGestureRecognizer` 是同一个思路——先看真实运行时状态，再决定往哪一步走。
+## 1.0.1：方向锁定的目标反过来——锁在倒置，而不是强制转正
+
+用户装机测试 1.0.0 后反馈了两件事，共同促成了这次反转：
+
+1. **横屏测试的结果不能说明倒置那边的行为对不对**：用户在**不支持横屏的主页面**上测试方向锁定，同样观察到"强制转正"。但主屏幕本身在这个项目的范围内根本不支持横屏（没有类似 `homeScreenRotationStyle` 这类允许主屏转横屏的 hook），所以横屏时点锁定，`-lock` 找不到一个"横屏"这个合法目标可以用，只能退回正向——这跟"锁定本来就会强制转正"是完全不同的两件事：一个是"目标选项根本不存在，只能落回默认"，另一个才是这次真正要处理的、倒置这个**已经是合法方向**（靠这台设备上另一个独立的倒置插件）时会发生什么。这条测试结果不能用来反推倒置状态下不装这次的 hook 会发生什么。
+2. **真正的需求被重新表述了一遍**：最初的措辞是"倒置时锁定应该强制翻回正向"，但重新对齐后，用户明确的意图其实是相反的——World 这整个项目存在的目的就是让手机倒过来也能舒服使用，方向锁定这个功能在其它任何一个方向上的作用都是"保持我现在看到的方向，不要再自动转走"，所以倒置时它理应也是同一个作用：**锁定在倒置状态**，而不是把界面强行拉回正向、违背用户此刻正在倒置查看的意图。
+
+修法：`HookLockNoArg` 检测到 `Orientation()==UIInterfaceOrientationPortraitUpsideDown` 时，调用 `OrigLockWithArg` 传入的目标从 `UIInterfaceOrientationPortrait` 改为 `UIInterfaceOrientationPortraitUpsideDown`——只改了这一个常量，其它逻辑（`Signature()` 校验、`OrientationLockFixOK` 兜底、对带参数版本的只读观察 hook）原样不变。对应日志字符串同步改为 `ORIENTATIONLOCK forced-to-upsidedown`。
 
 ## 尚未处理
 
 - 岛落到屏幕底部。alpha2 加了跳过原因日志，未改判定。需要真机复现后读 `SKIP` 行才能定性；另需确认异常时岛内文字对倒置视角是正还是倒，以区分是 Mango 的方向状态问题还是 World 的几何判定问题。
-- 灵动岛拖动方向问题本身停在 alpha14 已有的结论上（`LPROBE` 几乎不触发，怀疑走的是 `UITouch` 自己的 `locationInView:`/`previousLocationInView:`）——alpha15 系列曾经尝试推进这一点，但因为手动开关本身的真机 bug 没查完就被搁置，这次的 1.0.0 没有继续这条线，也没有回退掉 alpha15 的诊断结论，只是暂不基于那份代码继续。
-- 1.0.0 新增的方向锁定修复尚未真机验证：`SBOrientationLockManager` 的方法签名是否与假设一致（`Signature()` 检查通过与否）、Control Center 开关到底调用哪个方法、修复后开关本身的视觉状态是否和实际锁定状态保持一致，均需真机确认。
-- 1.0.0 新增的 `LOCKPROBE` 诊断尚未真机验证，Face ID 提示界面的真实类名仍未知。
+- 灵动岛拖动方向问题本身停在 alpha14 已有的结论上（`LPROBE` 几乎不触发，怀疑走的是 `UITouch` 自己的 `locationInView:`/`previousLocationInView:`）——alpha15 系列曾经尝试推进这一点，但因为手动开关本身的真机 bug 没查完就被搁置，这次的 1.0.0/1.0.1 没有继续这条线，也没有回退掉 alpha15 的诊断结论，只是暂不基于那份代码继续。
+- **Face ID 跟随倒置——已确认放弃，不是"尚未处理"**：真正的限制在 Face ID 认证流程本身（Secure Enclave 边界 + iPhone 平台从未支持倒置识别），不是这份文件能触及的范围，本节列出仅为存档，不再等待后续动作。
+- 1.0.1 的方向锁定修复（锁在倒置状态）尚未真机验证：需要确认 `ORIENTATIONLOCK forced-to-upsidedown` 是否出现、锁定后界面是否真的保持倒置不被自动转走、Control Center 开关本身的视觉状态是否和实际锁定状态一致。
 
 ## 保留风险
 
