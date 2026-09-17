@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 0.11.0-alpha11
+# MangoUpsideDownWorld 0.12.0-alpha12
 
 新编写的实验兼容补丁。目标：iPhone 13 mini / iOS 16.5 / Dopamine RootHide / 已核对的 Mango 版本。尚未真机验证，不宣称全场景已修复。
 
@@ -70,6 +70,8 @@ alpha11 额外新增两类日志，装上后自动记一次/持续记录，不�
 
 - `CLASSDUMP <类名> methods=...`：装上时记一次，列出 `SBSystemApertureLongPressGestureRecognizer` 和 `_SAUIPortalView` 各自真正定义（不是继承）的全部方法名。
 - `LPROBE api=... point={x,y} state=...`：只要这个真实的手势类调用了 `locationInView:` 或 `locationOfTouch:inView:`（`UIGestureRecognizer` 所有子类都有的公开取位置方法），就会记一条，同时也会出现在悬浮面板里。**如果拖动灵动岛时这一行完全不出现**，说明这个类读位置根本不走这两个方法（很可能是重写了 `touchesMoved:` 之类，直接用原始 `UITouch` 坐标）——这本身就是有价值的结果，不是探测失败。
+
+alpha12：`Log()` 本身现在会把每一行同时喂给悬浮面板——这是本文件里所有日志的唯一出口，之前只有 `TOUCH`/`GESTURE`/`LPROBE` 这几类显式接了悬浮面板，`CLASSDUMP`、`TRACK`、`WORLD`、`SKIP`、`CONFLICT`、`HIT fallback` 等其它类型的行只写进了文件、没进面板。现在不用再区分"这行到底进不进面板"：装上后展开面板、长按复制，拿到的就是完整历史，等价于日志文件从开始追踪到现在的全部内容（受同样的 300 条上限）。
 
 ## 编译
 

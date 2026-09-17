@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.11.0-alpha11. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 0.12.0-alpha12. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -22,9 +22,12 @@ static BOOL Enabled, Installed, Busy, Tracing;
 static unsigned Depth, Attempts, HitDepth;
 static dispatch_source_t Timer;
 static char StateKey;
-// Forward declaration: the floating debug overlay is defined near the
-// gesture-trace code below, but Reconcile() (defined first) toggles its
-// visibility on every Tracing transition.
+// Forward declarations: the floating debug overlay is defined near the
+// gesture-trace code below, but Log() (defined first, and the single choke
+// point every call site in this file already goes through) mirrors every
+// line into its history, and Reconcile() toggles its visibility on every
+// Tracing transition.
+static void DebugRecord(NSString *line);
 static void DebugSetVisible(BOOL visible);
 
 // Patch-owned state classes, NOT names extracted from Mango.
@@ -47,6 +50,11 @@ static void DebugSetVisible(BOOL visible);
 
 static void Log(NSString *s) {
     NSLog(@"[MangoUDWorld] %@",s);
+    // Every call site funnels through here, so mirroring into the debug
+    // overlay's history at this single point (rather than at each of this
+    // file's Log() call sites) is what keeps the floating panel and the log
+    // file in parity by construction, including at call sites added later.
+    DebugRecord(s);
     mkdir("/var/mobile/Library/Logs",0755);
     int fd=open("/var/mobile/Library/Logs/MangoUpsideDownWorld.log",O_WRONLY|O_CREAT|O_APPEND|O_NOFOLLOW,0600);
     if(fd<0)return;
@@ -595,15 +603,13 @@ static void LogGestureFix(NSString *api,NSString *cls,CGPoint raw,CGPoint flippe
     static double last;double now=CACurrentMediaTime();
     if(now-last<=0.05)return;    // a drag calls this many times per frame
     last=now;
-    NSString *s=[NSString stringWithFormat:@"GESTURE api=%@ class=%@ raw={%.2f,%.2f} turned={%.2f,%.2f}",api,cls,raw.x,raw.y,flipped.x,flipped.y];
-    Log(s);DebugRecord(s);
+    Log([NSString stringWithFormat:@"GESTURE api=%@ class=%@ raw={%.2f,%.2f} turned={%.2f,%.2f}",api,cls,raw.x,raw.y,flipped.x,flipped.y]);
 }
 static void LogGestureSkip(NSString *api,NSString *cls,UIView *view){
     static double last;double now=CACurrentMediaTime();
     if(now-last<=1)return;
     last=now;
-    NSString *s=[NSString stringWithFormat:@"GESTURE SKIP api=%@ class=%@ view=%@ reason=outside-turned-root",api,cls,NSStringFromClass(view.class)];
-    Log(s);DebugRecord(s);
+    Log([NSString stringWithFormat:@"GESTURE SKIP api=%@ class=%@ view=%@ reason=outside-turned-root",api,cls,NSStringFromClass(view.class)]);
 }
 // Negate both axes of a fixed-space delta read inside the turned world. Guard
 // non-finite values rather than propagate them, matching how every geometry
@@ -702,9 +708,8 @@ static void TraceTouches(UIWindow *w,UIEvent *e){
     for(UITouch *t in e.allTouches){
         CGPoint win=[t locationInView:w];
         CGPoint fx=isfinite(win.x)&&isfinite(win.y)?[w convertPoint:win toCoordinateSpace:fixed]:win;
-        NSString *s=[NSString stringWithFormat:@"TOUCH phase=%@ window={%.1f,%.1f} fixed={%.1f,%.1f} view=%@ recognizers=%@",
-            PhaseName(t.phase),win.x,win.y,fx.x,fx.y,NSStringFromClass(t.view.class),RecognizerDump(t.view)];
-        Log(s);DebugRecord(s);
+        Log([NSString stringWithFormat:@"TOUCH phase=%@ window={%.1f,%.1f} fixed={%.1f,%.1f} view=%@ recognizers=%@",
+            PhaseName(t.phase),win.x,win.y,fx.x,fx.y,NSStringFromClass(t.view.class),RecognizerDump(t.view)]);
     }
 }
 // Strictly read-only: calls through to the original sendEvent: FIRST and
@@ -754,11 +759,14 @@ static void LogOwnMethods(Class start,NSString *label){
 // WindowClass). Calls through unmodified and only logs -- unlike TurnDelta,
 // this makes no claim yet about what a fix here would even mean.
 static void LogLongPressProbe(NSString *api,CGPoint p,NSString *state){
+    // Unlike TurnDelta's own callers, nothing upstream of this one already
+    // checked the thread -- and Log() now unconditionally touches the debug
+    // overlay's UILabel/UITextView, which is not thread-safe.
+    if(![NSThread isMainThread])return;
     static double last;double now=CACurrentMediaTime();
     if(now-last<=0.05)return;    // a drag calls this many times per frame
     last=now;
-    NSString *s=[NSString stringWithFormat:@"LPROBE api=%@ point={%.2f,%.2f} state=%@",api,p.x,p.y,state];
-    Log(s);DebugRecord(s);
+    Log([NSString stringWithFormat:@"LPROBE api=%@ point={%.2f,%.2f} state=%@",api,p.x,p.y,state]);
 }
 static CGPoint (*OrigLongPressLocation)(id,SEL,UIView *);
 static CGPoint HookLongPressLocation(UIGestureRecognizer *self,SEL cmd,UIView *view){
@@ -825,6 +833,6 @@ static void Install(void){
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
     InstallGestureFix();
     InstallLongPressProbe();
-    Log(@"INSTALLED World 0.11.0-alpha11: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay + long-press class probe");Reconcile();
+    Log(@"INSTALLED World 0.12.0-alpha12: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay (all log lines) + long-press class probe");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}

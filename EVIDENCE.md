@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 0.11.0-alpha11：证据与边界
+# MangoUpsideDownWorld 0.12.0-alpha12：证据与边界
 
 这是本次新实现，不是从关联对话中取回的既有 World 源码，也不是给 Fix alpha2 改名。
 
@@ -176,6 +176,18 @@ TOUCH phase=Began window={164.8,65.0} fixed={203.3,744.3} view=_SAUIPortalView r
 - 两者都是新增的诊断能力，不修改 `WorldMath.h`/`world_math_test.c`，也不修改任何几何/手势修正逻辑本身——`TurnDelta`/`ApplyWorld`/`ContentHookTransform` 未变。
 
 **下一步该看什么**：真机装上本版后重新做一次拖动测试，重点看两类新日志：`CLASSDUMP` 会给出这两个类真正暴露的方法名（如果其中有类似 `_updateWithTranslation`/`handleDrag` 之类看起来像方向判断入口的名字，就是下一个该 hook 的候选）；`LPROBE` 有没有出现决定了"这个类到底怎么读位置"——有的话说明确实经过 `locationInView:`/`locationOfTouch:inView:`，可以在这个入口上重复 alpha8 的取反逻辑；完全没有则说明要换成 hook 这个类自己的私有方法（`CLASSDUMP` 列出的名字就是候选来源），而不是任何 `UIGestureRecognizer` 公开 API。
+
+## 0.12.0-alpha12：让悬浮面板真正拿到"全部"日志，不只是几类显式接了的行
+
+用户反馈：本想只靠"长按悬浮面板"这一步就把所有诊断信息发出来，不用再碰 Filza/SSH。但 alpha10-11 里悬浮面板只是被动接收——`DebugRecord()` 只在 `LogGestureFix`/`LogGestureSkip`/`TraceTouches`/`LogLongPressProbe` 这四个具体调用点被显式调用，`Log()` 本身不知道悬浮面板的存在。这意味着 `CLASSDUMP`（alpha11 这次最需要看的那两行）、`TRACK`、`WORLD`、`SKIP`、`CONFLICT`、`HIT fallback` 等其它所有日志类型都只写进了文件，长按面板拿到的是不完整的子集——且这个子集会随着以后新增日志类型继续悄悄漏掉新的种类，因为"要不要接入面板"变成了每个调用点各自决定的事。
+
+修法是把 `DebugRecord(s)` 的调用从这四个具体函数里移进 `Log()` 自身：`Log()` 是本文件目前 25+ 处日志调用**唯一**的出口（每一行不管来自哪个函数，最终都调用 `Log(NSString *s)`），在这一个点上镜像进悬浮面板的历史，就让"文件日志"和"悬浮面板"在结构上永远保持一致——不是靠记住给每个新日志点都加一遍 `DebugRecord`，而是这件事根本不需要再做。原来四个调用点各自的 `Log(s);DebugRecord(s);` 简化回单独的 `Log(s)`，避免重复记录同一行两次。
+
+`Log()`（第 51 行）的定义在文件里出现得早于 `DebugRecord()`（约第 588 行）和 `DebugSetVisible()`（约第 574 行）的定义，所以在文件顶部（`StateKey` 之后）为这两个函数各加了一条前向声明——这与 `DebugSetVisible` 本身在 alpha10 就已经需要的前向声明是同一个原因、同一种写法。
+
+**新发现的线程安全缺口**：`DebugRecord()` 会直接写 `UILabel.text`/`UITextView.text`，这两个都是 UIKit 对象，只能在主线程访问。alpha11 引入的 `LogLongPressProbe()`（喂 `LPROBE` 行）是当时**唯一**一个在调用 `DebugRecord` 之前没有先检查 `[NSThread isMainThread]` 的路径——`LogGestureFix`/`LogGestureSkip` 的调用方 `TurnDelta` 已经检查过，`TraceTouches` 只在 UIKit 主线程分发事件时被调用。既然现在 `Log()` 本身无条件触达悬浮面板，这个缺口本身变得更容易踩到（虽然它在 alpha11 就已经存在，不是这次改动引入的），顺手在 `LogLongPressProbe` 里补了同样的主线程检查。文件里其它所有 `Log()` 调用点都已经确认位于某个更外层的主线程检查之后（`Reconcile()`/`Begin()`/`WorldHit()`/`ContentHookTransform()`/`Install()` 各自的入口检查），不需要重复加。
+
+不影响任何几何或手势判定逻辑——`WorldMath.h`、`ApplyWorld`、`ContentHookTransform`、`TurnDelta` 均未改动，这一版纯粹是诊断链路本身的完整性修复。
 
 ## 尚未处理
 
