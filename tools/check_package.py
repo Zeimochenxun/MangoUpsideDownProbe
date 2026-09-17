@@ -46,17 +46,23 @@ def check(path):
     data = tar_files(next(v for k, v in members.items() if k.startswith("data.tar")))
     fields = dict(line.split(": ", 1) for line in control["control"].decode().splitlines()
                   if ": " in line and not line.startswith(" "))
-    require(fields.get("Package") == "com.chenxun.mangoupsidedownworld", "wrong package ID")
+    require(fields.get("Package") == "com.chenxun.systemflipprobe", "wrong package ID")
     require(fields.get("Architecture") == "iphoneos-arm64e", "wrong RootHide package architecture")
     require(set(control).issubset({"control", "md5sums"}), "unexpected package scripts")
     by_name = {Path(k).name: v for k, v in data.items()}
-    require(len(data) == 2 and set(by_name) == {"MangoUpsideDownWorld.dylib", "MangoUpsideDownWorld.plist"},
-            "unexpected payload; original Mango must never be included")
-    plist = plistlib.loads(by_name["MangoUpsideDownWorld.plist"])
-    require(plist == {"Filter": {"Bundles": ["com.apple.springboard"]}}, "unexpected injection filter")
-    dylib = by_name["MangoUpsideDownWorld.dylib"]
+    expected = {"SystemFlipProbeSB.dylib", "SystemFlipProbeSB.plist", "SystemFlipProbeBB.dylib", "SystemFlipProbeBB.plist", "systemflip-capture"}
+    require(len(data) == 5 and set(by_name) == expected, "unexpected payload")
+    for name, process in [("SystemFlipProbeSB", "SpringBoard"), ("SystemFlipProbeBB", "backboardd")]:
+        require(plistlib.loads(by_name[name + ".plist"]) == {"Filter": {"Executables": [process]}}, "wrong injection scope")
+    for name in ["SystemFlipProbeSB.dylib", "SystemFlipProbeBB.dylib", "systemflip-capture"]:
+        check_macho(name, by_name[name], 2 if name == "systemflip-capture" else 6)
+    print(f"PASS {path.name}: RootHide, two scoped probes and capture tool, no maintainer scripts")
+    print("Build and package checks do not verify on-device behavior.")
+
+
+def check_macho(name, dylib, expected_kind):
     magic, cpu, subtype, kind, ncmds, sizeofcmds, flags, reserved = struct.unpack_from("<8I", dylib)
-    require(magic == 0xfeedfacf and cpu == 0x0100000c and subtype & 0xffffff == 2 and kind == 6,
+    require(magic == 0xfeedfacf and cpu == 0x0100000c and subtype & 0xffffff == 2 and kind == expected_kind,
             "expected a thin arm64e Mach-O dylib")
     pos = 32
     rpaths, dependencies = [], []
@@ -72,14 +78,13 @@ def check(path):
             offset, length = struct.unpack_from("<II", dylib, pos + 8)
             signed = length > 0 and offset + length <= len(dylib)
         pos += size
-    require(
-        any(".jbroot" in p for p in rpaths) or
-        any(".jbroot" in p for p in dependencies),
-        "missing RootHide .jbroot linkage",
-    )
+    if expected_kind == 6:
+        require(any(".jbroot" in p for p in rpaths + dependencies), "missing RootHide .jbroot linkage")
     require(not any(p.startswith("/var/jb/") for p in dependencies), "unexpected hardcoded rootless dependency")
     require(signed, "missing embedded code-signature data")
-    print(f"PASS {path.name}: {fields['Architecture']}, arm64e, SpringBoard only, two payload files, signature data present")
+    if name == "SystemFlipProbeBB.dylib":
+        require(not any("UIKit" in p for p in dependencies), "backboardd must not load UIKit")
+    print(f"PASS {name}: arm64e, signature data present")
     print("RPATH:", rpaths)
     print("DEPENDENCIES:", dependencies)
     print("This checks package structure; it does not prove on-device ABI or behavior.")

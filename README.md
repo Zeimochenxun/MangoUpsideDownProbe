@@ -1,46 +1,82 @@
-# MangoUpsideDownWorld 0.8.0-alpha8
+# SystemFlipProbe 0.1.0 — 整屏反转的只读诊断
 
-新编写的实验兼容补丁。目标：iPhone 13 mini / iOS 16.5 / Dopamine RootHide / 已核对的 Mango 版本。尚未真机验证，不宣称全场景已修复。
+目标设备：iPhone 13 mini / iOS 16.5 / Dopamine RootHide。
 
-采用完整灵动岛根视图倒置、内部重复旋转抵消及窗口触摸命中补偿。正常竖屏和横屏不施加倒置。仅注入 SpringBoard；不修改 Mango 原版，不涉及授权或付费逻辑。
+这是只读诊断包：读取显示服务器、SpringBoard 窗口和坐标转换，写入两份日志。**它不会改变显示方向，不会修复倒置，也不处理或生成触摸。** 未在真机运行验证；构建通过仅证明编译和包结构检查通过。
 
-## 本版相对之前版本的变化
+## 为什么改走这一条路线
 
-alpha1 真机结果：收起态的岛已经能在倒置下显示在正确位置，但触控期间岛内内容会倒置、松手或动画结束后恢复；触控方向上下颠倒；少数情况下岛仍落在屏幕底部。
+已核对 UpsideDowned 开源源码和上传的 arm64/arm64e 二进制：它放开 SpringBoard 的方向限制，没有直接设置最终显示变换。下一步要判断：倒置时系统窗口如何旋转、CAWindowServerDisplay 是否改变方向，以及系统上下文之间的坐标转换如何变化。详细地址和证据见 `docs/UPSIDEDOWNED_REVIEW.md`。
 
-- alpha2 修了触控期间内容倒置：alpha1 在原始 setter 之后才把内容层改回正向，而 Mango 是在动画块里写这个 transform 的，UIKit 已按“正向 → 倒置”建好动画，后写的模型值改不了动画终点，于是整段动画都朝倒置插值。alpha2 改为在 `setTransform:` 里先把传入值规范化再交给原始实现。
-- alpha2 引入了新问题：长按激活、展开态关闭时会闪现一次旋转动画（关闭时是慢速的倒置转正向）。原因是 alpha2 的 hook 仍调用了 `Begin`，会在真正调用之前同步把内容层写回 Mango 的原始倒置值，这个写回本身不产生动画，但会成为紧接着那次动画调用的起点，于是 Core Animation 把“倒置→正向”做成了一次可见动画。
-- alpha3 修了这个问题：内容层的 `setTransform:` hook 不再调用 `Begin`/`End`，不在替换之前做任何同步写回，模型层在两次调用之间始终停留在正向一侧。
-- alpha4 修了触控方向上下颠倒的**一部分**：之前三个版本都是转 root（灵动岛内部的一个视图），窗口本身从未被转，导致拿窗口/固定坐标算手势方向的代码和拿 content 内部坐标算的方向正好相反。alpha4 改成转窗口本身，位置和内容朝向的效果不变，但窗口现在也和 root/content 一致地转了半周。
-- 真机复验发现：拖动跟手了，但上下滑动判断依旧反。这说明问题不完全在坐标系——很可能是 Mango 自己内部有一段判断"这是上滑还是下滑"的代码，不经过任何坐标转换，只看一次性符号。alpha5 加了一段只读探测：通过读取 `mango.dylib` 自身的方法名字符串（同一批二进制，UUID 已核对），找出几个名字上最可能相关的候选方法（`pillSwipeDownAction`/`pillSwipeUpAction`/`dismissPill` 等），运行时找出真正实现它们的类并记入日志。
-- alpha5 的真机结果：`pillSwipeDownAction`/`pillSwipeUpAction` 零匹配，现在判断这两个其实是 Mango 设置界面里的配置控件，不是手势代码，这条线索排除；`mango_prepareTopDismissReverseGeometryForInteractiveMirror` 挂在应用资源库选择器上，跟灵动岛无关，也排除。唯一坐实的是 **`MangoPillManager`**（定义了 `dismissPill`/`dismissPillAnimated:`），是岛控制器类的强候选。alpha6 把探测从"猜名字"改成直接列出 `MangoPillManager` 自身及其父类链定义的全部方法。
-- alpha6 的真机结果：`MangoPillManager` 全部 17 个方法都是内容生命周期/通知处理，没有任何 pan/touch/gesture 方法——排除了 Mango 自己的代码。alpha7 改成运行时实时抓，对上述两个公开方法只记日志、不改行为。
-- alpha7 的真机结果：滑动期间**一行 `GESTURE` 都没记到**，无法区分是没测到还是被私有子类绕过。但另一条推理已足以否定前四版的整条思路：视图的渲染矩阵和触摸坐标矩阵是同一个，所以转任何一层都不可能只翻画面而不同等翻转同子树内读到的坐标——而转 root（alpha1–3）和转窗口（alpha4，窗口已是 World 能触及的最顶层）方向都仍是反的。唯一自洽的解释是：判断方向的代码读的是屏幕**固定坐标系**（物理位置），窗口的 transform 只把窗口摆在那个空间之内、无法重定义它，所以它永远看到手指的真实物理位置，而 World 把岛从物理顶部搬到了物理底部——它仍按"岛在顶部"判断，于是必然一直反。这也解释了"拖动跟手、但上下判定不跟手"：前者持续读位置并经翻转子树渲染、两半相互抵消，后者在固定坐标系里只取一次符号、从不经过那次翻转。
-- 所以本版（alpha8）**第一次真正尝试修复方向**，且不再动几何：在那个固定坐标系增量进入岛手势处理的唯一入口处取反——仅当 `UIPanGestureRecognizer` 自身的 `.view` 位于某个正在翻转的 root 子树内时，对 `translationInView:`/`velocityInView:` 的返回值取反（x/y 都取，因为半周旋转同时反转两轴）。世界未翻转、已 SUSPEND、非主线程或非有限值一律原样透传。**这个修复基于推理而非观测**：如果真正的读数者是重写了这两个方法的私有子类、或读的是 `UITouch` 原始位置，本版不会有任何可观测变化、方向依旧反——那是有信息量的结果而不是回归。详见 EVIDENCE.md。
+采集使用真实的公开运行时头文件所列 getter；每次调用前核对设备上的 Objective-C 参数及返回类型。不匹配就记录 SKIP。只调用 `serverIfRunning`，不创建显示服务器。不调用 `setOrientation:`，不调用未经确认 ABI 的 BackBoardServices C 函数，不 Hook 系统方法。backboardd 版本不链接 UIKit。
 
-## 先准备恢复途径，再安装
+## 安装前：准备恢复
 
-1. 在手机仍正常时，确认电脑能通过 SSH 登录该手机，并保持终端连接；同时确认能从 Dopamine 关闭 tweak 注入后重新越狱。没有可用的恢复途径时先不要装。
-2. 若安装后屏幕仍响应，但位置/触摸异常：用 Filza 在 `/var/mobile/Library/Preferences/` 新建空文件 `MangoUpsideDownWorld.disabled`。主线程正常时约 0.25 秒检测到，恢复可确认属于本补丁的变换；删除标记并 respring 才重新启用。
-3. SSH 可用时，先在 RootHide 的越狱终端环境中运行 `command -v dpkg` 确认包管理命令存在，再用 root 执行 `dpkg -r com.chenxun.mangoupsidedownworld`，随后用已安装的越狱工具 respring。不要在 Windows PowerShell 本地执行 dpkg。
-4. 若卡住/循环重启且 SSH 不可用：按音量加、音量减，然后持续按侧键至 Apple 标志强制重启；在未启用 tweak 注入的越狱状态下移除 World。关闭注入的具体控件以设备上的 Dopamine 界面为准。
-5. Filza 手动恢复时，在 RootHide 当前真实 `.jbroot-…` 下找到 `Library/MobileSubstrate/DynamicLibraries/`，将 **MangoUpsideDownWorld.plist** 改为 `.plist.disabled` 后重新启动 SpringBoard；如实际包使用另一注入目录，以 `dpkg -L com.chenxun.mangoupsidedownworld` 清单为准。不要猜随机 jbroot 路径，不要删除 mango.dylib / MangoOSRendering.dylib。
+1. 先保证另一台设备能通过 SSH 进入手机的 RootHide 越狱环境，并能在提权终端运行 `dpkg`。保持连接。没有这一条件，先不要测试向 backboardd 注入的新包。
+2. 记录卸载命令：`dpkg -r com.chenxun.systemflipprobe`。必须在手机的 RootHide 环境、具有包管理权限的终端执行；不是在电脑本地执行。
+3. 若注入后黑屏或失去触摸，但 SSH 仍在线，执行上述卸载命令，然后通过你已验证的方式重启用户空间。删除磁盘上的 dylib 不会立即卸载进程中已经加载的代码。
+4. 若 SSH 也不可用：iPhone 13 mini 快按音量加、快按音量减，再持续按住侧边键直到 Apple 标志。Dopamine 重启后需要重新越狱；重新越狱时先关闭 tweak 注入，再卸载本包。不要仅依赖 SpringBoard 安全模式来处理 backboardd 问题。
+5. 如需手动禁用，只处理包清单中的 `SystemFlipProbeSB.dylib/.plist`、`SystemFlipProbeBB.dylib/.plist`。用 `dpkg -L com.chenxun.systemflipprobe` 查询真实位置；不要猜 RootHide 随机根目录，也不要删 Mango 文件。
 
-## 安装与验收
+读取操作仍可能暴露系统私有接口的不兼容，Objective-C 异常捕获不能拦截所有原生崩溃，因此保留上述恢复方式。
 
-- 先卸载 MangoUpsideDownFix 并 respring；建议停用旧 Probe 以减少高频日志。保留 Mango 和原来的倒置插件。World 包声明与 Fix 冲突，运行时也拒绝同时加载 Fix。
-- 安装本包的 `iphoneos-arm64e.deb`，这是原生 RootHide 包，不要再次进行 rootless→RootHide 转换。
-- 安装后 respring。先测普通竖屏和横屏，确认行为与安装前一致，再进入倒置。
-- 本版**第一次改触控行为**，重点复验这一条：在倒置下手指在灵动岛上下滑动，触发的动作是否与手指方向一致。**顺带务必测一次左右方向**（本版同时取反了 x 轴）：左右滑动、以及展开态的左右排列和左右向操作是否仍然正常——如果左右反倒被弄反了，请立刻说，这条要单独退掉。
-- 同时确认前几版已修好的没有回归：长按激活、展开、关闭全程岛内文字图标保持正向、没有旋转闪动；收起态位置正确；拖动跟手。
-- 取日志找 `GESTURE` 行：本版记的是 `GESTURE api=... raw={x,y} turned={x,y}`，`raw` 是系统原值、`turned` 是取反后交给 Mango 的值。这些行只在倒置下滑动时才出现。**如果方向修好了，把有 `GESTURE` 行的日志发回来**；**如果方向依旧是反的，请特别说明日志里有没有 `GESTURE` 行**——没有的话说明我们 hook 的方法根本没被调用，那条推理就被推翻了，下一步要换方向查（见 EVIDENCE.md 的置信度说明）。
-- 再分别验证：收起岛、通知、音乐/计时器、展开、收起；检查文字图标、左右排列、展开方向、点击、长按、拖动和岛外穿透；最后转回竖屏。
-- 若要复现岛落到底部：锁屏后在音乐播放状态点亮屏幕，随后取日志查 `SKIP` 行。同时请记录异常时岛内文字对倒置视角是正还是倒 —— 这一条用于区分是 Mango 的方向状态问题还是 World 的几何判定问题。
-- 日志位于 `/var/mobile/Library/Logs/MangoUpsideDownWorld.log`。`WORLD` 仅证明变换已应用；`SKIP` 说明该轮未施加修正及原因；`HIT fallback` 仅证明窗口回退命中；都不是功能全通过。`NO HOOKS` / `CONFLICT` / `SUSPEND` 表示没有启用或已停止。
-- 如果没有 `TRACK` / `WORLD`，不要叠加更多补丁强制生效：这表示当前窗口结构/方向/版本未满足保护条件。
+## 安装与采集
 
-## 编译
+1. 若正在使用旧的 MangoUpsideDownWorld / MangoUpsideDownFix，先停用它们，排除它们添加的窗口和手势变换。保留已购买的 Mango 和原来的 UpsideDowned。
+2. 从压缩包的 `packages/` 安装唯一的 `.deb`，用你当前的 RootHide 包管理器。不要把源码、plist 或 dylib 直接拖进系统目录。包原生按 RootHide Theos 编译，无需再次从 rootless 转换。
+3. 本包没有安装后强制重启脚本。安装后使用当前环境已验证的“重启用户空间”方式使 SpringBoard 与 backboardd 都重新加载；只重启 SpringBoard 可能不会加载 BB 模块。或者重启设备后重新越狱。
+4. 在手机上保持桌面可见，从另一台设备的 SSH 终端运行下面的命令。每次保持对应状态至少 6 秒。命令中的标签只是你对现场状态的记录，不会切换方向。
 
-工程使用 RootHide Theos、iOS 16.5 SDK、Apple Clang（macOS），`ARCHS=arm64e`，`THEOS_PACKAGE_SCHEME=roothide`。运行 `make package FINALPACKAGE=1`。CI 校验 SDK 哈希、拒绝 incompatible arm64e ABI 警告并审查 deb 内容。
+```sh
+systemflip-capture portrait
+```
 
-GitHub Actions 构建产物包含 deb、编译日志、load commands 和 SHA256。源码在本分支；不包含付费 Mango 二进制。更多原理与已知不足见 EVIDENCE.md。
+将手机倒置，确认原 UpsideDowned 已使桌面倒置，保持桌面可见，再执行：
+
+```sh
+systemflip-capture upside-down
+```
+
+转回正常竖屏再执行一次 `systemflip-capture portrait`。如需补充横屏和锁屏，分别执行 `systemflip-capture landscape`、`systemflip-capture lock-screen`。
+
+每次请求采集 0、2、5 秒三个快照。命令显示 Capture requested 只证明通知已发出，必须检查两份日志都有本次 CAPTURE/END 行。如果提示 command not found，用包管理环境中的 `dpkg -L com.chenxun.systemflipprobe` 找到 `systemflip-capture` 的实际路径；不要照抄另一台设备的 RootHide 路径。
+
+## 需要返回的内容
+
+- `/var/mobile/Library/Logs/SystemFlipProbe-SpringBoard.log`
+- `/var/mobile/Library/Logs/SystemFlipProbe-backboardd.log`
+- 对应正放、倒置状态的屏幕照片，以及是否开启方向锁定的说明。
+
+若该目录无法写入，模块会尝试 `/tmp/` 下同名文件。日志权限为 0600，backboardd 的文件可能需要提权的 Filza/SSH 读取。没有 BB 日志时先确认是否加载，不能据此推断系统没有显示服务器；不要扩大到所有进程注入。
+
+日志最多约 2 MiB，达到上限会清空后继续。没有截图、窗口内容、键盘文字、原始触摸记录或网络上传；只记录类名、几何、方向、方法类型和上下文标识。
+
+## 结果如何使用
+
+- SB 场景方向变了、BB 显示方向不变：支持当前在客户端窗口/场景层转动的判断，仍要检查窗口矩阵。
+- BB 显示方向也变了：比较变更时机及 MAP 记录，确认是否已有显示层参与，避免再次转动造成抵消。
+- MAP 的往返结果一致：只证明两种上下文转换自洽，**不证明物理触摸已被正确反转**。
+- `serverIfRunning=nil`、缺方法或 SKIP：保留日志作为下一轮定位依据，不自动尝试创建服务器或调用替代 setter。
+
+下一阶段才是有超时恢复的短时显示反转试验，并核验物理触摸、边缘手势、锁屏、唤醒和应用切换。仅发现 `setOrientation:` 或旋转常量不能保证 iOS 16.5 内屏和全部覆盖层都支持该用法。
+
+## 构建
+
+使用 RootHide 的 Theos、兼容现代 arm64e ABI 的 Apple clang，以及 iOS 16.5 SDK：
+
+```sh
+make clean
+make package FINALPACKAGE=1
+```
+
+`THEOS` 指向你实际安装的 RootHide Theos。工程使用 `THEOS_PACKAGE_SCHEME=roothide`、`ARCHS=arm64e`。不要把普通 rootless 包仅改 Architecture 字段当成转换完成。GitHub 工作流负责构建、检查注入范围/载荷/签名区域/架构，记录 SDK 校验值及编译器版本。
+
+## API 来源
+
+- [UpsideDowned 源码，固定提交](https://github.com/34306/upsidedowned/blob/b542ebe44305d12e19126d7d5481e6f4ab05615a/Tweak.xm)
+- [CAWindowServer](https://github.com/nst/iOS-Runtime-Headers/blob/master/Frameworks/QuartzCore.framework/CAWindowServer.h)
+- [CAWindowServerDisplay](https://github.com/nst/iOS-Runtime-Headers/blob/master/Frameworks/QuartzCore.framework/CAWindowServerDisplay.h)
+- [UIWindow `_contextId`](https://github.com/nst/iOS-Runtime-Headers/blob/master/PrivateFrameworks/UIKitCore.framework/UIWindow.h)
+- [RootHide Theos](https://github.com/roothide/theos)
+
+这些公开头文件不是本机 iOS 16.5 的 ABI 保证；本包将设备实际方法类型写进日志，并严格核对后才调用 getter。

@@ -1,0 +1,525 @@
+{
+  "file": "upsidedowned-review-arm64e.dylib",
+  "size": 69856,
+  "sha256": "8e7cb9bc829e268f90f316f0a7603c02261379f1f63c30e3055961771a9882cd",
+  "header": "Magic: 0xfeedfacf\nCPU: ARM64\nCPU subtype: 0x80000002\nFile type: DYLIB (0x6)\nFlags: 1048709\nReserved: 0x0\nNb cmds: 22\nSizeof cmds: 1872",
+  "commands": [
+    "Command: SEGMENT_64\nOffset:  0x20\nSize:    0x228\nname=__TEXT, vaddr=0x000000, vsize=0x8000 offset=0x000000, size=32768, max protection=5, init protection=5 flags=0",
+    "Command: SEGMENT_64\nOffset:  0x248\nSize:    0xe8\nname=__DATA_CONST, vaddr=0x008000, vsize=0x4000 offset=0x008000, size=16384, max protection=3, init protection=3 flags=16",
+    "Command: SEGMENT_64\nOffset:  0x330\nSize:    0xe8\nname=__DATA, vaddr=0x00c000, vsize=0x4000 offset=0x00c000, size=16384, max protection=3, init protection=3 flags=0",
+    "Command: SEGMENT_64\nOffset:  0x418\nSize:    0x48\nname=__LINKEDIT, vaddr=0x010000, vsize=0x4000 offset=0x010000, size=4320, max protection=1, init protection=1 flags=0",
+    "Command: ID_DYLIB\nOffset:  0x460\nSize:    0x58\nname=/Library/MobileSubstrate/DynamicLibraries/upsidedowned.dylib, timestamp=1, current_version=0.0.0,  compatibility_version=0.0.0",
+    "chained fixups header\nfixups_version = 0\nstarts_offset  = 32\nimports_offset = 104\nsymbols_offset = 112\nimports_count  = 2\nimports_format = IMPORT\nsymbols_format = 0\nchained start in image\nseg_count = 4\n  seg_offset[0] = 000 (__TEXT)\n  seg_offset[1] = 024 (__DATA_CONST)\n  seg_offset[2] = 048 (__DATA)\n  seg_offset[3] = 000 (__LINKEDIT)\nchained starts in segment 1 (__DATA_CONST)\nsize              = 24\npage_size         = 0x4000\npointer_format    = PTR_ARM64E_USERLAND24\nsegment_offset    = 0x8000\nmax_valid_pointer = 0x0\npage_count        = 1\n  page_start[0] = 0\n\n\nchained starts in segment 2 (__DATA)\nsize              = 24\npage_size         = 0x4000\npointer_format    = PTR_ARM64E_USERLAND24\nsegment_offset    = 0xc000\nmax_valid_pointer = 0x0\npage_count        = 1\n  page_start[0] = 0\n\n[RELOC] 0x0000c000: 0x000043f8\n[RELOC] 0x0000c008: 0x0000440b\n[RELOC] 0x0000c010: 0x0000442e\n[RELOC] 0x0000c018: 0x0000443f\n[RELOC] 0x0000c020: 0x00004457\n[RELOC] 0x0000c028: 0x00004467\n\nchained imports\n__DATA_CONST0x00008000: _objc_getClass (libobjc.A.dylib) addend: 0x0\n__DATA_CONST0x00008008: _MSHookMessageEx (libsubstrate.dylib) addend: 0x0\n",
+    "Command: DYLD_EXPORTS_TRIE\nOffset:  0x4c8\nSize:    0x10\noffset=0x010098, size=0x000008",
+    "Command: SYMTAB\nOffset:  0x4d8\nSize:    0x18\nsymbol offset=0x0100b0, nb symbols=63\nstring offset=0x0104b0, string size=1672",
+    "Command: DYSYMTAB\nOffset:  0x4f0\nSize:    0x50\nFirst local symbol index            : 0x0\nNumber of local symbols             : 0x3d\nExternal symbol index               : 0x3d\nNumber of external symbols          : 0x0\nUndefined symbol index              : 0x3d\nNumber of undefined symbols         : 0x2\nTable of content offset             : 0x0\nNumber of entries in TOC            : 0x0\nModule table offset                 : 0x0\nNumber of entries in module table   : 0x0\nExternal reference table offset     : 0x0\nNumber of external reference        : 0x0\nIndirect symbols offset             : 0x104a0\nNumber of indirect symbols          : 0x4\nExternal relocation offset          : 0x0\nNumber of external relocations      : 0x0\nLocal relocation offset             : 0x0\nNumber of local relocations         : 0x0\n",
+    "Command: UUID\nOffset:  0x540\nSize:    0x18\nfc 6b b4 da 12 01 43 48 b9 6c c2 de e9 51 28 6b  ",
+    "Command: BUILD_VERSION\nOffset:  0x558\nSize:    0x20\nPlatform: IOS\nMin OS:   14.0.0\nSDK:      17.2.0\n  LD (1022.1.0)\n",
+    "Command: SOURCE_VERSION\nOffset:  0x578\nSize:    0x10\nVersion: 0.0.0.0.0",
+    "Command: ENCRYPTION_INFO_64\nOffset:  0x588\nSize:    0x18\ncrypt offset=0x004000, crypt size=0x004000, crypt id=0",
+    "Command: LOAD_DYLIB\nOffset:  0x5a0\nSize:    0x38\nname=/usr/lib/libobjc.A.dylib, timestamp=2, current_version=228.0.0,  compatibility_version=1.0.0",
+    "Command: LOAD_DYLIB\nOffset:  0x5d8\nSize:    0x58\nname=/System/Library/Frameworks/Foundation.framework/Foundation, timestamp=2, current_version=2202.0.0,  compatibility_version=300.0.0",
+    "Command: LOAD_DYLIB\nOffset:  0x630\nSize:    0x60\nname=/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation, timestamp=2, current_version=2202.0.0,  compatibility_version=150.0.0",
+    "Command: LOAD_DYLIB\nOffset:  0x690\nSize:    0x48\nname=@loader_path/.jbroot/usr/lib/libsubstrate.dylib, timestamp=2, current_version=0.0.0,  compatibility_version=0.0.0",
+    "Command: LOAD_DYLIB\nOffset:  0x6d8\nSize:    0x30\nname=/usr/lib/libc++.1.dylib, timestamp=2, current_version=1600.157.0,  compatibility_version=1.0.0",
+    "Command: LOAD_DYLIB\nOffset:  0x708\nSize:    0x38\nname=/usr/lib/libSystem.B.dylib, timestamp=2, current_version=1336.62.1,  compatibility_version=1.0.0",
+    "Command: FUNCTION_STARTS\nOffset:  0x740\nSize:    0x10\noffset=0x0100a0, size=0x000010, #functions=8\n  [0] __TEXT + 0x004000\n  [1] __TEXT + 0x0041b4\n  [2] __TEXT + 0x00421c\n  [3] __TEXT + 0x004238\n  [4] __TEXT + 0x0042a0\n  [5] __TEXT + 0x0042b8\n  [6] __TEXT + 0x0042d4\n  [7] __TEXT + 0x004310\n",
+    "Command: DATA_IN_CODE\nOffset:  0x750\nSize:    0x10\noffset=0x0100b0, size=0x000000",
+    "Command: CODE_SIGNATURE\nOffset:  0x760\nSize:    0x10\noffset=0x010b40, size=0x0005a0"
+  ],
+  "sections": [
+    {
+      "name": "__text",
+      "address": 16384,
+      "size": 844,
+      "offset": 16384
+    },
+    {
+      "name": "__auth_stubs",
+      "address": 17228,
+      "size": 32,
+      "offset": 17228
+    },
+    {
+      "name": "__init_offsets",
+      "address": 17260,
+      "size": 4,
+      "offset": 17260
+    },
+    {
+      "name": "__cstring",
+      "address": 17264,
+      "size": 136,
+      "offset": 17264
+    },
+    {
+      "name": "__objc_methname",
+      "address": 17400,
+      "size": 142,
+      "offset": 17400
+    },
+    {
+      "name": "__unwind_info",
+      "address": 17544,
+      "size": 104,
+      "offset": 17544
+    },
+    {
+      "name": "__auth_got",
+      "address": 32768,
+      "size": 16,
+      "offset": 32768
+    },
+    {
+      "name": "__objc_imageinfo",
+      "address": 32784,
+      "size": 8,
+      "offset": 32784
+    },
+    {
+      "name": "__objc_selrefs",
+      "address": 49152,
+      "size": 48,
+      "offset": 49152
+    },
+    {
+      "name": "__bss",
+      "address": 49200,
+      "size": 58,
+      "offset": 0
+    }
+  ],
+  "libraries": [
+    "/Library/MobileSubstrate/DynamicLibraries/upsidedowned.dylib",
+    "/usr/lib/libobjc.A.dylib",
+    "/System/Library/Frameworks/Foundation.framework/Foundation",
+    "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
+    "@loader_path/.jbroot/usr/lib/libsubstrate.dylib",
+    "/usr/lib/libc++.1.dylib",
+    "/usr/lib/libSystem.B.dylib"
+  ],
+  "symbols": [
+    {
+      "name": "__ZL15_logosLocalInitv",
+      "value": 16384,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL52_logos_method$_ungrouped$UIDevice$userInterfaceIdiomP8UIDeviceP13objc_selector",
+      "value": 16820,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL92_logos_method$_ungrouped$SBTraitsSceneParticipantDelegate$_isAllowedToHavePortraitUpsideDownP32SBTraitsSceneParticipantDelegateP13objc_selector",
+      "value": 16924,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL74_logos_method$_ungrouped$SBTraitsSceneParticipantDelegate$_orientationModeP32SBTraitsSceneParticipantDelegateP13objc_selector",
+      "value": 16952,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL60_logos_method$_ungrouped$SpringBoard$homeScreenRotationStyleP11SpringBoardP13objc_selector",
+      "value": 17056,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL54_logos_method$_ungrouped$SBApplication$isMedusaCapableP13SBApplicationP13objc_selector",
+      "value": 17080,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL82_logos_method$_ungrouped$SBHomeScreenViewController$supportedInterfaceOrientationsP26SBHomeScreenViewControllerP13objc_selector",
+      "value": 17108,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL96_logos_method$_ungrouped$SBCoverSheetPrimarySlidingViewController$supportedInterfaceOrientationsP40SBCoverSheetPrimarySlidingViewControllerP13objc_selector",
+      "value": 17168,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL50_logos_orig$_ungrouped$UIDevice$userInterfaceIdiom",
+      "value": 49200,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL90_logos_orig$_ungrouped$SBTraitsSceneParticipantDelegate$_isAllowedToHavePortraitUpsideDown",
+      "value": 49208,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL72_logos_orig$_ungrouped$SBTraitsSceneParticipantDelegate$_orientationMode",
+      "value": 49216,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL58_logos_orig$_ungrouped$SpringBoard$homeScreenRotationStyle",
+      "value": 49224,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL52_logos_orig$_ungrouped$SBApplication$isMedusaCapable",
+      "value": 49232,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL80_logos_orig$_ungrouped$SBHomeScreenViewController$supportedInterfaceOrientations",
+      "value": 49240,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL94_logos_orig$_ungrouped$SBCoverSheetPrimarySlidingViewController$supportedInterfaceOrientations",
+      "value": 49248,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL13forcePadIdiom",
+      "value": 49256,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 0,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "/Users/huynguyen/Desktop/tweak/upsidedowned/.theos/obj/debug/arm64e/",
+      "value": 0,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "Tweak.xm.mm",
+      "value": 0,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "/Users/huynguyen/Desktop/tweak/upsidedowned/.theos/obj/debug/arm64e/Tweak.xm.e192ba87.o",
+      "value": 1709562514,
+      "type": 6,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 16384,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL15_logosLocalInitv",
+      "value": 16384,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 436,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 16384,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 16820,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL52_logos_method$_ungrouped$UIDevice$userInterfaceIdiomP8UIDeviceP13objc_selector",
+      "value": 16820,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 104,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 16820,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 16924,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL92_logos_method$_ungrouped$SBTraitsSceneParticipantDelegate$_isAllowedToHavePortraitUpsideDownP32SBTraitsSceneParticipantDelegateP13objc_selector",
+      "value": 16924,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 28,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 16924,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 16952,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL74_logos_method$_ungrouped$SBTraitsSceneParticipantDelegate$_orientationModeP32SBTraitsSceneParticipantDelegateP13objc_selector",
+      "value": 16952,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 104,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 16952,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 17056,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL60_logos_method$_ungrouped$SpringBoard$homeScreenRotationStyleP11SpringBoardP13objc_selector",
+      "value": 17056,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 24,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 17056,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 17080,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL54_logos_method$_ungrouped$SBApplication$isMedusaCapableP13SBApplicationP13objc_selector",
+      "value": 17080,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 28,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 17080,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 17108,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL82_logos_method$_ungrouped$SBHomeScreenViewController$supportedInterfaceOrientationsP26SBHomeScreenViewControllerP13objc_selector",
+      "value": 17108,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 60,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 17108,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 17168,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL96_logos_method$_ungrouped$SBCoverSheetPrimarySlidingViewController$supportedInterfaceOrientationsP40SBCoverSheetPrimarySlidingViewControllerP13objc_selector",
+      "value": 17168,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 60,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 17168,
+      "type": 14,
+      "external": false
+    },
+    {
+      "name": "__ZL50_logos_orig$_ungrouped$UIDevice$userInterfaceIdiom",
+      "value": 49200,
+      "type": 6,
+      "external": false
+    },
+    {
+      "name": "__ZL90_logos_orig$_ungrouped$SBTraitsSceneParticipantDelegate$_isAllowedToHavePortraitUpsideDown",
+      "value": 49208,
+      "type": 6,
+      "external": false
+    },
+    {
+      "name": "__ZL72_logos_orig$_ungrouped$SBTraitsSceneParticipantDelegate$_orientationMode",
+      "value": 49216,
+      "type": 6,
+      "external": false
+    },
+    {
+      "name": "__ZL58_logos_orig$_ungrouped$SpringBoard$homeScreenRotationStyle",
+      "value": 49224,
+      "type": 6,
+      "external": false
+    },
+    {
+      "name": "__ZL52_logos_orig$_ungrouped$SBApplication$isMedusaCapable",
+      "value": 49232,
+      "type": 6,
+      "external": false
+    },
+    {
+      "name": "__ZL80_logos_orig$_ungrouped$SBHomeScreenViewController$supportedInterfaceOrientations",
+      "value": 49240,
+      "type": 6,
+      "external": false
+    },
+    {
+      "name": "__ZL94_logos_orig$_ungrouped$SBCoverSheetPrimarySlidingViewController$supportedInterfaceOrientations",
+      "value": 49248,
+      "type": 6,
+      "external": false
+    },
+    {
+      "name": "__ZL13forcePadIdiom",
+      "value": 49256,
+      "type": 6,
+      "external": false
+    },
+    {
+      "name": "",
+      "value": 0,
+      "type": 4,
+      "external": false
+    },
+    {
+      "name": "_MSHookMessageEx",
+      "value": 0,
+      "type": 0,
+      "external": true
+    },
+    {
+      "name": "_objc_getClass",
+      "value": 0,
+      "type": 0,
+      "external": true
+    }
+  ],
+  "classes": [],
+  "categories": [],
+  "protocols": [],
+  "selrefs": {
+    "0xc000": "userInterfaceIdiom",
+    "0xc008": "_isAllowedToHavePortraitUpsideDown",
+    "0xc010": "_orientationMode",
+    "0xc018": "homeScreenRotationStyle",
+    "0xc020": "isMedusaCapable",
+    "0xc028": "supportedInterfaceOrientations"
+  },
+  "cfstrings": {},
+  "strings": {
+    "0x4370": "UIDevice",
+    "0x4379": "SBTraitsSceneParticipantDelegate",
+    "0x439a": "SpringBoard",
+    "0x43a6": "SBApplication",
+    "0x43b4": "SBHomeScreenViewController",
+    "0x43cf": "SBCoverSheetPrimarySlidingViewController",
+    "0x43f8": "userInterfaceIdiom",
+    "0x440b": "_isAllowedToHavePortraitUpsideDown",
+    "0x442e": "_orientationMode",
+    "0x443f": "homeScreenRotationStyle",
+    "0x4457": "isMedusaCapable",
+    "0x4467": "supportedInterfaceOrientations"
+  },
+  "bindings": {
+    "0x8000": "_objc_getClass",
+    "0x8008": "_MSHookMessageEx"
+  },
+  "stubs": {
+    "0x434c": "_objc_getClass",
+    "0x435c": "_MSHookMessageEx"
+  },
+  "functions": [
+    16384,
+    16820,
+    16924,
+    16952,
+    17056,
+    17080,
+    17108,
+    17168
+  ]
+}

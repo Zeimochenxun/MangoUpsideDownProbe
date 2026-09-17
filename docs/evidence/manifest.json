@@ -1,0 +1,186 @@
+{
+  "name": "01-upsidedowned.dylib",
+  "size": 151776,
+  "sha256": "8132800d6338a827fb72ff69d939f2a72d2576c1bcfd343fc524c47570f28996",
+  "slices": [
+    {
+      "arch": "arm64",
+      "cpu_subtype": "0x0",
+      "fat_offset": "0x4000",
+      "size": 53264,
+      "sha256": "f4fe3786a28823eb9b71878ef50fd73684df52f1c5b76a77535b6ed3c79385a9",
+      "libraries": [
+        "/Library/MobileSubstrate/DynamicLibraries/upsidedowned.dylib",
+        "/usr/lib/libobjc.A.dylib",
+        "/System/Library/Frameworks/Foundation.framework/Foundation",
+        "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
+        "@loader_path/.jbroot/usr/lib/libsubstrate.dylib",
+        "/usr/lib/libc++.1.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ],
+      "functions": 8,
+      "classes": 0,
+      "categories": 0,
+      "selectors": [
+        "userInterfaceIdiom",
+        "_isAllowedToHavePortraitUpsideDown",
+        "_orientationMode",
+        "homeScreenRotationStyle",
+        "isMedusaCapable",
+        "supportedInterfaceOrientations"
+      ],
+      "hook_symbols": [
+        {
+          "name": "__ZL52_logos_method$_ungrouped$UIDevice$userInterfaceIdiomP8UIDeviceP13objc_selector",
+          "address": "0x415c"
+        },
+        {
+          "name": "__ZL92_logos_method$_ungrouped$SBTraitsSceneParticipantDelegate$_isAllowedToHavePortraitUpsideDownP32SBTraitsSceneParticipantDelegateP13objc_selector",
+          "address": "0x41c0"
+        },
+        {
+          "name": "__ZL74_logos_method$_ungrouped$SBTraitsSceneParticipantDelegate$_orientationModeP32SBTraitsSceneParticipantDelegateP13objc_selector",
+          "address": "0x41dc"
+        },
+        {
+          "name": "__ZL60_logos_method$_ungrouped$SpringBoard$homeScreenRotationStyleP11SpringBoardP13objc_selector",
+          "address": "0x4240"
+        },
+        {
+          "name": "__ZL54_logos_method$_ungrouped$SBApplication$isMedusaCapableP13SBApplicationP13objc_selector",
+          "address": "0x4258"
+        },
+        {
+          "name": "__ZL82_logos_method$_ungrouped$SBHomeScreenViewController$supportedInterfaceOrientationsP26SBHomeScreenViewControllerP13objc_selector",
+          "address": "0x4274"
+        },
+        {
+          "name": "__ZL96_logos_method$_ungrouped$SBCoverSheetPrimarySlidingViewController$supportedInterfaceOrientationsP40SBCoverSheetPrimarySlidingViewControllerP13objc_selector",
+          "address": "0x42ac"
+        },
+        {
+          "name": "__ZL52_logos_method$_ungrouped$UIDevice$userInterfaceIdiomP8UIDeviceP13objc_selector",
+          "address": "0x415c"
+        },
+        {
+          "name": "__ZL92_logos_method$_ungrouped$SBTraitsSceneParticipantDelegate$_isAllowedToHavePortraitUpsideDownP32SBTraitsSceneParticipantDelegateP13objc_selector",
+          "address": "0x41c0"
+        },
+        {
+          "name": "__ZL74_logos_method$_ungrouped$SBTraitsSceneParticipantDelegate$_orientationModeP32SBTraitsSceneParticipantDelegateP13objc_selector",
+          "address": "0x41dc"
+        },
+        {
+          "name": "__ZL60_logos_method$_ungrouped$SpringBoard$homeScreenRotationStyleP11SpringBoardP13objc_selector",
+          "address": "0x4240"
+        },
+        {
+          "name": "__ZL54_logos_method$_ungrouped$SBApplication$isMedusaCapableP13SBApplicationP13objc_selector",
+          "address": "0x4258"
+        },
+        {
+          "name": "__ZL82_logos_method$_ungrouped$SBHomeScreenViewController$supportedInterfaceOrientationsP26SBHomeScreenViewControllerP13objc_selector",
+          "address": "0x4274"
+        },
+        {
+          "name": "__ZL96_logos_method$_ungrouped$SBCoverSheetPrimarySlidingViewController$supportedInterfaceOrientationsP40SBCoverSheetPrimarySlidingViewControllerP13objc_selector",
+          "address": "0x42ac"
+        }
+      ],
+      "imports": [
+        "_MSHookMessageEx",
+        "_objc_getClass",
+        "dyld_stub_binder"
+      ]
+    },
+    {
+      "arch": "arm64e",
+      "cpu_subtype": "0x80000002",
+      "fat_offset": "0x14000",
+      "size": 69856,
+      "sha256": "8e7cb9bc829e268f90f316f0a7603c02261379f1f63c30e3055961771a9882cd",
+      "libraries": [
+        "/Library/MobileSubstrate/DynamicLibraries/upsidedowned.dylib",
+        "/usr/lib/libobjc.A.dylib",
+        "/System/Library/Frameworks/Foundation.framework/Foundation",
+        "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
+        "@loader_path/.jbroot/usr/lib/libsubstrate.dylib",
+        "/usr/lib/libc++.1.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ],
+      "functions": 8,
+      "classes": 0,
+      "categories": 0,
+      "selectors": [
+        "userInterfaceIdiom",
+        "_isAllowedToHavePortraitUpsideDown",
+        "_orientationMode",
+        "homeScreenRotationStyle",
+        "isMedusaCapable",
+        "supportedInterfaceOrientations"
+      ],
+      "hook_symbols": [
+        {
+          "name": "__ZL52_logos_method$_ungrouped$UIDevice$userInterfaceIdiomP8UIDeviceP13objc_selector",
+          "address": "0x41b4"
+        },
+        {
+          "name": "__ZL92_logos_method$_ungrouped$SBTraitsSceneParticipantDelegate$_isAllowedToHavePortraitUpsideDownP32SBTraitsSceneParticipantDelegateP13objc_selector",
+          "address": "0x421c"
+        },
+        {
+          "name": "__ZL74_logos_method$_ungrouped$SBTraitsSceneParticipantDelegate$_orientationModeP32SBTraitsSceneParticipantDelegateP13objc_selector",
+          "address": "0x4238"
+        },
+        {
+          "name": "__ZL60_logos_method$_ungrouped$SpringBoard$homeScreenRotationStyleP11SpringBoardP13objc_selector",
+          "address": "0x42a0"
+        },
+        {
+          "name": "__ZL54_logos_method$_ungrouped$SBApplication$isMedusaCapableP13SBApplicationP13objc_selector",
+          "address": "0x42b8"
+        },
+        {
+          "name": "__ZL82_logos_method$_ungrouped$SBHomeScreenViewController$supportedInterfaceOrientationsP26SBHomeScreenViewControllerP13objc_selector",
+          "address": "0x42d4"
+        },
+        {
+          "name": "__ZL96_logos_method$_ungrouped$SBCoverSheetPrimarySlidingViewController$supportedInterfaceOrientationsP40SBCoverSheetPrimarySlidingViewControllerP13objc_selector",
+          "address": "0x4310"
+        },
+        {
+          "name": "__ZL52_logos_method$_ungrouped$UIDevice$userInterfaceIdiomP8UIDeviceP13objc_selector",
+          "address": "0x41b4"
+        },
+        {
+          "name": "__ZL92_logos_method$_ungrouped$SBTraitsSceneParticipantDelegate$_isAllowedToHavePortraitUpsideDownP32SBTraitsSceneParticipantDelegateP13objc_selector",
+          "address": "0x421c"
+        },
+        {
+          "name": "__ZL74_logos_method$_ungrouped$SBTraitsSceneParticipantDelegate$_orientationModeP32SBTraitsSceneParticipantDelegateP13objc_selector",
+          "address": "0x4238"
+        },
+        {
+          "name": "__ZL60_logos_method$_ungrouped$SpringBoard$homeScreenRotationStyleP11SpringBoardP13objc_selector",
+          "address": "0x42a0"
+        },
+        {
+          "name": "__ZL54_logos_method$_ungrouped$SBApplication$isMedusaCapableP13SBApplicationP13objc_selector",
+          "address": "0x42b8"
+        },
+        {
+          "name": "__ZL82_logos_method$_ungrouped$SBHomeScreenViewController$supportedInterfaceOrientationsP26SBHomeScreenViewControllerP13objc_selector",
+          "address": "0x42d4"
+        },
+        {
+          "name": "__ZL96_logos_method$_ungrouped$SBCoverSheetPrimarySlidingViewController$supportedInterfaceOrientationsP40SBCoverSheetPrimarySlidingViewControllerP13objc_selector",
+          "address": "0x4310"
+        }
+      ],
+      "imports": [
+        "_MSHookMessageEx",
+        "_objc_getClass"
+      ]
+    }
+  ]
+}

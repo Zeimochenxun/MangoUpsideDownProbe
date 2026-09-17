@@ -1,10 +1,9 @@
-name: Build MangoUpsideDownWorld (RootHide)
+name: Build SystemFlipProbe (RootHide, read-only)
 
 on:
   workflow_dispatch:
   push:
-    branches-ignore:
-      - system-flip-audit
+    branches: [system-flip-probe]
 
 permissions:
   contents: read
@@ -14,26 +13,18 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 30
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Verify geometry arithmetic
-        run: |
-          set -eu
-          xcrun clang -std=c11 -Wall -Wextra -Werror tests/world_math_test.c -o "$RUNNER_TEMP/geometry-test"
-          "$RUNNER_TEMP/geometry-test"
-
-      - name: Install Procursus tools
+      - uses: actions/checkout@v4
+      - name: Install signing and make tools
         uses: dhinakg/procursus-action@main
         with:
           packages: ldid make
-
       - name: Install RootHide Theos
         run: |
           set -eu
-          git clone --recursive https://github.com/roothide/theos.git "$HOME/theos"
-
-      - name: Install iOS 16.5 SDK
+          git clone https://github.com/roothide/theos.git "$HOME/theos"
+          git -C "$HOME/theos" checkout 88506b2c22e9e07dd4ed055f23c9e398a117a2c7
+          git -C "$HOME/theos" submodule update --init --recursive
+      - name: Install pinned iOS 16.5 SDK
         run: |
           set -eu
           mkdir -p "$HOME/theos/sdks"
@@ -49,39 +40,43 @@ jobs:
               raise SystemExit('SDK checksum mismatch')
           PY
           tar -xJf "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" -C "$HOME/theos/sdks"
-
-      - name: Build and inspect RootHide package
+      - name: Build and validate exact package
         shell: bash
         run: |
           set -euo pipefail
           export THEOS="$HOME/theos"
-          xcrun clang --version
-          git -C "$THEOS" rev-parse HEAD
-          shasum -a 256 Tweak.xm WorldMath.h "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz"
+          mkdir -p build-info
+          xcrun clang --version > build-info/compiler.txt
+          git rev-parse HEAD > build-info/source-commit.txt
+          git -C "$THEOS" rev-parse HEAD > build-info/theos-commit.txt
           make clean
-          make package FINALPACKAGE=1 2>&1 | tee "$RUNNER_TEMP/mangoworld-build.log"
-          if grep -qi 'incompatible arm64e ABI' "$RUNNER_TEMP/mangoworld-build.log"; then
-            echo 'Refusing package with incompatible arm64e ABI warning'
+          make package FINALPACKAGE=1 2>&1 | tee build-info/build.log
+          if grep -qi 'incompatible arm64e ABI' build-info/build.log; then
             exit 1
           fi
-          python3 tools/check_package.py packages/*.deb
-          dylib="$(find .theos -name MangoUpsideDownWorld.dylib -type f | head -n 1)"
-          test -n "$dylib"
-          xcrun lipo -info "$dylib"
-          xcrun otool -L "$dylib"
-          xcrun otool -l "$dylib" > "$RUNNER_TEMP/mangoworld-load-commands.txt"
-          mkdir -p build-info
-          cp "$RUNNER_TEMP/mangoworld-build.log" "$RUNNER_TEMP/mangoworld-load-commands.txt" build-info/
+          python3 tools/check_package.py packages/*.deb | tee build-info/package-check.txt
           shasum -a 256 packages/*.deb > build-info/SHA256SUMS.txt
-
-      - name: Upload package and build information
+          for name in SystemFlipProbeSB SystemFlipProbeBB; do
+            dylib="$(find .theos -name "$name.dylib" -type f | head -n 1)"
+            test -n "$dylib"
+            xcrun lipo -info "$dylib" > "build-info/$name-architecture.txt"
+            xcrun otool -L "$dylib" > "build-info/$name-dependencies.txt"
+          done
+      - name: Upload package, source, evidence and instructions
         uses: actions/upload-artifact@v4
         with:
-          name: MangoUpsideDownWorld-0.8.0-alpha8
+          name: SystemFlipProbe-0.1.0-RootHide
           if-no-files-found: error
           path: |
             packages/*.deb
             build-info/*
             README.md
-            EVIDENCE.md
-
+            Probe.m
+            Makefile
+            control
+            SystemFlipProbeSB.plist
+            SystemFlipProbeBB.plist
+            capture/Makefile
+            capture/main.c
+            tools/*.py
+            docs/**

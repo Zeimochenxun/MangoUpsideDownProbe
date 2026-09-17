@@ -1,10 +1,9 @@
-Package: com.chenxun.mangoupsidedownworld
-Name: MangoUpsideDownWorld
-Version: 0.8.0~alpha8
+Package: com.chenxun.systemflipprobe
+Name: SystemFlipProbe
+Version: 0.1.0
 Architecture: iphoneos-arm64e
-Description: Experimental whole-aperture upside-down compatibility for Mango on iOS 16.5.
+Description: Read-only display and window coordinate diagnostics for iOS 16.5. Does not rotate display or input.
 Maintainer: Chen Xun
 Author: Chen Xun
 Section: Tweaks
 Depends: mobilesubstrate, firmware (= 16.5)
-Conflicts: com.chenxun.mangoupsidedownfix
