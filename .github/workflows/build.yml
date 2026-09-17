@@ -53,7 +53,7 @@ jobs:
       - name: Upload package, source and evidence
         uses: actions/upload-artifact@v4
         with:
-          name: MangoOrientationProbe-0.1.0-RootHide
+          name: MangoOrientationProbe-0.2.0-RootHide
           if-no-files-found: error
           path: |
             packages/*.deb

@@ -1,8 +1,8 @@
 Package: com.chenxun.mangoorientationprobe
 Name: MangoOrientationProbe
-Version: 0.1.0
+Version: 0.2.0
 Architecture: iphoneos-arm64e
-Description: Read-only Mango orientation and gesture probe for iOS 16.5 RootHide.
+Description: Read-only Mango orientation, gesture and root-window probe for iOS 16.5 RootHide.
 Maintainer: Chen Xun
 Author: Chen Xun
 Section: Tweaks

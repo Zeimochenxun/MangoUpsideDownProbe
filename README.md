@@ -1,6 +1,6 @@
-# MangoOrientationProbe 0.1.0
+# MangoOrientationProbe 0.2.0
 
-这是面向 iOS 16.5、Dopamine RootHide、SpringBoard 的**只读定向 Probe**。它不修改 Mango 的方向值、布局、手势、触摸或视图变换，只记录已经由实际 `mango.dylib` 确认存在的类和方法。
+这是面向 iOS 16.5、Dopamine RootHide、SpringBoard 的**只读定向 Probe**。它不修改 Mango 的方向值、布局、手势、触摸或视图变换。除记录实际 `mango.dylib` 已确认存在的入口外，0.2.0 还把 `UIRootSceneWindow` 与 `FBRootWindow` 纳入运行时只读分析。
 
 日志固定写入：
 
@@ -40,9 +40,25 @@
 [MANGO-GESTURE] ... path=MangoPillElement.handlePanGesture ... translationY=... predicted=dismissWithContent ...
 [MANGO-ACTION] ... selector=dismissWithContent: ...
 [SPLIT-ACTIVATION] ... selector=launcherPanned: ... locationX=... locationY=...
+[ROOT-WINDOW-CLASS] class=UIRootSceneWindow exists=1 ...
+[ROOT-WINDOW-CLASS] class=FBRootWindow exists=1 ...
+[ROOT-WINDOW] ... sceneOrientation=2 frame=... bounds=... transform=... fixedOrigin=...
+[ROOT-WINDOW-GESTURE] ... windowClass=... originInWindow=... chain=...
 ```
 
 `visual=manual` 是有意设计：代码不能可靠判断人眼看到的最终朝向，因此不伪造“视觉正确/错误”。手势输入、Mango 实际动作与方向值会被自动记录，结合四方向测试即可判断语义是否反转。
+
+### UIRootSceneWindow / FBRootWindow 监控内容
+
+- 类是否真实存在、所属系统镜像、父类链、是否为 `UIWindow` 子类。
+- 类自身声明的、名称涉及 orientation/rotation/scene/window/frame/bounds/transform/coordinate/layout/hitTest 的真实方法及类型编码。
+- 相关 ivar 的真实名称、类型和偏移。
+- 实例的 frame、bounds、center、transform、windowLevel、key/hidden 状态。
+- `UIWindowScene.interfaceOrientation`。
+- `UIScreen.coordinateSpace` 与 `fixedCoordinateSpace` 中窗口原点、右下角的映射。
+- Mango 手势 view 所属 window、view→window 坐标和父视图链。
+
+Probe 不会 Hook 这两个类的未知私有 selector；先从日志确认真实结构后再决定是否需要更窄的 Hook。
 
 ## 安全与恢复
 

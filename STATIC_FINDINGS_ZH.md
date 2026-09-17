@@ -110,3 +110,17 @@
 - 实际动作到底由哪条入口触发，避免未来双 Hook。
 - `layoutMode` 在 1/2/3/4 是否变化；注意 layoutMode 是 SystemAperture 展示模式，不一定等价于 interface orientation。
 - 横屏分屏启动时 `[SPLIT-ACTIVATION]` 的 `viewBounds` 和触点是否仍保持竖屏坐标基准。
+
+## 0.2.0 新增的系统根窗口问题
+
+Mango 作者提示关注 `UIRootSceneWindow` 与 `FBRootWindow`。目前没有把这两个名字当作 Mango 自有类，也不预设它们一定存在于目标系统。Probe 会在 SpringBoard 运行时确认：
+
+对现有上传二进制的静态字符串、Objective-C 元数据和反汇编索引进行检索后，`mango.dylib`、`mangoos.dylib`、`mangoUIKit.dylib`、`MangoOSRendering.dylib` 均未发现这两个类名的直接引用。这个阴性结果只说明“没有名称级直接引用”，不能排除 Mango 创建的视图间接处于这些系统窗口之下，也不能排除通过通用 `UIWindow`/scene API 访问它们。
+
+- 类是否存在、父类链及所属系统镜像；
+- 它们是否真的是 `UIWindow` 子类；
+- 与 orientation/scene/rotation/geometry/coordinate 相关的实际方法类型；
+- 四方向下相关窗口的 frame、bounds、transform 和 screen coordinate-space 映射；
+- Mango 手势所在 view 最终挂在哪一种 window 上。
+
+这能区分两种情况：如果方向 2 时根窗口坐标空间已经完成 180° 映射，而 Mango 仍按原始 `translation.y` 判定，问题确定在 Mango 手势语义；如果根窗口或手势 view 所在 window 仍保持 portrait 坐标映射，则还需要继续追窗口级转换边界。此版本只观察，不修改这两个系统类。

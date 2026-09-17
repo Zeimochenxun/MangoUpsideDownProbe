@@ -8,7 +8,7 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = MangoOrientationProbe
 MangoOrientationProbe_FILES = Probe.m
 MangoOrientationProbe_CFLAGS = -fobjc-arc -fblocks -Wall -Wextra -Werror -Wno-unused-parameter -Wno-deprecated-declarations
-MangoOrientationProbe_FRAMEWORKS = UIKit Foundation
+MangoOrientationProbe_FRAMEWORKS = UIKit Foundation QuartzCore
 MangoOrientationProbe_LIBRARIES = substrate
 
 include $(THEOS_MAKE_PATH)/tweak.mk

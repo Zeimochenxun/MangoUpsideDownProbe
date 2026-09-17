@@ -21,6 +21,7 @@ static NSInteger gLastMangoOrientation = NSIntegerMin;
 static NSInteger gLastLayoutMode = NSIntegerMin;
 static volatile unsigned long long gEventCounter;
 static __thread unsigned long long gGestureEvent;
+static BOOL gRootWindowMetadataLogged;
 
 static NSString *OrientationName(NSInteger value) {
     switch (value) {
@@ -171,6 +172,157 @@ static BOOL VerifyMethod(Class cls, SEL sel, BOOL classMethod, const char *expec
     return YES;
 }
 
+static BOOL NameMatchesRootWindowKeyword(NSString *name) {
+    if (!name.length) return NO;
+    NSArray<NSString *> *keywords = @[@"orientation", @"rotation", @"scene", @"window",
+                                      @"root", @"frame", @"bounds", @"transform",
+                                      @"coordinate", @"layout", @"hitTest", @"pointInside"];
+    for (NSString *keyword in keywords) {
+        if ([name rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) return YES;
+    }
+    return NO;
+}
+
+static NSString *ClassHierarchy(Class cls) {
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    for (Class cursor = cls; cursor && parts.count < 16; cursor = class_getSuperclass(cursor)) {
+        [parts addObject:NSStringFromClass(cursor) ?: @"unknown"];
+    }
+    return [parts componentsJoinedByString:@"<-" ];
+}
+
+static void LogRootWindowClassMetadata(NSString *className) {
+    Class cls = objc_getClass(className.UTF8String);
+    if (!cls) {
+        Log(@"[ROOT-WINDOW-CLASS] class=%@ exists=0", className);
+        return;
+    }
+    const char *imageName = class_getImageName(cls);
+    BOOL windowSubclass = [cls isSubclassOfClass:UIWindow.class];
+    Log(@"[ROOT-WINDOW-CLASS] class=%@ exists=1 image=%s instanceSize=%zu isUIWindowSubclass=%d hierarchy=%@",
+        className, imageName ?: "unknown", class_getInstanceSize(cls), windowSubclass, ClassHierarchy(cls));
+
+    unsigned int methodCount = 0;
+    Method *methods = class_copyMethodList(cls, &methodCount);
+    NSUInteger loggedMethods = 0;
+    for (unsigned int i = 0; i < methodCount && loggedMethods < 80; i++) {
+        SEL selector = method_getName(methods[i]);
+        NSString *selectorName = NSStringFromSelector(selector);
+        if (!NameMatchesRootWindowKeyword(selectorName)) continue;
+        const char *types = method_getTypeEncoding(methods[i]);
+        IMP imp = method_getImplementation(methods[i]);
+        Log(@"[ROOT-WINDOW-METHOD] class=%@ selector=%@ types=%s image=%@",
+            className, selectorName, types ?: "unknown", ImagePathForIMP(imp));
+        loggedMethods++;
+    }
+    free(methods);
+
+    unsigned int ivarCount = 0;
+    Ivar *ivars = class_copyIvarList(cls, &ivarCount);
+    NSUInteger loggedIvars = 0;
+    for (unsigned int i = 0; i < ivarCount && loggedIvars < 80; i++) {
+        const char *rawName = ivar_getName(ivars[i]);
+        NSString *ivarName = rawName ? [NSString stringWithUTF8String:rawName] : @"unknown";
+        if (!NameMatchesRootWindowKeyword(ivarName)) continue;
+        Log(@"[ROOT-WINDOW-IVAR] class=%@ ivar=%@ types=%s offset=%td",
+            className, ivarName, ivar_getTypeEncoding(ivars[i]) ?: "unknown", ivar_getOffset(ivars[i]));
+        loggedIvars++;
+    }
+    free(ivars);
+    Log(@"[ROOT-WINDOW-METADATA-END] class=%@ declaredMethods=%u matchedMethods=%lu declaredIvars=%u matchedIvars=%lu",
+        className, methodCount, (unsigned long)loggedMethods, ivarCount, (unsigned long)loggedIvars);
+}
+
+static NSArray<UIWindow *> *AllApplicationWindows(void) {
+    NSMutableOrderedSet<UIWindow *> *windows = [NSMutableOrderedSet orderedSet];
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+            if (window) [windows addObject:window];
+        }
+    }
+    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+        if (window) [windows addObject:window];
+    }
+    return windows.array;
+}
+
+static NSString *ViewChain(UIView *view) {
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    for (UIView *cursor = view; cursor && parts.count < 14; cursor = cursor.superview) {
+        [parts addObject:NSStringFromClass(cursor.class) ?: @"unknown"];
+    }
+    if (view.window && ![parts.lastObject isEqualToString:NSStringFromClass(view.window.class)]) {
+        [parts addObject:[NSString stringWithFormat:@"window:%@", NSStringFromClass(view.window.class)]];
+    }
+    return [parts componentsJoinedByString:@"->"];
+}
+
+static void LogOneRootWindow(UIWindow *window, NSString *source, NSUInteger index) {
+    UIWindowScene *scene = window.windowScene;
+    NSInteger orientation = scene ? scene.interfaceOrientation : UIInterfaceOrientationUnknown;
+    UIScreen *screen = window.screen ?: UIScreen.mainScreen;
+    CGPoint coordinateOrigin = [window convertPoint:CGPointZero toCoordinateSpace:screen.coordinateSpace];
+    CGPoint fixedOrigin = [window convertPoint:CGPointZero toCoordinateSpace:screen.fixedCoordinateSpace];
+    CGPoint localMax = CGPointMake(CGRectGetMaxX(window.bounds), CGRectGetMaxY(window.bounds));
+    CGPoint coordinateMax = [window convertPoint:localMax toCoordinateSpace:screen.coordinateSpace];
+    CGPoint fixedMax = [window convertPoint:localMax toCoordinateSpace:screen.fixedCoordinateSpace];
+    UIViewController *root = window.rootViewController;
+    Log(@"[ROOT-WINDOW] source=%@ index=%lu ptr=%p class=%@ sceneOrientation=%ld sceneName=%@ frame=%@ bounds=%@ center=%@ transform=%@ key=%d hidden=%d alpha=%.3f level=%.3f screenBounds=%@ coordinateBounds=%@ fixedBounds=%@ coordinateOrigin=%@ coordinateMax=%@ fixedOrigin=%@ fixedMax=%@ rootVC=%@ rootViewFrame=%@ rootViewBounds=%@ rootViewTransform=%@",
+        source, (unsigned long)index, window, NSStringFromClass(window.class), (long)orientation,
+        OrientationName(orientation), NSStringFromCGRect(window.frame), NSStringFromCGRect(window.bounds),
+        NSStringFromCGPoint(window.center), NSStringFromCGAffineTransform(window.transform),
+        window.isKeyWindow, window.hidden, window.alpha, window.windowLevel,
+        NSStringFromCGRect(screen.bounds), NSStringFromCGRect(screen.coordinateSpace.bounds),
+        NSStringFromCGRect(screen.fixedCoordinateSpace.bounds), NSStringFromCGPoint(coordinateOrigin),
+        NSStringFromCGPoint(coordinateMax), NSStringFromCGPoint(fixedOrigin), NSStringFromCGPoint(fixedMax),
+        root ? NSStringFromClass(root.class) : @"none",
+        root.viewIfLoaded ? NSStringFromCGRect(root.view.frame) : @"not-loaded",
+        root.viewIfLoaded ? NSStringFromCGRect(root.view.bounds) : @"not-loaded",
+        root.viewIfLoaded ? NSStringFromCGAffineTransform(root.view.transform) : @"not-loaded");
+}
+
+static void LogTargetWindowsOnMain(NSString *source, UIView *gestureView) {
+    if (!gRootWindowMetadataLogged) {
+        gRootWindowMetadataLogged = YES;
+        LogRootWindowClassMetadata(@"UIRootSceneWindow");
+        LogRootWindowClassMetadata(@"FBRootWindow");
+    }
+    Class uiRootClass = objc_getClass("UIRootSceneWindow");
+    Class fbRootClass = objc_getClass("FBRootWindow");
+    NSArray<UIWindow *> *windows = AllApplicationWindows();
+    NSUInteger matched = 0;
+    for (UIWindow *window in windows) {
+        BOOL isUIRoot = uiRootClass && [window isKindOfClass:uiRootClass];
+        BOOL isFBRoot = fbRootClass && [window isKindOfClass:fbRootClass];
+        if (!isUIRoot && !isFBRoot) continue;
+        if (matched < 32) LogOneRootWindow(window, source, matched);
+        matched++;
+    }
+    Log(@"[ROOT-WINDOW-SUMMARY] source=%@ totalWindows=%lu matched=%lu uiRootClass=%d fbRootClass=%d",
+        source, (unsigned long)windows.count, (unsigned long)matched, uiRootClass != Nil, fbRootClass != Nil);
+    if (gestureView) {
+        UIWindow *window = gestureView.window;
+        CGPoint originInWindow = window ? [gestureView convertPoint:CGPointZero toView:window] : CGPointZero;
+        CGPoint maxInWindow = window ? [gestureView convertPoint:CGPointMake(CGRectGetMaxX(gestureView.bounds), CGRectGetMaxY(gestureView.bounds)) toView:window] : CGPointZero;
+        Log(@"[ROOT-WINDOW-GESTURE] source=%@ viewClass=%@ viewFrame=%@ viewBounds=%@ viewTransform=%@ windowClass=%@ originInWindow=%@ maxInWindow=%@ chain=%@",
+            source, NSStringFromClass(gestureView.class), NSStringFromCGRect(gestureView.frame),
+            NSStringFromCGRect(gestureView.bounds), NSStringFromCGAffineTransform(gestureView.transform),
+            window ? NSStringFromClass(window.class) : @"none", NSStringFromCGPoint(originInWindow),
+            NSStringFromCGPoint(maxInWindow), ViewChain(gestureView));
+    }
+}
+
+static void LogTargetWindows(NSString *source, UIView *gestureView) {
+    NSString *ownedSource = [source copy];
+    __weak UIView *weakView = gestureView;
+    if (NSThread.isMainThread) {
+        LogTargetWindowsOnMain(ownedSource, gestureView);
+    } else {
+        dispatch_async(dispatch_get_main_queue(), ^{ LogTargetWindowsOnMain(ownedSource, weakView); });
+    }
+}
+
 static NSInteger (*OrigMangoOrientation)(id, SEL);
 static NSInteger HookMangoOrientation(id self, SEL _cmd) {
     NSInteger result = OrigMangoOrientation(self, _cmd);
@@ -210,6 +362,7 @@ static void HookHandlePan(id self, SEL _cmd, UIPanGestureRecognizer *gesture) {
                               ((translation.y < -30.0 || fabs(translation.x) > 50.0) ? @"dismissWithContent" : @"none");
         Log(@"[MANGO-GESTURE] event=%llu path=MangoPillElement.handlePanGesture state=ended system=%ld orientation=%ld mode=%ld translationX=%.3f translationY=%.3f predicted=%@ staticRule=orientation-independent",
             event, (long)system, (long)mango, (long)mode, translation.x, translation.y, predicted);
+        LogTargetWindows(@"MangoPillElement.handlePanGesture.ended", gesture.view);
     }
     OrigHandlePan(self, _cmd, gesture);
     if (event) gGestureEvent = 0;
@@ -231,6 +384,9 @@ static void HookResizePan(id self, SEL _cmd, UIPanGestureRecognizer *gesture) {
         Log(@"[MANGO-GESTURE] event=%llu path=SBSystemApertureViewController._handleResizePan state=%@ system=%ld orientation=%ld branch=%@ translationX=%.3f translationY=%.3f",
             event, state == UIGestureRecognizerStateBegan ? @"began" : @"ended",
             (long)system, (long)mango, branch, translation.x, translation.y);
+        LogTargetWindows(state == UIGestureRecognizerStateBegan ?
+                         @"SBSystemApertureViewController._handleResizePan.began" :
+                         @"SBSystemApertureViewController._handleResizePan.ended", gesture.view);
     }
     OrigResizePan(self, _cmd, gesture);
     if (event) gGestureEvent = 0;
@@ -273,6 +429,7 @@ static void (*OrigManagerOrientation)(id, SEL, NSNotification *);
 static void HookManagerOrientation(id self, SEL _cmd, NSNotification *notification) {
     OrigManagerOrientation(self, _cmd, notification);
     LogOrientation(@"MangoPillManager.handleInterfaceOrientationChange", gLastLayoutMode);
+    LogTargetWindows(@"MangoPillManager.handleInterfaceOrientationChange", nil);
 }
 
 static NSString *OrientationTokenInDescription(id object) {
@@ -400,13 +557,16 @@ static void InstallHooksWhenReady(void) {
                                                       object:nil queue:[NSOperationQueue mainQueue]
                                                   usingBlock:^(NSNotification *note) {
         LogOrientation(@"MangoInterfaceOrientationDidChange", gLastLayoutMode);
+        LogTargetWindows(@"MangoInterfaceOrientationDidChange", nil);
     }];
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidChangeStatusBarOrientationNotification
                                                       object:nil queue:[NSOperationQueue mainQueue]
                                                   usingBlock:^(NSNotification *note) {
         LogOrientation(@"UIApplicationDidChangeStatusBarOrientation", gLastLayoutMode);
+        LogTargetWindows(@"UIApplicationDidChangeStatusBarOrientation", nil);
     }];
     LogOrientation(@"hooks-installed", gLastLayoutMode);
+    LogTargetWindows(@"hooks-installed", nil);
 }
 
 __attribute__((constructor)) static void MangoOrientationProbeInit(void) {
@@ -425,7 +585,7 @@ __attribute__((constructor)) static void MangoOrientationProbeInit(void) {
             [[NSFileManager defaultManager] moveItemAtPath:kLogPath toPath:previous error:nil];
         }
         AppendLine(@"");
-        Log(@"[SESSION] start pid=%d version=0.1.0 behavior=read-only log=%@ mkdirError=%@",
+        Log(@"[SESSION] start pid=%d version=0.2.0 behavior=read-only rootWindows=UIRootSceneWindow,FBRootWindow log=%@ mkdirError=%@",
             getpid(), kLogPath, error ?: @"none");
         dispatch_async(dispatch_get_main_queue(), ^{ InstallHooksWhenReady(); });
     }
