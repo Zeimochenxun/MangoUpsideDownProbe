@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 0.9.0-alpha9：证据与边界
+# MangoUpsideDownWorld 0.10.0-alpha10：证据与边界
 
 这是本次新实现，不是从关联对话中取回的既有 World 源码，也不是给 Fix alpha2 改名。
 
@@ -140,6 +140,16 @@ alpha8 的置信度说明留了一个未闭合的问题：`GESTURE` 探测在用
 - 同时把这个类名也补进了已有的 `GESTURE api=... class=...` 行——`TurnDelta` 里原本已经拿到 `self`（触发调用的识别器实例），只是没有记录它的类；一行 `NSStringFromClass(self.class)` 就能看出是不是纯 `UIPanGestureRecognizer` 本身。
 - 频率控制：与 `GESTURE` 同样用 0.05 秒节流（一次拖动每帧回调多次），且只在 `Tracing` 为真时才做任何工作——`Tracing` 是一次静态 BOOL 读取，关闭时这个 hook 的开销与调用原始实现之外几乎为零，不影响未开启诊断时的正常行为。
 - 未新增任何几何原语或修正逻辑，`WorldMath.h`/`world_math_test.c` 不变；这里全部是运行时对象自省（`gestureRecognizers`、`state`、`numberOfTouches`、`phase`、`convertPoint:toCoordinateSpace:`），无法在脱离 UIKit 运行时的 C 单测里覆盖，与文件里其它同样依赖真实视图层级的诊断代码（`ProbeMangoSelectors`、`ProbeMangoPillManager`、`WorldHit`）用的是同一类验证方式：只能靠真机日志核验，不靠单测。
+
+## 0.10.0-alpha10：把 alpha9 的记录同时喂给一个悬浮球，不改变记录内容本身
+
+用户反馈拿日志文件太麻烦：Filza 在 `/var/mobile/Library/Preferences/` 新建文件失败（用复制已有文件再粘贴重命名绕过了这个问题，见安装环节的对话），事后再翻文件、通过 SSH 或 Filza 把内容发出来这一整条路径本身也是额外负担。本版不改变 alpha9 记录**什么**（`TOUCH`/`GESTURE` 行的字段不变），只改变记录之后**去哪**：同一条格式化字符串除了写入 `Log()`（文件不变），也传给新增的 `DebugRecord()`，直接显示在屏幕上。
+
+- 新增一个独立的 `UIWindow`（子类 `MWDebugWindow`），窗口层级设到 `UIWindowLevelAlert+100000`，确保盖在系统其它界面之上。窗口本身铺满全屏，但重写了 `hitTest:withEvent:`：只有悬浮球和展开面板这两个真实子视图能接住触摸，其它区域命中到窗口自己时一律返回 `nil`，让触摸穿透到下面的正常界面——这和文件里 `SBFTouchPassThroughView` 这个类名本身要求的行为是同一件事，只是这次是我们自己新建的窗口需要自己满足这个要求。
+- **这个窗口从未被 `Discover()` 登记进 `Roots`**，所以 `ApplyWorld`/`RestoreWorld`/`OwnedContent`/`InsideTurnedRoot` 都不会碰到它：它始终按正常方向渲染，拖动它自己的 `UIPanGestureRecognizer` 也不会被 `TurnDelta`取反（`InsideTurnedRoot` 沿 superview 链找的是带 `MWWorldState` 的 Root，这棵视图树里没有）。这是设计使然，不是需要验证的假设——诊断工具本身必须在被诊断的东西行为异常时仍然可用。
+- 悬浮球可拖动（`UIPanGestureRecognizer`，纯本地状态更新，不涉及任何 World 几何）、点按展开/收起（`UITapGestureRecognizer`）。历史缓冲是一个上限 300 条的 `NSMutableArray`，超出后从最旧的开始丢弃；展开时把整个缓冲拼接显示在一个不可编辑但可选中复制的 `UITextView` 里，每次新记录自动滚动到底部。
+- 只在 `Tracing`（同 alpha9 的文件开关）为真时才创建/显示；关闭时隐藏但不销毁，历史和悬浮球位置保留，重新开启不会重置。创建本身是幂等的（`if(DebugWindow)return;`），从 `Reconcile()`（恒在主线程）里被调用，不会重复初始化。
+- 与几何测试同理，这里全部是运行时 UIKit 对象操作（窗口层级、hitTest、手势、文本视图），不是新的坐标数学，`WorldMath.h`/`world_math_test.c` 不变，无法脱离设备真机验证。
 
 ## 尚未处理
 

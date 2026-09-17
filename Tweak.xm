@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.9.0-alpha9. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 0.10.0-alpha10. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -22,6 +22,10 @@ static BOOL Enabled, Installed, Busy, Tracing;
 static unsigned Depth, Attempts, HitDepth;
 static dispatch_source_t Timer;
 static char StateKey;
+// Forward declaration: the floating debug overlay is defined near the
+// gesture-trace code below, but Reconcile() (defined first) toggles its
+// visibility on every Tracing transition.
+static void DebugSetVisible(BOOL visible);
 
 // Patch-owned state classes, NOT names extracted from Mango.
 @interface MWOwnedTransform : NSObject
@@ -252,7 +256,7 @@ static void Reconcile(void){
             // Tracing is independent of Enabled/orientation: it is a read-only
             // diagnostic, useful for comparing turned vs. untouched behavior.
             BOOL tracing=access(TracePath,F_OK)==0;
-            if(tracing!=Tracing){Tracing=tracing;Log(Tracing?@"TRACE: touch/gesture tracing enabled":@"TRACE: touch/gesture tracing disabled");}
+            if(tracing!=Tracing){Tracing=tracing;Log(Tracing?@"TRACE: touch/gesture tracing enabled":@"TRACE: touch/gesture tracing disabled");DebugSetVisible(Tracing);}
             if(!Enabled||Orientation()!=UIInterfaceOrientationPortraitUpsideDown)return;
             for(UIWindow *w in ExistingWindows())Discover(w);
             for(UIWindow *w in Windows.allObjects)Discover(w);
@@ -454,19 +458,138 @@ static BOOL InsideTurnedRoot(UIView *v){
     }
     return NO;
 }
+// Floating debug overlay, added in 0.10.0-alpha10. The file-based trace
+// toggle answers "did anything fire" only after the fact, through Filza or
+// SSH; this answers it live, on the screen being tested, with no separate
+// retrieval step. It is a plain UIWindow the World never registers as a
+// Root, so none of the world/content/gesture hooks above ever apply to it --
+// it always renders upright, and its own drag/tap gestures are unaffected by
+// TurnDelta (InsideTurnedRoot walks superviews looking for a tracked Root;
+// this window's view tree is never one).
+static UIWindowScene *MainWindowScene(void){
+    for(UIScene *scene in UIApplication.sharedApplication.connectedScenes)
+        if([scene isKindOfClass:UIWindowScene.class]&&((UIWindowScene *)scene).screen==UIScreen.mainScreen)
+            return (UIWindowScene *)scene;
+    return nil;
+}
+@interface MWDebugWindow : UIWindow
+@end
+@implementation MWDebugWindow
+// Only the bubble/panel subviews should ever receive a touch; every other
+// point in this full-screen window must fall through to whatever is behind
+// it -- the same click-through requirement SBFTouchPassThroughView names.
+- (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
+    UIView *hit=[super hitTest:p withEvent:e];
+    return hit==self?nil:hit;
+}
+@end
+@interface MWDebugController : NSObject
+- (void)onTap:(UITapGestureRecognizer *)g;
+- (void)onPan:(UIPanGestureRecognizer *)g;
+@end
+static UIWindow *DebugWindow;
+static UIView *DebugBubble;
+static UILabel *DebugCount;
+static UITextView *DebugPanel;
+static NSMutableArray<NSString *> *DebugHistory;
+static BOOL DebugExpanded;
+static void DebugLayout(void){
+    if(!DebugWindow)return;
+    DebugPanel.hidden=!DebugExpanded;
+    if(!DebugExpanded)return;
+    CGRect screen=UIScreen.mainScreen.bounds;
+    CGRect b=DebugBubble.frame;
+    CGFloat w=MIN((CGFloat)300,screen.size.width-16),h=MIN((CGFloat)360,screen.size.height-16);
+    CGFloat x=MAX((CGFloat)8,MIN(b.origin.x,screen.size.width-w-8));
+    CGFloat y=b.origin.y-h-8;
+    if(y<8)y=CGRectGetMaxY(b)+8;
+    DebugPanel.frame=CGRectMake(x,y,w,h);
+    DebugPanel.text=[DebugHistory componentsJoinedByString:@"\n"];
+    [DebugPanel scrollRangeToVisible:NSMakeRange(DebugPanel.text.length,0)];
+}
+@implementation MWDebugController
+- (void)onTap:(UITapGestureRecognizer *)g {
+    if(g.state!=UIGestureRecognizerStateEnded)return;
+    DebugExpanded=!DebugExpanded;
+    DebugLayout();
+}
+- (void)onPan:(UIPanGestureRecognizer *)g {
+    CGPoint t=[g translationInView:DebugWindow];
+    CGRect f=DebugBubble.frame;
+    f.origin.x+=t.x;f.origin.y+=t.y;
+    DebugBubble.frame=f;
+    [g setTranslation:CGPointZero inView:DebugWindow];
+    if(g.state==UIGestureRecognizerStateEnded||g.state==UIGestureRecognizerStateCancelled)DebugLayout();
+}
+@end
+static MWDebugController *DebugController;
+static void DebugCreate(void){
+    if(DebugWindow)return;
+    CGRect screen=UIScreen.mainScreen.bounds;
+    UIWindowScene *scene=MainWindowScene();
+    DebugWindow=scene?[[MWDebugWindow alloc] initWithWindowScene:scene]:[[MWDebugWindow alloc] initWithFrame:screen];
+    DebugWindow.frame=screen;
+    DebugWindow.windowLevel=UIWindowLevelAlert+100000;
+    DebugWindow.backgroundColor=UIColor.clearColor;
+    DebugWindow.hidden=YES;
+    DebugBubble=[[UIView alloc] initWithFrame:CGRectMake(screen.size.width-60,screen.size.height-140,44,44)];
+    DebugBubble.backgroundColor=[UIColor colorWithWhite:0 alpha:.55];
+    DebugBubble.layer.cornerRadius=22;DebugBubble.clipsToBounds=YES;
+    DebugCount=[[UILabel alloc] initWithFrame:DebugBubble.bounds];
+    DebugCount.textAlignment=NSTextAlignmentCenter;
+    DebugCount.textColor=UIColor.whiteColor;
+    DebugCount.font=[UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightBold];
+    DebugCount.text=@"0";DebugCount.userInteractionEnabled=NO;
+    [DebugBubble addSubview:DebugCount];
+    [DebugWindow addSubview:DebugBubble];
+    DebugPanel=[[UITextView alloc] initWithFrame:CGRectZero];
+    DebugPanel.backgroundColor=[UIColor colorWithWhite:0 alpha:.85];
+    DebugPanel.textColor=UIColor.greenColor;
+    DebugPanel.font=[UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightRegular];
+    DebugPanel.editable=NO;DebugPanel.selectable=YES;
+    DebugPanel.layer.cornerRadius=8;DebugPanel.clipsToBounds=YES;
+    DebugPanel.hidden=YES;
+    [DebugWindow addSubview:DebugPanel];
+    DebugController=[MWDebugController new];
+    [DebugBubble addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:DebugController action:@selector(onTap:)]];
+    [DebugBubble addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:DebugController action:@selector(onPan:)]];
+}
+// Called from Reconcile() on every Tracing transition. Lazily creates the
+// overlay once, then only toggles hidden -- history and bubble position
+// survive being hidden, so re-enabling tracing does not reset either.
+static void DebugSetVisible(BOOL visible){
+    if(visible)DebugCreate();
+    if(!DebugWindow)return;
+    DebugWindow.hidden=!visible;
+    if(!visible){DebugExpanded=NO;DebugPanel.hidden=YES;}
+}
+static void DebugRecord(NSString *line){
+    if(!DebugHistory)DebugHistory=[NSMutableArray array];
+    [DebugHistory addObject:line];
+    if(DebugHistory.count>300)[DebugHistory removeObjectAtIndex:0];
+    if(!DebugCount)return;
+    DebugCount.text=[NSString stringWithFormat:@"%lu",(unsigned long)DebugHistory.count];
+    if(DebugExpanded){
+        DebugPanel.text=[DebugHistory componentsJoinedByString:@"\n"];
+        [DebugPanel scrollRangeToVisible:NSMakeRange(DebugPanel.text.length,0)];
+    }
+}
+
 // in/out/inout are Objective-C context-sensitive keywords; name the parameters
 // so they cannot be read as parameter qualifiers.
 static void LogGestureFix(NSString *api,NSString *cls,CGPoint raw,CGPoint flipped){
     static double last;double now=CACurrentMediaTime();
     if(now-last<=0.05)return;    // a drag calls this many times per frame
     last=now;
-    Log([NSString stringWithFormat:@"GESTURE api=%@ class=%@ raw={%.2f,%.2f} turned={%.2f,%.2f}",api,cls,raw.x,raw.y,flipped.x,flipped.y]);
+    NSString *s=[NSString stringWithFormat:@"GESTURE api=%@ class=%@ raw={%.2f,%.2f} turned={%.2f,%.2f}",api,cls,raw.x,raw.y,flipped.x,flipped.y];
+    Log(s);DebugRecord(s);
 }
 static void LogGestureSkip(NSString *api,NSString *cls,UIView *view){
     static double last;double now=CACurrentMediaTime();
     if(now-last<=1)return;
     last=now;
-    Log([NSString stringWithFormat:@"GESTURE SKIP api=%@ class=%@ view=%@ reason=outside-turned-root",api,cls,NSStringFromClass(view.class)]);
+    NSString *s=[NSString stringWithFormat:@"GESTURE SKIP api=%@ class=%@ view=%@ reason=outside-turned-root",api,cls,NSStringFromClass(view.class)];
+    Log(s);DebugRecord(s);
 }
 // Negate both axes of a fixed-space delta read inside the turned world. Guard
 // non-finite values rather than propagate them, matching how every geometry
@@ -565,8 +688,9 @@ static void TraceTouches(UIWindow *w,UIEvent *e){
     for(UITouch *t in e.allTouches){
         CGPoint win=[t locationInView:w];
         CGPoint fx=isfinite(win.x)&&isfinite(win.y)?[w convertPoint:win toCoordinateSpace:fixed]:win;
-        Log([NSString stringWithFormat:@"TOUCH phase=%@ window={%.1f,%.1f} fixed={%.1f,%.1f} view=%@ recognizers=%@",
-            PhaseName(t.phase),win.x,win.y,fx.x,fx.y,NSStringFromClass(t.view.class),RecognizerDump(t.view)]);
+        NSString *s=[NSString stringWithFormat:@"TOUCH phase=%@ window={%.1f,%.1f} fixed={%.1f,%.1f} view=%@ recognizers=%@",
+            PhaseName(t.phase),win.x,win.y,fx.x,fx.y,NSStringFromClass(t.view.class),RecognizerDump(t.view)];
+        Log(s);DebugRecord(s);
     }
 }
 // Strictly read-only: calls through to the original sendEvent: FIRST and
@@ -617,6 +741,6 @@ static void Install(void){
     dispatch_source_set_timer(Timer,dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),250*NSEC_PER_MSEC,50*NSEC_PER_MSEC);
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
     InstallGestureFix();
-    Log(@"INSTALLED World 0.9.0-alpha9: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace");Reconcile();
+    Log(@"INSTALLED World 0.10.0-alpha10: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}
