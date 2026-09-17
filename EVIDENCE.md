@@ -200,6 +200,23 @@ TOUCH phase=Began window={164.8,65.0} fixed={203.3,744.3} view=_SAUIPortalView r
 
 两处改动都不影响现有的灵动岛几何/手势逻辑（`ApplyWorld`/`ContentHookTransform`/`TurnDelta`/`WorldMath.h` 均未改）,悬浮窗的转正只影响它自己的 `UIWindow.transform`,探测只读、不写任何视图。
 
+## 0.13.0-alpha13 真机结果，与 0.14.0-alpha14 的修法
+
+用户开 trace 后做了一次长按/拖动测试，并打开了 Mango 分屏、进行了 Mango 相关操作。日志给出两组独立的新事实：
+
+**灵动岛拖动方向——`CLASSDUMP`/`LPROBE` 的组合结果**：`SBSystemApertureLongPressGestureRecognizer` 自身只定义了一个方法——`touchesMoved:withEvent:`；`_SAUIPortalView` 定义的全是渲染配置相关方法（`setSourceView:`/`portalLayer`/`_configurePortalViewIfNeeded` 等），没有任何手势代码，排除。同一份日志里有约 10 次 `TOUCH phase=Moved`，但 `LPROBE`（`locationInView:`/`locationOfTouch:inView:`，`UIGestureRecognizer` 基类都有的公开取位置方法）总共只触发 4 次，且几乎全部落在 `Began`/`Cancelled` 状态切换的瞬间，持续拖动过程中（`Changed`）整场只出现 1 次。如果方向判断真的靠这两个方法算，应该随每次 `Moved` 持续密集触发；实际几乎不触发，说明这个类拿手指位置大概率没有走 `UIGestureRecognizer` 自己的这两个方法，而是在它重写的 `touchesMoved:withEvent:` 里直接读传入的 `UITouch` 对象自己的 `-locationInView:`/`-previousLocationInView:`（**注意**：`UITouch` 也有一个同名方法 `locationInView:`，跟 `UIGestureRecognizer` 的是两个完全不同类上的同名方法——这次 `InstallLongPressProbe()` 用 `MSHookMessageEx` 精确 hook 的是后者，根本碰不到 `UITouch` 自己那个）。这是具体、可验证的下一步方向，但本版没有据此新增或修改任何 hook：下一步如果要继续追，更安全的做法是直接给 `touchesMoved:withEvent:` 本身加 hook（范围完全锁定这一个类），而不是 hook 全系统都在用的 `UITouch`。
+
+**`SPLITPROBE` 的假阴性——问题在探测范围，不在判据**：这次日志里 `SPLITPROBE` 命中了 `SBCoverSheetWindow`/`SBControlCenterWindow`/`UITextEffectsWindow`/`SBHomeScreenWindow`/`SBFloatingDockWindow`/`SBWindow`/`SBMainSwitcherWindow`/`SBBannerWindow`——基本是 SpringBoard 自己界面的全部（主屏、控制中心、锁屏、悬浮 Dock、多任务切换、通知横幅、键盘），证实了 alpha13 分析里提到的"另一个真正的倒置插件"确实在系统层面对这些窗口做了真正的整体旋转。但**没有任何一行提到 Mango 或分屏**，即使用户这次确认已经打开分屏并做过操作。
+
+原因是 alpha13 的 `ProbeOtherWindows()` 显式跳过了任何 `isKindOfClass:WindowClass`（即 `SBSystemApertureWindow`，灵动岛自己的窗口）的窗口，理由是"里面的内容已经被这个文件其它逻辑处理过了"。但 `EVIDENCE.md` 第 10 行记录的父视图链——`Mango host → SAUIElementView → UIView → _SBSystemApertureContainerViewContentView → UIView → SBSystemApertureContainerView → 三层 SBFTouchPassThroughView → SBSystemApertureWindow`——和 alpha11 `TOUCH` 追踪都指向同一件事：真正被触摸命中的 `_SAUIPortalView`，是跟已知内容层（`_SBSystemApertureContainerViewContentView`）平级的另一个视图，不在它的子树里。alpha13 把整个灵动岛窗口都跳过，连这个视图也一起漏掉了——不是判据错，是范围错。
+
+alpha14 的修法分两处，而不是简单地"不再跳过这个窗口"：
+
+1. `ProbeInverted`/`ProbeOtherWindows` 现在会扫描所有窗口，灵动岛窗口也包含在内；但改为专门排除 `ContentClass` 这一个类本身（命中判定和递归都在这里停），而不是排除整个窗口。原因：`ApplyWorld`/`ContentHookTransform` 已经主动纠正过这个内容视图自己的朝向，纠正后它和它所有子视图，在固定坐标系里理应呈现"倒置基向量"——这是已经修好、生效中的状态，不是新发现。如果继续往它内部递归做这个判定，会把内容层内部本来就该倒置、早就在 `WORLD`/`TRACK` 里报过的图标、文字视图全部当成"新发现"报出来，是纯噪音，还会把真正的新信息埋起来。去重键也从"只按窗口类名"改成"窗口类名+这次找到的完整视图列表"，因为分屏打开关闭这类内容变化，不应该被"这个窗口类名之前报过一次"挡住不再记录。
+2. 新增 `ProbeContentStructure()`，专门补上"不进内容层子树"留下的空白——它不问朝向对不对（那边的答案已知且没有信息量），只是把内容层内部**真实存在**的全部视图类名去重列出来，记一条 `CONTENTDUMP classes=...`，跟 alpha11 对手势类做 `CLASSDUMP` 是同一个思路，只是这次照的是视图树而不是方法列表。按去重后的完整类名集合去重记录，集合变了（比如分屏往里面加了新视图）会重新记一次，不会被更早、更短的一次记录挡住。
+
+两个改动都只读，不修改任何几何/手势逻辑（`ApplyWorld`/`ContentHookTransform`/`TurnDelta`/`WorldMath.h` 均未改）。下一步：真机重新开 trace、再打开一次分屏，看 `SPLITPROBE` 里灵动岛窗口这次是否报出除已知三层 `SBFTouchPassThroughView`/`SBSystemApertureContainerView` 之外的新类名，以及 `CONTENTDUMP` 里是否出现一个明显不属于 `SAUIElementView`/通用 `UIView` 这类已知外壳的、看起来像分屏专用的类名。
+
 ## 尚未处理
 
 - 岛落到屏幕底部。alpha2 加了跳过原因日志，未改判定。需要真机复现后读 `SKIP` 行才能定性；另需确认异常时岛内文字对倒置视角是正还是倒，以区分是 Mango 的方向状态问题还是 World 的几何判定问题。

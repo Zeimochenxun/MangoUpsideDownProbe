@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.13.0-alpha13. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 0.14.0-alpha14. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -269,11 +269,28 @@ static NSArray<UIWindow *> *ExistingWindows(void){
 // plugin doesn't follow" into a concrete class to target next, the same way
 // alpha11's CLASSDUMP turned a guess into SBSystemApertureLongPressGesture-
 // Recognizer. Never modifies anything it finds; walks are bounded like
-// Contents(), and each window class is logged only once per boot so a
-// steady hit cannot flood the log.
+// Contents().
+//
+// 0.14.0-alpha14: alpha13 skipped SBSystemApertureWindow entirely on the
+// assumption that anything relevant there was already covered by ApplyWorld.
+// A real-device run with Mango's split screen open found nothing, and the
+// EVIDENCE.md parent chain plus alpha11's TOUCH log explain why: Mango
+// draws inside this same window (_SAUIPortalView, hit directly by touches,
+// sits alongside -- not above -- ContentClass in that chain), so the whole
+// window was the wrong thing to exclude. Now every window is walked,
+// aperture included. ContentClass's own subtree is excluded instead (not
+// skipped -- its entire recursion stops there): ApplyWorld/ContentHookTransform
+// already cancel that view's own turn, so every plain view inside it
+// legitimately reads as an inverted basis too (it inherits the window's
+// turn with no counter-rotation of its own) -- that is the fix working, not
+// a new finding, and running this test inside it would flood the log with
+// already-known-good views instead of surfacing whatever Mango actually put
+// there. ProbeContentStructure() below answers that question instead, with
+// a test that fits what is actually unknown in there: structure, not turn.
 static NSMutableSet<NSString *> *SeenInvertedWindowClasses;
 static void ProbeInverted(UIView *v,id<UICoordinateSpace> fixed,unsigned depth,NSMutableArray<NSString *> *hits){
-    if(depth>32||hits.count>=8||!CATransform3DIsAffine(v.layer.transform))return;
+    if(depth>32||hits.count>=16||!CATransform3DIsAffine(v.layer.transform))return;
+    if(ContentClass&&[v isKindOfClass:ContentClass])return;
     CGPoint a=[v convertPoint:CGPointZero toCoordinateSpace:fixed];
     CGPoint b=[v convertPoint:CGPointMake(1,0) toCoordinateSpace:fixed];
     CGPoint c=[v convertPoint:CGPointMake(0,1) toCoordinateSpace:fixed];
@@ -284,7 +301,7 @@ static void ProbeInverted(UIView *v,id<UICoordinateSpace> fixed,unsigned depth,N
 static void ProbeOtherWindows(void){
     if(!SeenInvertedWindowClasses)SeenInvertedWindowClasses=[NSMutableSet set];
     for(UIWindow *w in ExistingWindows()){
-        if(w.screen!=UIScreen.mainScreen||w==DebugWindow||(WindowClass&&[w isKindOfClass:WindowClass]))continue;
+        if(w.screen!=UIScreen.mainScreen||w==DebugWindow)continue;
         NSString *wcls=NSStringFromClass(w.class);
         if([SeenInvertedWindowClasses containsObject:wcls])continue;
         NSMutableArray<NSString *> *hits=[NSMutableArray array];
@@ -292,6 +309,38 @@ static void ProbeOtherWindows(void){
         if(!hits.count)continue;
         [SeenInvertedWindowClasses addObject:wcls];
         Log([NSString stringWithFormat:@"SPLITPROBE window=%@ inverted=%@",wcls,[hits componentsJoinedByString:@","]]);
+    }
+}
+// 0.14.0-alpha14: what ProbeInverted deliberately does not look inside --
+// the real view classes Mango puts under its own content view. Unlike
+// ProbeInverted this asks nothing about orientation/turn state at all (every
+// view found here has already had its turn cancelled by the hooks above, so
+// that question has a known, uninteresting answer); it only names what is
+// actually there, the same purpose LogOwnMethods() served for a method list
+// instead of a view tree. Keyed and deduplicated by the full sorted class
+// set rather than by root pointer: a root can persist across many app
+// switches with the same shape, and Mango replacing what it draws inside
+// (split screen opening, say) is exactly the change this must not silently
+// swallow by having already logged some earlier, shorter set for the same
+// root.
+static NSMutableSet<NSString *> *SeenContentShapes;
+static void CollectClasses(UIView *v,unsigned depth,NSMutableSet<NSString *> *classes){
+    if(depth>32||classes.count>=64)return;
+    [classes addObject:NSStringFromClass(v.class)];
+    for(UIView *sub in v.subviews)CollectClasses(sub,depth+1,classes);
+}
+static void ProbeContentStructure(void){
+    if(!SeenContentShapes)SeenContentShapes=[NSMutableSet set];
+    for(UIView *root in Roots.allObjects){
+        NSArray<UIView *> *contents=Contents(root);if(!contents)continue;
+        for(UIView *content in contents){
+            NSMutableSet<NSString *> *classes=[NSMutableSet set];
+            CollectClasses(content,0,classes);
+            NSString *joined=[[classes.allObjects sortedArrayUsingSelector:@selector(compare:)] componentsJoinedByString:@","];
+            if([SeenContentShapes containsObject:joined])continue;
+            [SeenContentShapes addObject:joined];
+            Log([NSString stringWithFormat:@"CONTENTDUMP classes=%@",joined]);
+        }
     }
 }
 static void Reconcile(void){
@@ -312,6 +361,7 @@ static void Reconcile(void){
             for(UIWindow *w in ExistingWindows())Discover(w);
             for(UIWindow *w in Windows.allObjects)Discover(w);
             for(UIView *root in Roots.allObjects)ApplyWorld(root);
+            if(Tracing)ProbeContentStructure();
         }];
     }@finally{Busy=NO;}
 }
@@ -888,6 +938,6 @@ static void Install(void){
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
     InstallGestureFix();
     InstallLongPressProbe();
-    Log(@"INSTALLED World 0.13.0-alpha13: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay (all log lines, now itself turned) + long-press class probe + other-window inversion probe");Reconcile();
+    Log(@"INSTALLED World 0.14.0-alpha14: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay (all log lines, now itself turned) + long-press class probe + other-window inversion probe (aperture window included) + content structure probe");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}
