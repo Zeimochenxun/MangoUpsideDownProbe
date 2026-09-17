@@ -1,10 +1,9 @@
-Package: com.chenxun.mangoupsidedownworld
-Name: MangoUpsideDownWorld
-Version: 1.0.0
+Package: com.chenxun.mangoorientationprobe
+Name: MangoOrientationProbe
+Version: 0.1.0
 Architecture: iphoneos-arm64e
-Description: Experimental whole-aperture upside-down compatibility for Mango on iOS 16.5.
+Description: Read-only Mango orientation and gesture probe for iOS 16.5 RootHide.
 Maintainer: Chen Xun
 Author: Chen Xun
 Section: Tweaks
 Depends: mobilesubstrate, firmware (= 16.5)
-Conflicts: com.chenxun.mangoupsidedownfix
