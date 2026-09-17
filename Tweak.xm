@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.15.2-alpha15c. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 1.0.0. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -19,11 +19,6 @@ static Class WindowClass, PassClass, ContentClass, ContainerClass;
 static NSHashTable<UIWindow *> *Windows;
 static NSHashTable<UIView *> *Roots;
 static BOOL Enabled, Installed, Busy, Tracing;
-// 0.15.0-alpha15: single top-level arm/disarm gate for the whole feature,
-// not just the new riskier pieces below. Defaults to NO and is never
-// persisted to a file the way Disabled/TracePath are -- every respring
-// starts fully disarmed, on purpose (see EVIDENCE.md).
-static BOOL ManualOn;
 static unsigned Depth, Attempts, HitDepth;
 static dispatch_source_t Timer;
 static char StateKey;
@@ -37,17 +32,6 @@ static void DebugRecord(NSString *line);
 static void DebugSetVisible(BOOL visible);
 static void DebugSetTurned(BOOL turned);
 static UIWindow *DebugWindow;
-// 0.15.0-alpha15: ArmSetAppearance is defined alongside ArmCreate, after
-// MWDebugController's @implementation (same reason DebugSetVisible needs
-// forward declaring above), but onArmTap: inside that implementation calls
-// it immediately on every tap. ArmCreate itself needs forward declaring for
-// the same reason DebugCreate never did: DebugCreate is only ever called
-// from DebugSetVisible, defined right next to it; ArmCreate is called from
-// Reconcile(), defined earlier in the file, so it can retry every tick
-// until a real UIWindowScene exists (see ArmCreate's own comment).
-static void ArmSetAppearance(void);
-static void ArmCreate(void);
-static UIWindow *ArmWindow;
 
 // Patch-owned state classes, NOT names extracted from Mango.
 @interface MWOwnedTransform : NSObject
@@ -317,7 +301,7 @@ static void ProbeInverted(UIView *v,id<UICoordinateSpace> fixed,unsigned depth,N
 static void ProbeOtherWindows(void){
     if(!SeenInvertedWindowClasses)SeenInvertedWindowClasses=[NSMutableSet set];
     for(UIWindow *w in ExistingWindows()){
-        if(w.screen!=UIScreen.mainScreen||w==DebugWindow||w==ArmWindow)continue;
+        if(w.screen!=UIScreen.mainScreen||w==DebugWindow)continue;
         NSString *wcls=NSStringFromClass(w.class);
         if([SeenInvertedWindowClasses containsObject:wcls])continue;
         NSMutableArray<NSString *> *hits=[NSMutableArray array];
@@ -359,21 +343,57 @@ static void ProbeContentStructure(void){
         }
     }
 }
+// 1.0.0: read-only diagnostic for the Face ID lock-screen ask -- no confirmed
+// private class name for the biometric prompt view was found ahead of time,
+// so per this file's own established rule (guess a class and hook it blind
+// only after a real device log names it, never before -- alpha1-8's whole
+// lesson on the pill), this only looks and logs. Reuses CollectClasses
+// exactly as ProbeContentStructure does, just rooted at a different window
+// instead of Mango's content view. Independent of Enabled/active/orientation
+// entirely (unlike ProbeContentStructure): the lock screen exists and can be
+// probed regardless of whether the pill itself is currently being tracked or
+// turned, so this is gated only by Tracing, the same as ProbeOtherWindows.
+// Filtered to window class names containing "CoverSheet" or "DashBoard" --
+// SBCoverSheetWindow is confirmed present on this exact device from this
+// repo's own alpha14 SPLITPROBE log data; "DashBoard" is an unconfirmed
+// second candidate family since the window actually hosting the Face ID
+// prompt is unknown. Rate-limited independently (~2s) rather than sharing
+// TraceTouches'/LogGestureFix's 0.05s throttle: this has nothing to do with
+// touch/frame cadence, and windows worth walking here don't change that
+// fast.
+static NSMutableSet<NSString *> *SeenLockScreenShapes;
+static void ProbeLockScreenViews(void){
+    static double last;double now=CACurrentMediaTime();
+    if(now-last<=2)return;
+    last=now;
+    if(!SeenLockScreenShapes)SeenLockScreenShapes=[NSMutableSet set];
+    for(UIWindow *w in ExistingWindows()){
+        NSString *wcls=NSStringFromClass(w.class);
+        if(![wcls containsString:@"CoverSheet"]&&![wcls containsString:@"DashBoard"])continue;
+        NSMutableSet<NSString *> *classes=[NSMutableSet set];
+        CollectClasses(w,0,classes);
+        NSString *joined=[[classes.allObjects sortedArrayUsingSelector:@selector(compare:)] componentsJoinedByString:@","];
+        NSString *key=[wcls stringByAppendingString:joined];
+        if([SeenLockScreenShapes containsObject:key])continue;
+        [SeenLockScreenShapes addObject:key];
+        Log([NSString stringWithFormat:@"LOCKPROBE window=%@ classes=%@",wcls,joined]);
+    }
+}
 static void Reconcile(void){
     if(Busy||Depth||![NSThread isMainThread])return;
     Busy=YES;
     @try{
         [UIView performWithoutAnimation:^{
             for(UIView *root in Roots.allObjects)RestoreWorld(root);
-            ArmCreate(); // no-op once ArmWindow exists; retries here until a real UIWindowScene does
-            if(access(Disabled,F_OK)==0&&Enabled){Enabled=NO;ManualOn=NO;Log(@"DISABLED: restored owned transforms");}
+            if(access(Disabled,F_OK)==0&&Enabled){Enabled=NO;Log(@"DISABLED: restored owned transforms");}
             // Tracing is independent of Enabled/orientation: it is a read-only
             // diagnostic, useful for comparing turned vs. untouched behavior.
             BOOL tracing=access(TracePath,F_OK)==0;
             if(tracing!=Tracing){Tracing=tracing;Log(Tracing?@"TRACE: touch/gesture tracing enabled":@"TRACE: touch/gesture tracing disabled");DebugSetVisible(Tracing);}
-            BOOL active=ManualOn&&Enabled&&Orientation()==UIInterfaceOrientationPortraitUpsideDown;
+            BOOL active=Enabled&&Orientation()==UIInterfaceOrientationPortraitUpsideDown;
             DebugSetTurned(active);
             if(Tracing)ProbeOtherWindows();
+            if(Tracing)ProbeLockScreenViews();
             if(!active)return;
             for(UIWindow *w in ExistingWindows())Discover(w);
             for(UIWindow *w in Windows.allObjects)Discover(w);
@@ -449,7 +469,7 @@ static void ContentHookTransform(UIView *s,SEL c,CGAffineTransform v){
 }
 
 static UIView *WorldHit(UIWindow *w,CGPoint point,UIEvent *event){
-    if(!ManualOn||!Enabled||Busy||Depth||![NSThread isMainThread]||HitDepth||Orientation()!=2)return nil;
+    if(!Enabled||Busy||Depth||![NSThread isMainThread]||HitDepth||Orientation()!=2)return nil;
     ++HitDepth;
     @try {
     for(UIView *root in w.subviews.reverseObjectEnumerator){
@@ -605,7 +625,6 @@ static UIWindowScene *MainWindowScene(void){
 - (void)onTap:(UITapGestureRecognizer *)g;
 - (void)onPan:(UIPanGestureRecognizer *)g;
 - (void)onLongPress:(UILongPressGestureRecognizer *)g;
-- (void)onArmTap:(UITapGestureRecognizer *)g;
 @end
 static UIView *DebugBubble;
 static UILabel *DebugCount;
@@ -647,20 +666,6 @@ static void DebugLayout(void){
     DebugPanel.backgroundColor=[UIColor colorWithWhite:1 alpha:.4];
     [UIView animateWithDuration:.3 animations:^{DebugPanel.backgroundColor=was;}];
 }
-// 0.15.0-alpha15: the only interactive control on ArmWindow. Flips the one
-// top-level gate everything else in this file now checks, updates this
-// button's own appearance immediately (ArmSetAppearance, defined with
-// ArmCreate below), and calls Reconcile() directly rather than waiting for
-// the next 250ms timer tick -- the same immediacy DebugSetVisible already
-// gets for free by being called from inside Reconcile() itself, but this
-// tap originates outside that loop.
-- (void)onArmTap:(UITapGestureRecognizer *)g {
-    if(g.state!=UIGestureRecognizerStateEnded)return;
-    ManualOn=!ManualOn;
-    Log([NSString stringWithFormat:@"ARM TAP now=%@",ManualOn?@"ON":@"OFF"]);
-    ArmSetAppearance();
-    Reconcile();
-}
 @end
 static MWDebugController *DebugController;
 static void DebugCreate(void){
@@ -700,95 +705,6 @@ static void DebugCreate(void){
     [DebugBubble addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:DebugController action:@selector(onPan:)]];
     [DebugPanel addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:DebugController action:@selector(onLongPress:)]];
 }
-// 0.15.0-alpha15: the arm/disarm button. Unlike DebugWindow (lazily created
-// only once Tracing turns on, hidden otherwise), this needs to exist as
-// early as possible -- ManualOn is the gate the user now has to reach for
-// every time, so the control for it cannot itself be hidden behind another
-// gate. Reuses MWDebugWindow's click-through hitTest as a second,
-// independent instance; no new window class needed. Fixed position
-// (bottom-left) rather than draggable like DebugBubble (bottom-right) --
-// one more gesture recognizer is one more thing to reason about on the
-// input path this whole file is already being careful with in this
-// version, and a single fixed corner is enough for a control meant to
-// always be reachable.
-//
-// alpha15 real-device result: the button appeared but taps produced no
-// response. DebugWindow uses this exact same construction (MWDebugWindow,
-// same windowLevel, a gesture recognizer on a small subview) and has always
-// worked, so the difference is not the pattern itself -- it is WHEN each
-// one runs it. DebugWindow is only ever built long after boot, when the
-// user manually creates the trace file, by which point a UIWindowScene is
-// certainly connected. This was the one thing in the whole file called
-// directly from Install() itself, which retries every 500ms specifically
-// because things this early in SpringBoard's startup are not guaranteed
-// ready yet -- if MainWindowScene() returned nil at that moment, the old
-// code fell back to initWithFrame:, which can render but, lacking any
-// windowScene, is known not to reliably receive touches on modern
-// scene-based iOS.
-//
-// alpha15b fixed that: ArmCreate() no longer falls back, and is called from
-// Reconcile() below (cheap due to the ArmWindow guard below) so it retries
-// on the same 250ms timer Install() itself already trusts. Real-device
-// result: ARM READY now fires (confirming the window really does attach to
-// a scene), but ARM TAP still never fires on a confirmed real tap. That
-// rules out the scene-timing theory entirely and narrows this to something
-// between "a touch lands on screen" and "the tap gesture recognizer
-// transitions to Ended" -- which could be a hit-testing/window-ordering
-// problem (the touch never reaches this view at all) or a gesture-
-// recognizer-specific one (the touch reaches the view but the recognizer
-// itself never fires). MWArmButtonView below adds a raw touchesBegan:
-// override directly on the button -- independent of UIGestureRecognizer's
-// own state machine entirely -- so the next real-device log tells these
-// two apart directly instead of guessing further: ARM TOUCHBEGAN with no
-// ARM TAP means the recognizer is the problem; neither firing means the
-// touch itself never arrives.
-@interface MWArmButtonView : UIView
-@end
-@implementation MWArmButtonView
-- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    Log(@"ARM TOUCHBEGAN");
-    [super touchesBegan:touches withEvent:event];
-}
-@end
-static UIView *ArmButton;
-static UILabel *ArmLabel;
-static void ArmCreate(void){
-    if(ArmWindow)return;
-    UIWindowScene *scene=MainWindowScene();
-    if(!scene)return; // retried by the next Reconcile() tick
-    CGRect screen=UIScreen.mainScreen.bounds;
-    ArmWindow=[[MWDebugWindow alloc] initWithWindowScene:scene];
-    ArmWindow.frame=screen;
-    ArmWindow.windowLevel=UIWindowLevelAlert+100000;
-    ArmWindow.backgroundColor=UIColor.clearColor;
-    ArmWindow.hidden=NO;
-    ArmButton=[[MWArmButtonView alloc] initWithFrame:CGRectMake(16,screen.size.height-140,44,44)];
-    ArmButton.layer.cornerRadius=22;ArmButton.clipsToBounds=YES;
-    ArmLabel=[[UILabel alloc] initWithFrame:ArmButton.bounds];
-    ArmLabel.textAlignment=NSTextAlignmentCenter;
-    ArmLabel.textColor=UIColor.whiteColor;
-    ArmLabel.font=[UIFont systemFontOfSize:11 weight:UIFontWeightBold];
-    ArmLabel.userInteractionEnabled=NO;
-    [ArmButton addSubview:ArmLabel];
-    [ArmWindow addSubview:ArmButton];
-    if(!DebugController)DebugController=[MWDebugController new];
-    [ArmButton addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:DebugController action:@selector(onArmTap:)]];
-    ArmSetAppearance();
-    // Confirms ArmWindow actually attached to a real scene, and roughly how
-    // many Reconcile() ticks (~250ms each) that took after boot -- directly
-    // useful for telling whether a future report of "button unresponsive"
-    // is this same timing issue recurring versus something else.
-    Log(@"ARM READY");
-}
-// Reflects ManualOn plainly: dark grey "OFF" vs. a saturated red "ON" --
-// arming this now also enables the global UITouch hook and repurposes the
-// volume buttons, so the button showing it must never be ambiguous about
-// which state is current.
-static void ArmSetAppearance(void){
-    if(!ArmButton)return;
-    ArmButton.backgroundColor=ManualOn?[UIColor colorWithRed:.8 green:.15 blue:.15 alpha:.85]:[UIColor colorWithWhite:0 alpha:.55];
-    ArmLabel.text=ManualOn?@"ON":@"OFF";
-}
 // Called from Reconcile() on every Tracing transition. Lazily creates the
 // overlay once, then only toggles hidden -- history and bubble position
 // survive being hidden, so re-enabling tracing does not reset either.
@@ -808,13 +724,8 @@ static void DebugSetVisible(BOOL visible){
 // not. Runs every Reconcile tick regardless of Tracing, so the transform is
 // already correct by the time DebugCreate() lazily makes the window visible.
 static void DebugSetTurned(BOOL turned){
-    if(DebugWindow)DebugWindow.transform=turned?CGAffineTransformMakeRotation((CGFloat)M_PI):CGAffineTransformIdentity;
-    // 0.15.0-alpha15: the arm/disarm button needs the same treatment and
-    // for the same reason -- it is a plain UIWindow like DebugWindow, and
-    // the user needs to read ON/OFF on it correctly while holding the
-    // phone physically upside-down, which is exactly when they are most
-    // likely to be reaching for it.
-    if(ArmWindow)ArmWindow.transform=turned?CGAffineTransformMakeRotation((CGFloat)M_PI):CGAffineTransformIdentity;
+    if(!DebugWindow)return;
+    DebugWindow.transform=turned?CGAffineTransformMakeRotation((CGFloat)M_PI):CGAffineTransformIdentity;
 }
 static void DebugRecord(NSString *line){
     if(!DebugHistory)DebugHistory=[NSMutableArray array];
@@ -887,87 +798,83 @@ static void InstallGestureFix(void){
     MSHookMessageEx(pan,@selector(velocityInView:),(IMP)HookVelocity,(IMP *)&OrigVelocity);
 }
 
-// 0.15.0-alpha15: the next candidate after alpha11's finding that the
-// pill's own gesture class defines only touchesMoved:withEvent:, and that
-// LPROBE (hooking UIGestureRecognizer's locationInView:/
-// locationOfTouch:inView:) fires far too rarely during a real drag to be
-// the primary position reader. touchesMoved: receives UITouch instances
-// directly, so UITouch's OWN locationInView:/previousLocationInView: --
-// same selector names, a different class entirely from the ones LPROBE
-// already covers -- is the next place code reading a touch's position
-// could be calling. Unlike every other hook in this file, this is not
-// scoped to any private SpringBoard class: UITouch is public, and this
-// method is called for every touch-position query anywhere in
-// SpringBoard's own process (Home Screen, Control Center, Notification
-// Center, the passcode pad, Face ID prompts, the app switcher, Spotlight's
-// keyboard), not just the pill. Two things keep that from mattering:
-// ManualOn (checked directly below, unlike TurnDelta, since nothing
-// upstream of this call site already implies it) must be on, and
-// InsideTurnedRoot(view) -- reused exactly as already defined above -- is
-// what actually confines any effect to the pill's own subtree, the same
-// way it already confines TurnDelta. Passcode/Face ID/Control Center/Home
-// Screen views are never inside that subtree, so this is a no-op for all
-// of them by the same reasoning TurnDelta already relies on, not new
-// reasoning.
+// 1.0.0: orientation-lock fix. SBOrientationLockManager is a real,
+// long-lived private SpringBoard singleton (documented in header dumps back
+// to iOS 7) -- confirmed still functional, not just historically, via the
+// actual published source of a real, currently-listed tweak (AVLock,
+// github.com/gilshahar7/AVLock), which declares and calls exactly
+// [SBOrientationLockManager sharedInstance] and its -lock/-unlock/
+// -isUserLocked methods. A separate, older (2016, iOS 9.3) header dump
+// additionally lists -lock:(long long)arg1, an explicit-target variant --
+// real historical evidence of the API's shape, but not independently
+// confirmed on iOS 16.5, so both selectors still go through this file's own
+// Signature() check below before anything is hooked, exactly like every
+// other private method this file has ever touched. The other classic
+// approach, [UIDevice setValue:forKey:@"orientation"], is confirmed dead on
+// iOS 16+ -- Apple explicitly patched it out -- and is not used here.
 //
-// locationInView:/previousLocationInView: return an ABSOLUTE position, not
-// a delta, so negating x/y (TurnDelta's operation) makes no geometric
-// sense here. The correct operation is reflecting the point about the same
-// pivot the rest of this file already turns everything around, computed in
-// whatever view happens to be passed in: convert the screen's fixed-space
-// center into that view's own coordinate space, then reflect the point
-// about it. Reflecting BOTH locationInView: and previousLocationInView:
-// about the same pivot negates the delta between them exactly the way
-// TurnDelta negates a delta directly (reflect(a)-reflect(b) == b-a), so
-// touchesMoved:-style code that diffs the two still sees the corrected
-// sign, while each individual call still returns a geometrically valid
-// point rather than a nonsensical negated coordinate.
+// Selectors are looked up via sel_registerName(...), not @selector(...):
+// none of lock/unlock/isUserLocked/lock: are declared in any imported
+// header, the same reason Orientation() above looks up
+// mango_currentInterfaceOrientation this way.
 //
-// This is not guaranteed to fix the direction bug. If the pill's private
-// code reads position from something other than these two methods (raw
-// UITouch ivars, or a private method neither this nor LPROBE covers), this
-// has zero effect on the actual bug while still carrying its narrowly
-// scoped risk. The log line below is how a real-device test tells the
-// difference -- exactly like LPROBE already did for the other candidate
-// pair.
-static BOOL InvertTouchLocation=YES;
-static void LogTouchLocationFix(NSString *api,CGPoint raw,CGPoint reflected){
-    static double last;double now=CACurrentMediaTime();
-    if(now-last<=0.05)return;    // a drag calls this many times per frame
-    last=now;
-    Log([NSString stringWithFormat:@"TOUCHFIX api=%@ raw={%.2f,%.2f} turned={%.2f,%.2f}",api,raw.x,raw.y,reflected.x,reflected.y]);
+// Scope note: this is the first hook in this file's history that is not
+// scoped to a class Mango itself owns. SBOrientationLockManager is a single
+// whole-device, whole-system singleton -- Control Center's toggle, Camera's
+// orientation lock, anything else that calls -lock, all go through the same
+// object. The mitigation here is behavioral, not structural: the actual
+// substitution below only fires in the one moment this fix targets (locking
+// while inverted); every other call is untouched. But the risk category
+// itself -- a system-wide singleton, not something private to Mango's own
+// UI -- is genuinely different from every prior hook in this file.
+static Class OrientationLockClass;
+static BOOL OrientationLockFixOK=YES;
+static SEL LockWithArgSel;
+static void (*OrigLockNoArg)(id,SEL);
+static void (*OrigLockWithArg)(id,SEL,long long);
+// The no-arg -lock is the one a Control Center toggle almost certainly
+// calls, since the toggle itself has no orientation argument to pass. When
+// the device is currently inverted, calling the original no-arg
+// implementation would lock at that inverted orientation -- instead this
+// calls the ORIGINAL -lock: implementation directly (OrigLockWithArg, not
+// through self, so this does not re-enter HookLockWithArg's own logging as
+// though it were a distinct external call) with the public
+// UIInterfaceOrientationPortrait constant, correcting the lock target
+// itself to upright. Every other case (not inverted, or Orientation()
+// returns -1/unknown) calls straight through to the untouched original --
+// a byte-for-byte passthrough for the overwhelmingly common case.
+static void HookLockNoArg(id self,SEL cmd){
+    if(!OrientationLockFixOK){OrigLockNoArg(self,cmd);return;}
+    if(Orientation()==UIInterfaceOrientationPortraitUpsideDown){
+        Log(@"ORIENTATIONLOCK forced-to-portrait");
+        OrigLockWithArg(self,LockWithArgSel,(long long)UIInterfaceOrientationPortrait);
+        return;
+    }
+    OrigLockNoArg(self,cmd);
 }
-static CGPoint TurnLocation(NSString *api,UIView *view,CGPoint p){
-    if(!InvertTouchLocation||!isfinite(p.x)||!isfinite(p.y))return p;
-    if(![NSThread isMainThread])return p;
-    if(!ManualOn)return p;
-    if(!view||!InsideTurnedRoot(view))return p;
-    UIScreen *screen=view.window.screen;if(!screen)return p;
-    CGRect bounds=screen.fixedCoordinateSpace.bounds;
-    CGPoint fixedCenter=CGPointMake(CGRectGetMidX(bounds),CGRectGetMidY(bounds));
-    CGPoint pivot=[view convertPoint:fixedCenter fromCoordinateSpace:screen.fixedCoordinateSpace];
-    if(!isfinite(pivot.x)||!isfinite(pivot.y))return p;
-    CGPoint out=CGPointMake(2*pivot.x-p.x,2*pivot.y-p.y);
-    if(!isfinite(out.x)||!isfinite(out.y))return p;
-    LogTouchLocationFix(api,p,out);
-    return out;
+// Observe-only: logs every call to the explicit-target variant and always
+// calls straight through unmodified, including calls this file's own
+// HookLockNoArg above makes internally (via OrigLockWithArg, so those don't
+// loop back through here) and any the original -lock implementation itself
+// might make internally when NOT inverted (before reaching OrigLockNoArg
+// above) -- this exists purely to gather real data on who else calls this
+// variant and with what target, without touching behavior nobody asked to
+// change.
+static void HookLockWithArg(id self,SEL cmd,long long target){
+    Log([NSString stringWithFormat:@"ORIENTATIONLOCK explicit-lock target=%lld currentOrientation=%ld",target,(long)Orientation()]);
+    OrigLockWithArg(self,cmd,target);
 }
-static CGPoint (*OrigTouchLocation)(id,SEL,UIView *);
-static CGPoint HookTouchLocation(UITouch *self,SEL cmd,UIView *view){
-    return TurnLocation(@"UITouch.locationInView:",view,OrigTouchLocation(self,cmd,view));
-}
-static CGPoint (*OrigTouchPreviousLocation)(id,SEL,UIView *);
-static CGPoint HookTouchPreviousLocation(UITouch *self,SEL cmd,UIView *view){
-    return TurnLocation(@"UITouch.previousLocationInView:",view,OrigTouchPreviousLocation(self,cmd,view));
-}
-static void InstallTouchLocationFix(void){
-    Class touch=UITouch.class;
-    NSArray *args=@[@"@"];
-    if(!Signature(touch,@selector(locationInView:),@encode(CGPoint),args)||
-       !Signature(touch,@selector(previousLocationInView:),@encode(CGPoint),args)){
-        InvertTouchLocation=NO;Log(@"NO TOUCH FIX: signature mismatch");return;}
-    MSHookMessageEx(touch,@selector(locationInView:),(IMP)HookTouchLocation,(IMP *)&OrigTouchLocation);
-    MSHookMessageEx(touch,@selector(previousLocationInView:),(IMP)HookTouchPreviousLocation,(IMP *)&OrigTouchPreviousLocation);
+static void InstallOrientationLockFix(void){
+    OrientationLockClass=objc_getClass("SBOrientationLockManager");
+    SEL lockSel=sel_registerName("lock");
+    LockWithArgSel=sel_registerName("lock:");
+    NSArray *longArg=@[@(@encode(long long))];
+    if(!OrientationLockClass||
+       !Signature(OrientationLockClass,lockSel,"v",@[])||
+       !Signature(OrientationLockClass,LockWithArgSel,"v",longArg)){
+        OrientationLockFixOK=NO;Log(@"NO ORIENTATION LOCK FIX: signature mismatch");return;}
+    MSHookMessageEx(OrientationLockClass,lockSel,(IMP)HookLockNoArg,(IMP *)&OrigLockNoArg);
+    MSHookMessageEx(OrientationLockClass,LockWithArgSel,(IMP)HookLockWithArg,(IMP *)&OrigLockWithArg);
 }
 
 // Diagnostic-only touch/gesture trace, added in 0.9.0-alpha9. Off by default;
@@ -1108,111 +1015,6 @@ static void InstallLongPressProbe(void){
         MSHookMessageEx(cls,@selector(locationOfTouch:inView:),(IMP)HookLongPressTouchLocation,(IMP *)&OrigLongPressTouchLocation);
     else Log(@"NO LPROBE: locationOfTouch:inView: signature mismatch");
 }
-
-// 0.15.0-alpha15: physical, touch-independent escape hatch for ManualOn --
-// the whole reason it needs one is that InstallTouchLocationFix above
-// makes SpringBoard's own touch handling the thing being changed. Targets
-// SBVolumeControl's -handleVolumeButtonWithType:down:, confirmed to exist
-// with this exact shape (a signed integer type identifier plus a down/up
-// BOOL) via public runtime-header archives of nearby iOS versions;
-// verified again at runtime via Signature() before hooking, same as every
-// other private class in this file -- if it doesn't match on this exact
-// device, VolumeHookOK stays NO, the hook is never installed, and volume
-// buttons are left completely untouched with no claim of a physical
-// recovery path, the same honesty NO HOOKS/NO GESTURE FIX already apply
-// elsewhere here.
-//
-// The numeric meaning of "type" for Up vs. Down is undocumented for iOS
-// 16.5. Rather than hardcode a historical guess (wrong guess swaps restore
-// and respring) or infer direction from system volume level (ambiguous
-// exactly at 0%/100%, precisely when this matters most), the mapping
-// self-calibrates at runtime with no separate ritual: while ManualOn is
-// off this hook is a pure passthrough (first line below), so nothing here
-// runs at all normally -- no timing, no swallowed presses. The moment
-// ManualOn turns on, the very first long-press of EITHER button is
-// recorded as the Up type and immediately performs the restore action;
-// every later press this boot is unambiguous. If that very first press
-// was actually the physical Down button, the user gets a restore instead
-// of a respring on that one press -- a mild, self-correcting inconvenience
-// (the mapping is now known; the next press of the other button resprings
-// correctly), never a dangerous one, since restoring is strictly gentler
-// than respringing and this fixes itself after exactly one press. See
-// EVIDENCE.md for why this was chosen over hardcoding a guess or reading
-// system volume level.
-static Class VolumeControlClass;
-static BOOL VolumeHookOK=YES;
-static BOOL VolumeMapped=NO;
-static long long VolumeUpType;
-static NSMutableDictionary<NSNumber *,NSNumber *> *VolumeGeneration;
-static NSMutableDictionary<NSNumber *,NSNumber *> *VolumeIsDown;
-static const NSTimeInterval VolumeLongPressThreshold=0.6;
-// Forces the same disarmed state DISABLED already produces, then runs
-// Reconcile() immediately rather than waiting up to 250ms for the timer --
-// this is the volume-button restore action, so it must be as prompt as
-// the arm button's own onArmTap: already is.
-static void DisarmAndRestore(void){
-    ManualOn=NO;
-    [UIView performWithoutAnimation:^{for(UIView *root in Roots.allObjects)RestoreWorld(root);}];
-    ArmSetAppearance();
-    Reconcile();
-}
-static void FireVolumeAction(BOOL isUp){
-    if(isUp){Log(@"VOLUME ACTION restore-and-disarm");DisarmAndRestore();}
-    else{Log(@"VOLUME ACTION respring");exit(0);}
-}
-static void (*OrigHandleVolumeButton)(id,SEL,long long,BOOL);
-static void HookHandleVolumeButton(id self,SEL cmd,long long type,BOOL down){
-    if(![NSThread isMainThread]){OrigHandleVolumeButton(self,cmd,type,down);return;}
-    if(!VolumeGeneration)VolumeGeneration=[NSMutableDictionary dictionary];
-    if(!VolumeIsDown)VolumeIsDown=[NSMutableDictionary dictionary];
-    NSNumber *key=@(type);
-    if(!down){
-        // VolumeIsDown[key] is only ever set to YES while a down for this
-        // same key was swallowed below. Clearing it here, and only here --
-        // never preemptively from the timer below -- is what lets this
-        // real release event still recognize itself as owned even after
-        // ManualOn (or the mapping) has since changed as a *result* of
-        // this very press's own long-press action; otherwise the original
-        // implementation would see an up with no matching down.
-        BOOL owned=[VolumeIsDown[key] boolValue];
-        VolumeIsDown[key]=@NO;
-        if(owned)return;
-        OrigHandleVolumeButton(self,cmd,type,down);return;
-    }
-    if(!VolumeHookOK||!ManualOn){OrigHandleVolumeButton(self,cmd,type,down);return;}
-    NSNumber *prevGen=VolumeGeneration[key];
-    unsigned long long gen=(prevGen?prevGen.unsignedLongLongValue:0)+1;
-    VolumeGeneration[key]=@(gen);
-    VolumeIsDown[key]=@YES;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(VolumeLongPressThreshold*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
-        if(!ManualOn)return; // disarmed (via the toggle, or already restored) mid-hold: do not act
-        if(![VolumeIsDown[key] boolValue])return; // released before the threshold: short press, already swallowed above
-        if(VolumeGeneration[key].unsignedLongLongValue!=gen)return; // superseded by a newer down on the same key
-        if(!VolumeMapped){
-            VolumeUpType=type;VolumeMapped=YES;
-            Log([NSString stringWithFormat:@"VOLUME CALIBRATED up-type=%lld (this boot only)",type]);
-            FireVolumeAction(YES);return;
-        }
-        FireVolumeAction(type==VolumeUpType);
-    });
-    // Never calls original while armed: this press is fully owned, short
-    // or long -- VolumeIsDown[key] is cleared only by the eventual real up
-    // event above, so that event -- not this timer -- decides whether the
-    // original implementation ever sees anything for this press.
-}
-static void InstallVolumeFix(void){
-    VolumeControlClass=objc_getClass("SBVolumeControl");
-    // handleVolumeButtonWithType:down: is not declared in any imported
-    // header (SBVolumeControl is private), so it is looked up by name at
-    // runtime rather than written as @selector(...) -- the same reason
-    // Orientation() above uses sel_registerName for
-    // mango_currentInterfaceOrientation instead of @selector.
-    SEL sel=sel_registerName("handleVolumeButtonWithType:down:");
-    NSArray *args=@[@(@encode(long long)),@(@encode(BOOL))];
-    if(!VolumeControlClass||!Signature(VolumeControlClass,sel,"v",args)){
-        VolumeHookOK=NO;Log(@"NO VOLUME FIX: signature mismatch");return;}
-    MSHookMessageEx(VolumeControlClass,sel,(IMP)HookHandleVolumeButton,(IMP *)&OrigHandleVolumeButton);
-}
 #define INSTALL_HOOKS(C,P) \
 MSHookMessageEx(C,@selector(layoutSubviews),(IMP)P##HookLayout,(IMP *)&P##Layout); \
 MSHookMessageEx(C,@selector(setFrame:),(IMP)P##HookFrame,(IMP *)&P##Frame); \
@@ -1252,8 +1054,7 @@ static void Install(void){
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
     InstallGestureFix();
     InstallLongPressProbe();
-    InstallTouchLocationFix();
-    InstallVolumeFix();
-    Log(@"INSTALLED World 0.15.2-alpha15c: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay (all log lines, now itself turned) + long-press class probe + other-window inversion probe (aperture window included) + content structure probe + manual arm/disarm gate (scene-retry fixed, raw touch diagnostic) + global UITouch location fix + volume-button escape hatches");Reconcile();
+    InstallOrientationLockFix();
+    Log(@"INSTALLED World 1.0.0: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay (all log lines, now itself turned) + long-press class probe + other-window inversion probe (aperture window included) + content structure probe + orientation-lock fix + lock-screen probe");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}

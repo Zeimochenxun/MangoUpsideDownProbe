@@ -1,6 +1,8 @@
-# MangoUpsideDownWorld 0.12.0-alpha12：证据与边界
+# MangoUpsideDownWorld 1.0.0：证据与边界
 
 这是本次新实现，不是从关联对话中取回的既有 World 源码，也不是给 Fix alpha2 改名。
+
+**关于 1.0.0 这次版本重排**：alpha14 之后曾经有 alpha15/15b/15c 三个版本（手动开关 `ManualOn`、全局 `UITouch` 定位 hook、音量键长按改造），目的是继续追灵动岛拖动方向问题；但那个手动开关本身在真机上一直点不动（`ARM READY` 有、`ARM TAP` 没有），问题定位到"触摸没到这个视图还是识别器没触发"这一步就没再继续。用户决定放下这条还没查完的线，把代码内容退回到 alpha14（`git checkout <alpha14 commit> -- .`，新提交，不是重写历史，alpha15 系列的三个提交完整保留在 git log 里），在这个更简单、已经稳定的基础上做两个跟灵动岛无关的新需求。版本号相应从 `0.X.0-alphaN` 换成独立的 `1.0.0` 起点，避免跟仓库历史上已经用过的 `alpha2` 混淆。悬浮球、长按一键复制、`SPLITPROBE`/`CONTENTDUMP` 等诊断工具全部原样保留——这次两个新功能的日志同样都经过 `Log()`，会自动进入长按复制的历史里，不需要额外接线。
 
 ## 已证实的输入
 
@@ -217,70 +219,50 @@ alpha14 的修法分两处，而不是简单地"不再跳过这个窗口"：
 
 两个改动都只读，不修改任何几何/手势逻辑（`ApplyWorld`/`ContentHookTransform`/`TurnDelta`/`WorldMath.h` 均未改）。下一步：真机重新开 trace、再打开一次分屏，看 `SPLITPROBE` 里灵动岛窗口这次是否报出除已知三层 `SBFTouchPassThroughView`/`SBSystemApertureContainerView` 之外的新类名，以及 `CONTENTDUMP` 里是否出现一个明显不属于 `SAUIElementView`/通用 `UIView` 这类已知外壳的、看起来像分屏专用的类名。
 
-## 0.15.0-alpha15：全局 UITouch 定位修复 + 手动开关 + 音量键物理恢复通道
+## 1.0.0：方向锁定修复 + Face ID 锁屏诊断
 
-用户在看到 alpha14 的分析（灵动岛手势类只定义 `touchesMoved:withEvent:`，`LPROBE` 几乎不触发，暗示真正读位置的是 `UITouch` 自己的 `locationInView:`/`previousLocationInView:`）之后，明确要求：不要再分阶段（先只读探测、验证真的被调用后再改），直接把探测和修改一起做；同时提出三个配套要求，作为接受这次风险的前提。
+用户提出两个跟灵动岛无关的新需求：(1) 倒置状态下开屏 Face ID 界面仍保持正向，每次都要把手机转回去才能看；(2) 倒置状态下点方向锁定，应该强制翻回正向而不是锁定在倒置状态。按用户自己定的方法论——先查有没有真实可用的信息，查不到才加只读探测——分别处理：
 
-**为什么这次跟之前 14 个 alpha 都不一样**：`UITouch` 是公开类，这个方法是 SpringBoard 进程内所有代码读取一次触摸位置的必经之路——不只是灵动岛，还包括主屏图标拖动、控制中心、通知中心、锁屏密码输入、Face ID 提示、多任务切换、Spotlight 键盘等等。之前 14 个版本的每一个 hook 都严格限定在某个已用真机日志验证过的私有类上（`PassClass`/`ContentClass`/`WindowClass`/`SBSystemApertureLongPressGestureRecognizer`），出错的影响面天生就被限定在灵动岛自己身上；这次的 hook 类本身没有这层天然限定。
+**方向锁定：查到真实依据，直接尝试修复**
 
-**收紧影响面的两层限定，缺一不可**：
+`SBOrientationLockManager` 是从 iOS 7 就存在的私有 SpringBoard 单例（多个年代的运行时头文件存档都有记录）。为了不重蹈灵动岛前 8 版"猜类名直接下手"的覆辙，先找了一个真实存在、目前仍在维护的公开插件 [AVLock](https://github.com/gilshahar7/AVLock)（给系统自带视频播放器加方向锁定按钮），它的 `Tweak.xm` 里白纸黑字用的是：
 
-1. **新增 `ManualOn`**——一个全局顶层开关，默认关闭，且**不做任何持久化**（不像 `.disabled`/`.trace` 那样落文件），每次 respring 都从关闭状态重新开始。这不只是给这次新加的两项风险加的门槛：`Reconcile()` 里原来只看 `Enabled&&Orientation()==PortraitUpsideDown` 的 `active` 判断，现在改成 `ManualOn&&Enabled&&Orientation()==PortraitUpsideDown`——`ManualOn` 变成了整个 World（位置/内容修正、命中测试兜底、alpha8 的手势方向修正、这次新加的两项）唯一的顶层门槛，不是分开管理的两套开关。这样设计的原因：`TurnDelta`/`InsideTurnedRoot` 全都通过 `s.outer.applied` 间接感知"是否处于倒置状态"，而 `s.outer.applied` 只有 `ApplyWorld` 会设置，`ApplyWorld` 只有在 `active` 为真时才会跑——把 `ManualOn` 塞进 `active` 本身，其它所有依赖这条链路的逻辑不需要各自单独查一次 `ManualOn`，天然继承这层门槛。唯二两个直接查 `ManualOn` 的例外是 `WorldHit`（它的早退检查在 `active` 计算之外，独立发生）和新加的 `TurnLocation`（下面详述，它对每一次 `UITouch` 调用都会跑，不能依赖任何间接状态）。
-   - 关掉开关不需要新写一套还原逻辑：`Reconcile()` 本来就在每次 tick 开头无条件跑 `RestoreWorld`，跟 `.disabled` 文件触发的还原走的是同一段代码。点开关只是多调一次 `Reconcile()`，让这次还原立刻发生，不用等最多 250ms 的定时器。
-   - 开关本体是屏幕左下角一个常驻的独立小圆点（复用已有的 `MWDebugWindow`，同一个类再开一个实例，不需要新窗口类），**从 `Install()` 里无条件创建**，不像悬浮追踪球那样要等 `Tracing` 打开才出现——这个开关本身就是访问其它一切功能的入口，不能被藏在另一个开关后面。没有加拖动手势（悬浮追踪球有）：这一版本身已经在小心处理输入相关的改动，少一个手势识别器就是少一件需要担心的事。
-   - 复用 `DebugSetTurned()` 让这个新窗口也跟着倒置转正——原因跟悬浮追踪球完全一样（alpha13 已经论证过）：普通 `UIWindow` 的 `transform` 下，UIKit 自己处理手势和渲染都会自动跟着转，不需要额外处理；这次只是同一个函数多转一个窗口。
+```objc
+[[%c(SBOrientationLockManager) sharedInstance] isUserLocked]
+[[%c(SBOrientationLockManager) sharedInstance] lock]
+[[%c(SBOrientationLockManager) sharedInstance] unlock]
+```
 
-2. **`InsideTurnedRoot(view)`**——原样复用 `TurnDelta` 已经在用的同一个函数，不是新推理。新增的 `TurnLocation()` 只有在 `ManualOn` 为真**且** `view` 确实在某个正在被转的 root 子树里时才会改动返回值；否则原样返回原始实现的结果。密码输入、Face ID、主屏这些视图永远不会出现在这棵子树里（`Roots` 只收 `Discover()` 在 `WindowClass` 窗口下找到的 `PassClass` 视图），跟 `TurnDelta` 已经安全依赖了 14 个版本的同一条件完全一样。
+另外从一份 2016 年（iOS 9.3）的运行时头文件存档里还能看到一个带参数版本 `-lock:(long long)arg1`，以及若干只读方法（`effectiveLockedOrientation`/`userLockOrientation`/`isEffectivelyLocked`）——这条是更早的历史证据，没有被 AVLock 这类现役插件直接验证过，所以代码里这两个方法都要先过一遍这个文件已有的 `Signature()` 检查，验证不通过就什么都不装，跟这个文件对待其它私有方法的一贯做法一致。
 
-**`TurnLocation` 的几何**：`locationInView:`/`previousLocationInView:` 返回的是绝对坐标，不是位移，所以 `TurnDelta` 那种直接取负号的做法在几何上没有意义（会把一个点甩到看不懂的坐标去）。正确操作是绕 World 已经在用的同一个 pivot 做镜像：把屏幕固定坐标系的中心点换算进传入的 `view` 自己的坐标系，再让原始点绕这个换算后的中心点镜像。同时镜像 `locationInView:` 和 `previousLocationInView:` 两个值，等价于直接对它们的差值取负（`reflect(a)-reflect(b) == b-a`），所以 `touchesMoved:` 这类靠这两个值算差值方向的代码看到的方向依旧会被纠正，同时每次调用单独拿到的还是一个几何上说得通的坐标，不是负数坐标。
+同时确认了网上最常被提到的强制转屏手法——`[UIDevice setValue:forKey:@"orientation"]`——**在 iOS 16 上已经被苹果官方明确废掉**（苹果论坛版主原话："这个技巧不应该被使用……现在已经被修复，不再有任何效果"），所以这次完全没有用这个思路。
 
-**这次修复不保证成功**：如果灵动岛读位置走的既不是 `UIGestureRecognizer` 的两个方法（alpha11 `LPROBE` 已排除大概率），也不是 `UITouch` 的这两个方法（这次要验证的），而是别的私有方法或者直接读 ivar，这次改动不会有任何可观测效果，但风险已经被上面两层限定收紧，不会比之前更危险。新增的 `TOUCHFIX` 日志行（同 `LogGestureFix` 的限频方式）就是用来看这次是否真的被调用。
+修法：新增 `InstallOrientationLockFix()`，hook `SBOrientationLockManager` 的无参数 `-lock`（Control Center 那个开关本身没有方向参数可传，大概率调的就是这个）。每次调用时读 `Orientation()`（这个文件已有的、读取 Mango 当前方向报告的函数）：
 
-**音量键物理恢复通道，为什么不能靠触控**：这次改动本身改的正是"触控怎么读位置"这件事，如果它改错了，触控本身可能表现异常，这时候任何指望靠"再摸一下屏幕"来关闭/回退的方案都不成立。所以恢复通道必须完全不依赖触控——物理音量键是这台设备上少数不经过这条新 hook 链路的输入。
+- **如果是倒置状态**：不调用原始的无参数实现，改为直接调用原始的带参数实现 `-lock:`，传入 `UIInterfaceOrientationPortrait`（公开 UIKit 枚举值），把锁定目标本身纠正成正向。
+- **其它情况**（不是倒置，或者 `Orientation()` 返回未知）：原样调用原始实现，完全不受影响。
 
-**为什么音量键的映射是运行时自校准，不是硬编码猜测**：`SBVolumeControl`（用公开的 iOS 13.1.3/14.4 runtime header 存档确认过存在 `-handleVolumeButtonWithType:down:` 这个方法，真机上再用现有的 `Signature()` 做一次运行时校验）用一个数字 `type` 区分音量上/下键，这个数字在 iOS 16.5 上对应哪个键没有任何公开文档。考虑过两个替代方案都有明确缺陷：硬编码历史版本的猜测值——猜错的后果是长按你以为是"恢复"的键却触发了"重启"（反过来也一样），而且没有任何办法在装机前验证对错；用公开的 `AVAudioSession` 系统音量电平变化方向去反推——这个方法在音量已经在 0% 或 100% 边界时完全推不出方向，而这恰好是最需要这条恢复通道可靠工作的场景（比如已经静音的时候）。所以选了运行时自校准：开关关闭时这个 hook 是纯透传（`HookHandleVolumeButton` 第一行检查 `ManualOn`，关闭时直接调用原始实现，不进入任何计时逻辑），开关打开后**第一次**长按任意一个键，被记成"上键"（`VolumeUpType`）并立即执行恢复动作；这次开机期间所有后续按键都无歧义。如果第一次长按的其实是物理下键，后果只是这一次给出了"恢复"而不是"重启"——一个自我纠正的轻微不便（现在映射已知，按另一个键就能正确重启），不是危险后果，因为恢复动作天生比重启更保温和，这个误判在下一次按键时就会纠正。
+同时对带参数的 `-lock:` 单独挂了一个**只读观察 hook**，只记日志（`ORIENTATIONLOCK explicit-lock target=... currentOrientation=...`）、永远原样放行——用来收集真实数据：万一 Control Center 的开关实际调用的不是无参数版本，或者还有别的调用方（比如相机的方向锁定），这条日志能看出来。
 
-**长按/短按判定与"不能让原始实现看到一个不成对的松手事件"**：用 `dispatch_after` 加每个键各自的世代计数器判断长按（0.6 秒），配合每个键各自的"当前是否按住"字典。**这里有一个容易踩的坑，已经在写这版代码时改正**：如果计时器一到时间就直接把"当前是否按住"标记清掉再触发恢复动作，那么恢复动作（把 `ManualOn` 设回假）执行之后，手指真正松开时触发的"松手"事件会因为标记已经被清掉而被判定为"不是我们在管的按键"，直接原样交给 `SBVolumeControl` 原始实现——原始实现会收到一个从未收到过对应"按下"事件的"松手"事件，这类不成对的事件不是这个私有类原本设计要处理的输入。改正后的写法是："当前是否按住"这个标记只由真正的物理松手事件本身来清除，计时器触发恢复/重启动作时完全不去动它；这样无论计时器有没有触发过动作，松手事件永远能正确判断"这次按下是不是我们吞掉的"，原始实现永远不会看到一个不成对的松手。
+**这次改动的性质需要单独说清楚**：`SBOrientationLockManager` 是**这个文件历史上第一个不属于 Mango、而是整台手机共用的系统级单例**——之前所有 hook（`PassClass`/`ContentClass`/`WindowClass`/`SBSystemApertureLongPressGestureRecognizer` 等）都严格限定在已用真机日志验证过、只服务于 Mango 灵动岛自己的私有类上，出错的影响面天生被限定在灵动岛身上；这次挂的方法是 Control Center 开关、相机方向锁定等任何东西调用 `-lock` 都会经过的同一个对象。缓解手段是行为上的、不是结构上的：只有真的检测到"当前是倒置状态"这一个条件成立时才会真的改变行为，其它时候是原样透传——但风险的**类别**本身（系统级单例 vs. Mango 专属类）跟之前任何一次 hook 都不一样，这一点已经在实现前明确告知用户，由用户自己判断可以接受。
 
-不影响任何现有的灵动岛几何/手势逻辑（`ApplyWorld`/`ContentHookTransform`/`WorldMath.h` 均未改），`TurnDelta` 本身也未改，只是它现在依赖的 `active`/`s.outer.applied` 链路多了 `ManualOn` 这一层。
+**Face ID 锁屏：没查到确切类名，只加只读探测**
 
-## 0.15.1-alpha15b：真机反馈开关按钮点不动，修法与诊断
+两轮搜索都没找到锁屏 Face ID 提示界面对应的确切私有类名，所以这次不猜测下手，只加诊断。新增 `ProbeLockScreenViews()`，复用已有的 `Tracing` 开关（跟 `TraceTouches`/`ProbeOtherWindows` 同一个开关，不需要新建文件），大约每 2 秒跑一次（这个探测跟触摸/帧率节奏无关，不需要用 `TraceTouches` 那种 0.05 秒节流）：
 
-用户真机反馈：装上 alpha15 后，左下角的开关按钮点击没有任何反应（既没有视觉变化，灵动岛的行为也没有跟着变）。
+- 遍历 `ExistingWindows()`（已有函数），只挑类名里带 `CoverSheet` 或 `DashBoard` 的窗口——`SBCoverSheetWindow` 已经在这份仓库自己的 alpha14 `SPLITPROBE` 真机日志里确认存在过；`DashBoard` 是第二个未经证实的候选前缀，因为具体是哪个窗口在承载 Face ID 提示目前未知。
+- 命中的窗口，复用已有的 `CollectClasses()`（`ProbeContentStructure()` 已经在用的同一个函数）递归收集内部**真实存在**的全部视图类名，去重后记一条 `LOCKPROBE window=<类名> classes=<列表>`。
+- 去重键是"窗口类名+这次找到的完整类名集合"，跟 `CONTENTDUMP`/`SPLITPROBE` 同样的设计：如果这个集合后来变了（比如 Face ID 提示出现时新增了视图），会重新记一次，不会被更早、更短的一次记录挡住。
+- 独立于 `Enabled`/`active`/方向状态——锁屏界面的存在与否跟灵动岛本身是否在被追踪/转动完全无关，只要开着 trace 就会跑。
 
-**推理过程**：`ArmCreate()` 和已经用了 5 个版本、一直正常工作的 `DebugCreate()`（悬浮追踪球）用的是几乎完全相同的代码模式——同一个窗口类 `MWDebugWindow`、同样的 `windowLevel`、同样"在小 subview 上挂一个手势识别器"的写法。既然模式本身早已验证可用，问题不在写法，而在**这两者被调用的时机完全不同**：`DebugCreate()` 只会在用户手动创建 trace 文件时才触发，那个时间点系统必然早已启动完毕；而 `ArmCreate()` 是 `Install()` 末尾**直接同步调用**的唯一一处——`Install()` 本身运行在 SpringBoard 刚起步的阶段，这也是为什么 `Install()` 自己要靠一个"每 500ms 重试、最多 40 次"的循环去等 Mango 的类加载好。如果 `ArmCreate()` 恰好在这个早期窗口执行，`MainWindowScene()` 完全可能还返回空——原来的代码这时会退到 `initWithFrame:` 这条不依赖场景的兼容创建路径，这条路径在现代基于 Scene 的 iOS 上**能正常显示，但已知不保证能正确收到触摸事件**。这与真机症状完全吻合：按钮看得见，点它却没反应。
-
-**修法**：不再允许 `ArmCreate()` 退到 `initWithFrame:` 这条路径——`MainWindowScene()` 返回空时函数直接原样返回，不创建任何东西（`ArmWindow` 保持 `nil`）。调用点从 `Install()` 移到 `Reconcile()` 内部，紧跟着已有的还原逻辑（本身是幂等的，`if(ArmWindow)return;` 保证已创建后开销为空）——这样它借用的是已经跑了 5 个版本、稳定可靠的同一个 250ms 定时器，不断重试，直到某次 tick 时场景真的连接好为止，不需要发明新的重试机制。
-
-同时加了两行诊断日志，专门用于区分未来若还出现"按钮点不动"，到底是同一个问题复发还是别的原因：`ARM READY`（按钮真正创建成功、场景确认可用的那一刻，能看出这次是第几个 tick 才成功，间接反映等了多久）；`ARM TAP now=ON/OFF`（每次手势真正被触发时立即记一行，在改动任何状态之前）——如果下次真机测试里连这一行都没有，说明问题在于点击事件根本没有传到这个手势识别器身上（这次已修的这类问题，或者又一次撞上同类时机问题）；如果这一行有但灵动岛行为仍不对，说明问题出在 `ManualOn` 生效之后的某个环节，需要往那个方向查，而不是回头怀疑按钮本身。
-
-不涉及任何几何/手势逻辑改动，只是这一个 UI 控件自身的创建时机问题。
-
-## 0.15.2-alpha15c：alpha15b 真机结果否定了场景时机推理，加更底层的诊断
-
-alpha15b 装机后，用户确认真机日志里 `ARM READY` 出现了（场景创建这一步的修复确实生效），但确认自己点了按钮之后，日志里**没有** `ARM TAP`。这直接推翻了"场景还没连好"这条已经修过的推理路线——问题出在完全不同的地方，且现在只有"点击这一动作本身没有生效"这一个粗粒度的事实，还分不清是以下两种情况中的哪一种：
-
-1. 触摸事件根本没有传到这个视图（命中测试/窗口层级问题：可能是另一个窗口挡在上面、点击穿透没生效，等等）；
-2. 触摸确实传到了这个视图，但 `UITapGestureRecognizer` 自己的状态机没有走到 `Ended`（识别器配置问题，或者被别的识别器抢先取消）。
-
-这两种情况需要完全不同的后续排查方向，但仅凭"没有 ARM TAP"这一个事实无法区分——继续在这两者之间盲猜，正是这份文件历史上（灵动岛 alpha1-8）已经吃过一次亏、之后才改成"先加探测再动手"的那套方法论要避免的事。
-
-**这次加的诊断**：新增 `MWArmButtonView`，是 `ArmButton` 从普通 `UIView`换成的一个极简子类，只重写了 `-touchesBegan:withEvent:`，进来就记一行 `ARM TOUCHBEGAN`，然后原样调用 `[super touchesBegan:...]`。这是 UIKit 里比 `UIGestureRecognizer` 更底层的通道——一个视图收到触摸，`touchesBegan:` 一定会被调用，且**完全不经过**手势识别器自己的状态机，两条路径互不干扰、互不影响（同一个视图上同时挂手势识别器和重写 `touchesXXX:` 方法是 UIKit 明确支持的标准写法，不是新技巧）。下次真机测试点按钮后，看日志：
-
-- 如果**两行都没有**：触摸压根没到达这个视图，说明是命中测试/窗口层级的问题，下一步要去查是不是被别的窗口挡住了。
-- 如果**只有 `ARM TOUCHBEGAN`，没有 `ARM TAP`**：触摸确实到了，问题出在手势识别器本身，需要往这个方向查。
-
-同时提出了两个不需要重新装包、现在就能免费验证的判断实验，写进了 README：**开 trace 后点右下角原有的悬浮追踪球，看它是否也点不动**（如果也点不动，说明是这台设备上所有类似悬浮窗按钮的通病，不是这次新按钮独有的问题）；**关掉 trace 后再点左下角开关**（如果这时候能点动了，说明是两个悬浮窗叠在一起互相挡住了触摸，而不是按钮自身的构造问题）。这两个实验的结果，加上 `ARM TOUCHBEGAN`/`ARM TAP` 这两行日志，应该足以把问题锁定到具体某一层，不需要再靠代码走查猜第三次。
-
-不涉及任何几何/手势逻辑改动，`MWArmButtonView` 只是诊断，不改变任何已有行为。
+这一步纯粹是诊断，不 hook、不改变任何行为，跟 `SPLITPROBE`/`ProbeOtherWindows` 是同一个安全等级。装机后需要真机验证：倒置状态下锁屏、触发一次 Face ID，把 `LOCKPROBE` 日志发回来，才能看出真正承载 Face ID 提示的类名，跟 alpha11 用 `CLASSDUMP`+`LPROBE` 把猜测变成 `SBSystemApertureLongPressGestureRecognizer` 是同一个思路——先看真实运行时状态，再决定往哪一步走。
 
 ## 尚未处理
 
 - 岛落到屏幕底部。alpha2 加了跳过原因日志，未改判定。需要真机复现后读 `SKIP` 行才能定性；另需确认异常时岛内文字对倒置视角是正还是倒，以区分是 Mango 的方向状态问题还是 World 的几何判定问题。
-- alpha15c 的新诊断（`ARM TOUCHBEGAN`）及 README 里的两个判断实验（悬浮追踪球是否也点不动、关闭 trace 后开关是否恢复响应）均尚待真机验证；开关按钮点不动这个问题本身仍未解决，目前只是把可能的原因范围缩小了。
-- alpha15 的全局 `UITouch` 修复是否真的被调用、方向是否修好，均需真机验证；`TOUCHFIX` 日志行是唯一的判断依据。
-- alpha15 的音量键校准/恢复/重启这套机制本身尚未真机验证过——README 已经把这一步列为装机后第一件要做的事，且明确要求如果这套机制本身不工作就不要继续测试倒置。
-- alpha15b 修的按钮点不动问题本身也尚未真机验证过；`ARM READY`/`ARM TAP` 两行日志是这次验证的直接依据。
+- 灵动岛拖动方向问题本身停在 alpha14 已有的结论上（`LPROBE` 几乎不触发，怀疑走的是 `UITouch` 自己的 `locationInView:`/`previousLocationInView:`）——alpha15 系列曾经尝试推进这一点，但因为手动开关本身的真机 bug 没查完就被搁置，这次的 1.0.0 没有继续这条线，也没有回退掉 alpha15 的诊断结论，只是暂不基于那份代码继续。
+- 1.0.0 新增的方向锁定修复尚未真机验证：`SBOrientationLockManager` 的方法签名是否与假设一致（`Signature()` 检查通过与否）、Control Center 开关到底调用哪个方法、修复后开关本身的视觉状态是否和实际锁定状态保持一致，均需真机确认。
+- 1.0.0 新增的 `LOCKPROBE` 诊断尚未真机验证，Face ID 提示界面的真实类名仍未知。
 
 ## 保留风险
 
