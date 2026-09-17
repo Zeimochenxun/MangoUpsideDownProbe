@@ -1,0 +1,47 @@
+[
+  {
+    "file": "01-mangoos.dylib",
+    "bytes": 706992,
+    "sha256": "27f88d66b6ffe3087bbd80ed4f04a7c9ac176d18776e53cc0e104927f08b5adf"
+  },
+  {
+    "file": "02-mangoUIKit.dylib",
+    "bytes": 144192,
+    "sha256": "a6be7ad1461bef64c7c790fe4046d8f484b24c0e7634f149c500481a998685e5"
+  },
+  {
+    "file": "03-MangoOSRendering-1-.dylib",
+    "bytes": 123520,
+    "sha256": "eb5ba620a8398f7cace9c25c39ac8dedced7bce4be9f5802a63593af4804da81"
+  },
+  {
+    "file": "04-mango.plist",
+    "bytes": 308,
+    "sha256": "e7dc57a8e03d8bfbdcc532669806e91849452e5974645aad9dffde2d6e2a90d5"
+  },
+  {
+    "file": "05-mangoos.plist",
+    "bytes": 393,
+    "sha256": "ab70916ab9e39638065a533011d0c50e3bca57b6a91b493312436aa4ed2d97aa"
+  },
+  {
+    "file": "06-mangoUIKit.plist",
+    "bytes": 500,
+    "sha256": "6798cb16d2ef99d30f9948d58d05cc608f560d7b745897ec6a2e6029b7f68b7f"
+  },
+  {
+    "file": "07-MangoOSRendering.plist",
+    "bytes": 307,
+    "sha256": "1480f0ce823af1e91d86e5c574bcdeef8142490774ce5873497df822d49ff644"
+  },
+  {
+    "file": "08-MangoOSPrefs.plist",
+    "bytes": 510,
+    "sha256": "70edae771a2190e04e5527aae7a7a00bec5eb3a3f305a387f864ead546a1cd64"
+  },
+  {
+    "file": "09-mango-1-.dylib",
+    "bytes": 1594592,
+    "sha256": "4679a2314e3a2f9e18d65503e5c69d67faaae81ab62b27d4d989a29b057f7ed6"
+  }
+]

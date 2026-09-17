@@ -3,6 +3,8 @@ name: Build MangoUpsideDownWorld (RootHide)
 on:
   workflow_dispatch:
   push:
+    branches-ignore:
+      - system-flip-audit
 
 permissions:
   contents: read
