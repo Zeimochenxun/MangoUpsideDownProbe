@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.7.0-alpha7. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 0.8.0-alpha8. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -378,124 +378,126 @@ static BOOL VerifiedMango(void){
     }
     return found;
 }
-// Read-only diagnostic. Static analysis of mango.dylib's own __objc_methname
-// table (selector-name strings survive stripping -- objc_msgSend needs them at
-// runtime -- so they are readable the same way mango_currentInterfaceOrientation
-// was found; see EVIDENCE.md) turned up a set of pill-swipe/dismiss/orientation
-// selectors that read like plausible sites for the touch-direction bug: the
-// window turn fixed the coordinate space touch POSITION is measured in (drag
-// tracking now follows the finger), but whatever decides "was that an up-swipe
-// or a down-swipe" is still backwards, and a decision like that does not have
-// to route through any coordinate conversion World could see or correct. This
-// changes nothing; it only records which loaded class actually defines each
-// selector, once, so a corrective hook -- if one turns out to be needed and
-// possible -- can target the right class instead of guessing.
-static void ProbeMangoSelectors(void){
-    static const char *names[]={
-        "pillSwipeDownAction","setPillSwipeDownAction:",
-        "pillSwipeUpAction","setPillSwipeUpAction:",
-        "dismissPill","dismissPillAnimated:",
-        "mango_orientationDidChange:",
-        "mango_prepareTopDismissReverseGeometryForInteractiveMirror"};
-    unsigned count=0;Class *classes=objc_copyClassList(&count);
-    if(!classes)return;
-    for(unsigned i=0;i<count;i++){
-        unsigned mc=0;Method *methods=class_copyMethodList(classes[i],&mc);
-        if(!methods)continue;
-        for(unsigned m=0;m<mc;m++){
-            const char *sel=sel_getName(method_getName(methods[m]));
-            for(unsigned n=0;n<sizeof(names)/sizeof(names[0]);n++)
-                if(!strcmp(sel,names[n]))
-                    Log([NSString stringWithFormat:@"PROBE class=%@ sel=%s",NSStringFromClass(classes[i]),sel]);
-        }
-        free(methods);
-    }
-    free(classes);
-}
-// Device result of the probe above: pillSwipeDownAction/pillSwipeUpAction and
-// their setters matched nothing -- read alongside the rest of the earlier
-// string dump (UIButton/UILabel/UISlider-typed neighbors named
-// pillDismissDelayLabel, pillDismissDelaySlider, and so on) they are almost
-// certainly a settings-screen configuration property, not live gesture code,
-// and that settings class simply was not loaded yet when this one-shot probe
-// ran. mango_prepareTopDismissReverseGeometryForInteractiveMirror turned out
-// to belong to MangoAppLibraryPickerView -- the App Library picker, a
-// different surface entirely, not the island. What did land somewhere real:
-// MangoPillManager defines dismissPill/dismissPillAnimated:, confirming it is
-// loaded and is a plausible island controller. This probe lists every method
-// MangoPillManager itself defines (its own custom superclass chain too, since
-// a helper could live one level up) instead of testing more guessed names, so
-// whatever actually reads swipe direction can be found by what it is really
-// called rather than by continuing to guess.
-static void ProbeMangoPillManager(void){
-    Class c=objc_getClass("MangoPillManager");
-    if(!c){Log(@"PROBE MangoPillManager not loaded");return;}
-    for(unsigned depth=0;c&&depth<8;c=class_getSuperclass(c),depth++){
-        const char *name=class_getName(c);
-        // Stop at the first Apple framework class: those add thousands of
-        // methods that say nothing about Mango's own code.
-        if(!strncmp(name,"NS",2)||!strncmp(name,"UI",2)||!strncmp(name,"OS_",3))break;
-        unsigned mc=0;Method *methods=class_copyMethodList(c,&mc);
-        if(!methods)continue;
-        for(unsigned m=0;m<mc;m++)
-            Log([NSString stringWithFormat:@"PROBE class=%@ method=%s",NSStringFromClass(c),sel_getName(method_getName(methods[m]))]);
-        free(methods);
-    }
-}
-// Device result of the probes above: MangoPillManager's complete method list
-// is lifecycle and notification handling only (init/dealloc, foreground/lock/
-// orientation notification handlers, show/dismiss/query) -- nothing reads a
-// gesture or touch. That rules Mango's own code out as the direction bug's
-// source at this class, and static introspection has no further named lead:
-// the pan/swipe/translation selectors found earlier in the string dump most
-// likely belong to unrelated Mango surfaces (settings, launcher), not this
-// one. Guessing more class names from here is low yield; the direct approach
-// is to watch the actual call in the moment it happens.
+// Why the direction stayed backwards through four attempts at turning
+// geometry, and what this version does instead.
 //
-// This hooks UIPanGestureRecognizer's own translationInView:/velocityInView:
-// -- public, documented UIKit API, not a private or Mango-owned method -- and
-// logs the caller's view and the returned value, but only while the
-// recognizer's .view is root or a descendant of a root World is actively
-// turning (checked via Roots; a global hash-table lookup, not a Mango-, name-
-// or signature-based guess). Outside that condition (Roots empty, or any pan
-// gesture anywhere else in SpringBoard) this adds a single count check and
-// returns, same class of overhead the existing per-frame geometry hooks
-// already carry. The real value is always returned unmodified; nothing this
-// reads is changed. One caveat: if the actual recognizer at play is a private
-// subclass that overrides these two methods with its own implementation,
-// hooking the base class's IMP will not see those calls -- a quiet run
-// (nothing logged during a real swipe) would mean that, not that no gesture
-// happened.
-static BOOL IsInsideTrackedRoot(UIView *v){
+// A view's rendering matrix and its touch-coordinate matrix are the same
+// matrix (touches run it inverted). So no transform can flip what is drawn
+// without equally flipping the coordinates anything in that same subtree
+// reads -- alpha1-3 turned root, alpha4 turned the window, which is the
+// topmost view World can reach, and the swipe direction was reported wrong
+// after both. That rules out the whole "some view in the chain still
+// disagrees in sign" family of explanations, including the one alpha4 was
+// built on.
+//
+// What is left is a reader that does not sit in the subtree at all: it asks
+// the screen's fixedCoordinateSpace, i.e. physical screen position. A
+// window's transform only places the window INSIDE that space; it cannot
+// redefine the space itself. Such a reader therefore always sees where the
+// finger physically is, correctly and unaffected by anything World does --
+// and that is the bug. World moves the island from the physical top of the
+// screen to the physical bottom; the reader keeps deciding up-versus-down
+// against the layout it was written for. Every swipe comes out inverted, and
+// would keep coming out inverted no matter how much more geometry is turned.
+//
+// This is also consistent with the two facts that looked contradictory: live
+// drag tracking follows the finger (it re-reads position continuously and
+// renders through the turned subtree, so both halves are in the same turned
+// space and cancel), while the discrete up/down verdict does not (it is one
+// sign taken in fixed space and never passed through the turn).
+//
+// So the fix is not more geometry. It is one negation applied at the single
+// place where a fixed-space vertical delta enters the island's gesture
+// handling: UIPanGestureRecognizer's translationInView:/velocityInView:,
+// public documented UIKit API, when the recognizer's own view is inside a
+// root World is actively turning. Inside that subtree the turn has already
+// inverted the visual meaning of "down", so returning the negated vector is
+// what makes the reader's verdict match the finger. Restricted that tightly,
+// this cannot reach any pan gesture elsewhere in SpringBoard, and it reverts
+// to the untouched value the moment the world is not turned.
+//
+// Horizontal is negated too, for the same reason and by the same half-turn:
+// a half-turn inverts both axes, so left/right on the turned island is
+// mirrored exactly as up/down is. Negating only y would fix the reported
+// symptom and leave the horizontal half of the same bug in place.
+//
+// Confidence and how this gets falsified: the reasoning above is sound but
+// the specific reader has not been observed -- alpha7's read-only probe on
+// these same two methods logged nothing during testing, which means either
+// no swipe was performed in that window, or the real recognizer is a private
+// subclass that overrides these two methods and so bypasses a base-class
+// hook. If it is that subclass, this fix changes nothing observable and the
+// direction stays wrong; that outcome is informative, not a regression, and
+// it is the reason GESTURE logging is kept in place here. If instead the
+// reader takes its delta from raw UITouch locations rather than from a pan
+// recognizer, the same thing happens. Either way the next step is to log the
+// recognizer's real class rather than guess again.
+static BOOL InvertGestureAxes=YES;
+// Device result of the probe above: pillSwipeDownAction/pillSwipeUpAction and
+// A gesture belongs to the turned world only while its own view is root or a
+// descendant of a root that is currently turned. The turn is what inverts the
+// visual meaning of a fixed-space delta, so it is also the exact condition
+// under which negating one is correct -- the same reasoning, and the same
+// s.outer.applied test, that OwnedContent uses for content transforms. A
+// suspended root is deliberately excluded: after SUSPEND or CONFLICT the
+// world is no longer turned, so its deltas must be passed through untouched.
+static BOOL InsideTurnedRoot(UIView *v){
     if(!Roots.count)return NO;
-    for(;v;v=v.superview)
-        if([Roots containsObject:v])return YES;
+    for(unsigned n=0;v&&n++<64;v=v.superview){
+        MWWorldState *s=State(v);
+        if(s)return !s.suspended&&s.outer.applied;
+    }
     return NO;
 }
-static void LogGestureRead(NSString *api,UIView *targetView,CGPoint p){
+// in/out/inout are Objective-C context-sensitive keywords; name the parameters
+// so they cannot be read as parameter qualifiers.
+static void LogGestureFix(NSString *api,CGPoint raw,CGPoint flipped){
     static double last;double now=CACurrentMediaTime();
     if(now-last<=0.05)return;    // a drag calls this many times per frame
     last=now;
-    Log([NSString stringWithFormat:@"GESTURE api=%@ targetView=%@ value={%.2f,%.2f}",api,NSStringFromClass(targetView.class),p.x,p.y]);
+    Log([NSString stringWithFormat:@"GESTURE api=%@ raw={%.2f,%.2f} turned={%.2f,%.2f}",api,raw.x,raw.y,flipped.x,flipped.y]);
+}
+static void LogGestureSkip(NSString *api,UIView *view){
+    static double last;double now=CACurrentMediaTime();
+    if(now-last<=1)return;
+    last=now;
+    Log([NSString stringWithFormat:@"GESTURE SKIP api=%@ view=%@ reason=outside-turned-root",api,NSStringFromClass(view.class)]);
+}
+// Negate both axes of a fixed-space delta read inside the turned world. Guard
+// non-finite values rather than propagate them, matching how every geometry
+// path here fails closed.
+static CGPoint TurnDelta(NSString *api,UIGestureRecognizer *self,CGPoint v){
+    if(!InvertGestureAxes||!isfinite(v.x)||!isfinite(v.y))return v;
+    if(![NSThread isMainThread])return v;
+    UIView *view=self.view;
+    if(!InsideTurnedRoot(view)){
+        // A recognizer anchored at or above root (on the aperture window
+        // itself, say) is out of scope above and corrected nothing -- which
+        // on its own is indistinguishable from this hook never being called
+        // at all. Say which one happened, so a run where the direction is
+        // still wrong points at the right next step instead of at both.
+        if(view.window&&[Windows containsObject:view.window])
+            LogGestureSkip(api,view);
+        return v;
+    }
+    CGPoint out=CGPointMake(-v.x,-v.y);
+    LogGestureFix(api,v,out);
+    return out;
 }
 static CGPoint (*OrigTranslation)(id,SEL,UIView *);
 static CGPoint HookTranslation(UIGestureRecognizer *self,SEL cmd,UIView *view){
-    CGPoint v=OrigTranslation(self,cmd,view);
-    if(IsInsideTrackedRoot(self.view))LogGestureRead(@"translationInView:",view,v);
-    return v;
+    return TurnDelta(@"translationInView:",self,OrigTranslation(self,cmd,view));
 }
 static CGPoint (*OrigVelocity)(id,SEL,UIView *);
 static CGPoint HookVelocity(UIGestureRecognizer *self,SEL cmd,UIView *view){
-    CGPoint v=OrigVelocity(self,cmd,view);
-    if(IsInsideTrackedRoot(self.view))LogGestureRead(@"velocityInView:",view,v);
-    return v;
+    return TurnDelta(@"velocityInView:",self,OrigVelocity(self,cmd,view));
 }
-static void InstallGestureProbe(void){
+static void InstallGestureFix(void){
     Class pan=objc_getClass("UIPanGestureRecognizer");
     NSArray *args=@[@"@"];
     if(!pan||!Signature(pan,@selector(translationInView:),@encode(CGPoint),args)||
        !Signature(pan,@selector(velocityInView:),@encode(CGPoint),args)){
-        Log(@"NO GESTURE PROBE: signature mismatch");return;}
+        InvertGestureAxes=NO;Log(@"NO GESTURE FIX: signature mismatch");return;}
     MSHookMessageEx(pan,@selector(translationInView:),(IMP)HookTranslation,(IMP *)&OrigTranslation);
     MSHookMessageEx(pan,@selector(velocityInView:),(IMP)HookVelocity,(IMP *)&OrigVelocity);
 }
@@ -534,9 +536,7 @@ static void Install(void){
     Timer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
     dispatch_source_set_timer(Timer,dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),250*NSEC_PER_MSEC,50*NSEC_PER_MSEC);
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
-    ProbeMangoSelectors();
-    ProbeMangoPillManager();
-    InstallGestureProbe();
-    Log(@"INSTALLED World 0.7.0-alpha7: window turn + content normalization + skip reasons + selector probe + gesture probe + window hit fallback");Reconcile();
+    InstallGestureFix();
+    Log(@"INSTALLED World 0.8.0-alpha8: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}

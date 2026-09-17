@@ -1,6 +1,6 @@
 Package: com.chenxun.mangoupsidedownworld
 Name: MangoUpsideDownWorld
-Version: 0.7.0~alpha7
+Version: 0.8.0~alpha8
 Architecture: iphoneos-arm64e
 Description: Experimental whole-aperture upside-down compatibility for Mango on iOS 16.5.
 Maintainer: Chen Xun
