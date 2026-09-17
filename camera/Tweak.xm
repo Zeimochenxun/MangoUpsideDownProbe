@@ -38,7 +38,7 @@ static void CXLog(NSString *message){
     if(fstat(fd,&st)!=0||!S_ISREG(st.st_mode)){close(fd);return;}
     if(st.st_size>512*1024)ftruncate(fd,0);
     NSData *bytes=[[NSString stringWithFormat:@"%.3f %@\n",NSDate.timeIntervalSinceReferenceDate,line] dataUsingEncoding:NSUTF8StringEncoding];
-    const uint8_t *p=bytes.bytes;size_t left=bytes.length;
+    const uint8_t *p=(const uint8_t *)bytes.bytes;size_t left=bytes.length;
     while(left){ssize_t n=write(fd,p,left);if(n<0&&errno==EINTR)continue;if(n<=0)break;p+=n;left-=(size_t)n;}
     close(fd);
 }
@@ -116,15 +116,14 @@ static void CXRefreshDeviceOrientation(void){
     }
 
     UIDeviceOrientation orientation=UIDevice.currentDevice.orientation;
-    BOOL valid=NO,newValue=NO;
+    BOOL newValue=NO;
     switch(orientation){
-        case UIDeviceOrientationPortraitUpsideDown: valid=YES;newValue=YES;break;
+        case UIDeviceOrientationPortraitUpsideDown:newValue=YES;break;
         case UIDeviceOrientationPortrait:
         case UIDeviceOrientationLandscapeLeft:
-        case UIDeviceOrientationLandscapeRight: valid=YES;newValue=NO;break;
+        case UIDeviceOrientationLandscapeRight:newValue=NO;break;
         default:return;
     }
-    if(!valid)return;
 
     BOOL changed=NO;
     @synchronized(CXConnections){if(CXUpsideDown!=newValue){CXUpsideDown=newValue;changed=YES;}}
@@ -207,9 +206,6 @@ static void CXRefreshDeviceOrientation(void){
         CXConnections=[NSHashTable weakObjectsHashTable];
         CXRequestedOrientations=[NSMapTable weakToStrongObjectsMapTable];
         CXUpsideDown=NO;
-
-        // Explicitly initialize Logos hooks. This custom constructor must not
-        // rely on implicit hook initialization.
         %init;
 
         dispatch_async(dispatch_get_main_queue(),^{
