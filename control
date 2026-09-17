@@ -1,11 +1,11 @@
 Package: com.chenxun.mangoupsidedownworld
 Name: MangoUpsideDownWorld
-Version: 1.1.0
+Version: 1.2.0
 Architecture: iphoneos-arm64e
-Description: Experimental whole-aperture upside-down compatibility for Mango on iOS 16.5, with integrated Mango-confirmed System Aperture placement correction.
+Description: Experimental whole-aperture upside-down compatibility for Mango on iOS 16.5, including exact Mango notification swipe correction.
 Maintainer: Chen Xun
 Author: Chen Xun
 Section: Tweaks
 Depends: mobilesubstrate, firmware (= 16.5)
-Conflicts: com.chenxun.mangoupsidedownfix
+Conflicts: com.chenxun.mangoupsidedownfix, com.chenxun.mangoorientationprobe
 Replaces: com.chenxun.mangoupsidedownfix

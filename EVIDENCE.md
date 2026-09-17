@@ -1,4 +1,21 @@
-# MangoUpsideDownWorld 1.0.1：证据与边界
+# MangoUpsideDownWorld 1.2.0：证据与边界
+
+## 1.2.0：四方向 Probe 已定位通知手势的真实消费点
+
+- 已证实 Mango 收到完整的 1/2/3/4，不存在 PortraitUpsideDown 被保存成 Portrait。
+- 已证实 `-[SBSystemApertureViewController _handleResizePan:]` 的运行时 IMP 来自目标
+  `mango.dylib`（LC_UUID `67c0d7c2-4487-3fd2-9535-067745ae4b8f`）。
+- 静态反汇编确认该 replacement 只把 3/4 判为 landscape；1/2 共用 fallback。Ended
+  时读取 `translationInView:`，以 y 的正负和 30pt 阈值选择打开/清除动作。
+- 真机日志确认 orientation=2、y=+67.333 时进入 App，y=-259.667 时清除；这与用户观察
+  “倒置竖屏视觉上滑=进入 App、视觉下滑=清除”一致。
+- `UIRootSceneWindow` 的实际运行时子类是 `SBRootSceneWindow`，方向 2 时系统坐标空间已做
+  180° 映射；`FBRootWindow` 在该轮运行时未出现。二者不是本次动作语义的修复点。
+
+因此 1.2.0 不再扩大 window transform、`UITouch`、`hitTest:`、velocity 或全局 pan 补偿。
+它只包住上述 Mango replacement 的一次 Ended 调用，临时把当前 pan 的 y translation
+取反，调用返回后恢复；其它方向与其它识别器原样通过。安装前还会逐项验证 iOS 16.5、
+Mango UUID、selector 签名与当前 IMP 镜像归属，任一不符即 fail closed。
 
 这是本次新实现，不是从关联对话中取回的既有 World 源码，也不是给 Fix alpha2 改名。
 

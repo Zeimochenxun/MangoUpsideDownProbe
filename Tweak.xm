@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 1.0.1. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 1.2.0. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -7,6 +7,7 @@
 #import <mach-o/dyld.h>
 #import <mach-o/loader.h>
 #import <substrate.h>
+#include <dlfcn.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -22,6 +23,7 @@ static BOOL Enabled, Installed, Busy, Tracing;
 static unsigned Depth, Attempts, HitDepth;
 static dispatch_source_t Timer;
 static char StateKey;
+static const struct mach_header_64 *VerifiedMangoHeader;
 // Forward declarations: the floating debug overlay is defined near the
 // gesture-trace code below, but Log() (defined first, and the single choke
 // point every call site in this file already goes through) mirrors every
@@ -494,11 +496,20 @@ static BOOL VerifiedMango(void){
             if((size_t)(end-p)<sizeof(struct load_command))break;
             const struct load_command *lc=(const struct load_command *)p;
             if(lc->cmdsize<sizeof(*lc)||lc->cmdsize>(size_t)(end-p))break;
-            if(lc->cmd==LC_UUID&&lc->cmdsize>=sizeof(struct uuid_command))found=!memcmp(((const struct uuid_command *)p)->uuid,uuid,16);
+            if(lc->cmd==LC_UUID&&lc->cmdsize>=sizeof(struct uuid_command)&&!memcmp(((const struct uuid_command *)p)->uuid,uuid,16)){
+                found=YES;VerifiedMangoHeader=h;
+            }
             p+=lc->cmdsize;
         }
     }
     return found;
+}
+static BOOL IMPBelongsToVerifiedMango(IMP imp){
+    if(!imp||!VerifiedMangoHeader)return NO;
+    Dl_info info;memset(&info,0,sizeof(info));
+    if(!dladdr((const void *)imp,&info)||!info.dli_fbase||!info.dli_fname)return NO;
+    const char *base=strrchr(info.dli_fname,'/');base=base?base+1:info.dli_fname;
+    return info.dli_fbase==(const void *)VerifiedMangoHeader&&!strcmp(base,"mango.dylib");
 }
 // Why the direction stayed backwards through four attempts at turning
 // geometry, and what this version does instead.
@@ -554,7 +565,7 @@ static BOOL VerifiedMango(void){
 // reader takes its delta from raw UITouch locations rather than from a pan
 // recognizer, the same thing happens. Either way the next step is to log the
 // recognizer's real class rather than guess again.
-static BOOL InvertGestureAxes=YES;
+static BOOL InvertGestureAxes=NO;
 // Device result of the probe above: pillSwipeDownAction/pillSwipeUpAction and
 // A gesture belongs to the turned world only while its own view is root or a
 // descendant of a root that is currently turned. The turn is what inverts the
@@ -763,7 +774,7 @@ static CGPoint (*OrigVelocity)(id,SEL,UIView *);
 static CGPoint HookVelocity(UIGestureRecognizer *self,SEL cmd,UIView *view){
     return TurnDelta(@"velocityInView:",self,OrigVelocity(self,cmd,view));
 }
-static void InstallGestureFix(void){
+static __attribute__((unused)) void InstallGestureFix(void){
     Class pan=objc_getClass("UIPanGestureRecognizer");
     NSArray *args=@[@"@"];
     if(!pan||!Signature(pan,@selector(translationInView:),@encode(CGPoint),args)||
@@ -771,6 +782,43 @@ static void InstallGestureFix(void){
         InvertGestureAxes=NO;Log(@"NO GESTURE FIX: signature mismatch");return;}
     MSHookMessageEx(pan,@selector(translationInView:),(IMP)HookTranslation,(IMP *)&OrigTranslation);
     MSHookMessageEx(pan,@selector(velocityInView:),(IMP)HookVelocity,(IMP *)&OrigVelocity);
+}
+
+// Probe.log established the live Mango decision point: Mango replaces
+// -[SBSystemApertureViewController _handleResizePan:].  System and Mango both
+// receive orientation 2; the defect is the final vertical verdict, not a
+// 2->1 orientation normalization.  Scope the translation correction to that
+// exact call, only for Ended and only for PortraitUpsideDown.  X, velocity,
+// every other recognizer and all other orientations remain untouched.
+static void (*OrigMangoResizePan)(id,SEL,UIGestureRecognizer *);
+static void HookMangoResizePan(id self,SEL cmd,UIGestureRecognizer *gesture){
+    if(!gesture||gesture.state!=UIGestureRecognizerStateEnded||Orientation()!=UIInterfaceOrientationPortraitUpsideDown||
+       ![gesture isKindOfClass:UIPanGestureRecognizer.class]){
+        OrigMangoResizePan(self,cmd,gesture);return;
+    }
+    UIPanGestureRecognizer *pan=(UIPanGestureRecognizer *)gesture;
+    UIView *view=pan.view;
+    CGPoint raw=[pan translationInView:view];
+    if(!isfinite(raw.x)||!isfinite(raw.y)){OrigMangoResizePan(self,cmd,gesture);return;}
+    CGPoint fixed=CGPointMake(raw.x,-raw.y);
+    [pan setTranslation:fixed inView:view];
+    LogGestureFix(@"Mango _handleResizePan: ended",NSStringFromClass(pan.class),raw,fixed);
+    @try { OrigMangoResizePan(self,cmd,gesture); }
+    @finally { [pan setTranslation:raw inView:view]; }
+}
+static BOOL InstallMangoResizePanFix(void){
+    Class cls=objc_getClass("SBSystemApertureViewController");
+    SEL sel=sel_registerName("_handleResizePan:");
+    if(!cls||!Signature(cls,sel,"v",@[@"@"])){
+        Log(@"NO MANGO PAN FIX: _handleResizePan: signature unavailable");return NO;
+    }
+    IMP current=class_getMethodImplementation(cls,sel);
+    if(!IMPBelongsToVerifiedMango(current)){
+        Log(@"NO MANGO PAN FIX: current _handleResizePan: IMP is not the verified mango.dylib");return NO;
+    }
+    MSHookMessageEx(cls,sel,(IMP)HookMangoResizePan,(IMP *)&OrigMangoResizePan);
+    Log(@"MANGO PAN FIX installed: orientation=2 state=Ended translation.y only");
+    return OrigMangoResizePan!=NULL;
 }
 
 // 1.0.0: orientation-lock fix. SBOrientationLockManager is a real,
@@ -1046,9 +1094,9 @@ static void Install(void){
     Timer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
     dispatch_source_set_timer(Timer,dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),250*NSEC_PER_MSEC,50*NSEC_PER_MSEC);
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
-    InstallGestureFix();
+    InstallMangoResizePanFix();
     InstallLongPressProbe();
     InstallOrientationLockFix();
-    Log(@"INSTALLED World 1.0.1: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay (all log lines, now itself turned) + long-press class probe + other-window inversion probe (aperture window included) + content structure probe + orientation-lock fix (locks at inverted, not portrait)");Reconcile();
+    Log(@"INSTALLED World 1.2.0: placement + world transform + exact Mango ended-pan Y correction + orientation-lock fix");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}

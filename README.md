@@ -1,4 +1,23 @@
-# MangoUpsideDownWorld 1.0.1
+# MangoUpsideDownWorld 1.2.0
+
+## 1.2.0：Mango 通知灵动岛倒置手势最小修复
+
+最新四方向 Probe 已确认：`UIWindowScene.interfaceOrientation` 与 Mango 的方向值在
+Portrait / PortraitUpsideDown / LandscapeLeft / LandscapeRight 中分别保持 1/2/3/4，
+不存在 `2 -> 1` 的输入归一化。真正执行通知动作的是 Mango 写入
+`SBSystemApertureViewController` 的 `-_handleResizePan:` replacement；其当前 IMP 位于已核对
+UUID `67c0d7c2-4487-3fd2-9535-067745ae4b8f` 的 `mango.dylib`。Mango 在这个函数里只为
+3/4 建立 landscape 分支，1/2 共用 portrait fallback，并在手势 Ended 时按
+`translation.y > 30` / `< -30` 决定打开或清除，所以倒置时动作语义相反。
+
+1.2.0 只在下列条件全部成立时临时把该手势的 `translation.y` 取反：目标 selector 和
+签名匹配、当前 IMP 确认来自上述 Mango 镜像、方向为 2、状态为 Ended、参数确为
+`UIPanGestureRecognizer`。调用 Mango 原实现后立即恢复原始 translation。x、velocity、
+正常竖屏、左右横屏、其它手势与全局触摸坐标均不修改。若 Mango 更新、UUID/签名/IMP
+归属不匹配，修复会拒绝安装并写日志，而不是猜测 hook。
+
+安装前必须卸载 `MangoOrientationProbe`；包管理器已声明冲突，避免 Probe 抢先替换同一
+selector。首次测试先确认正常竖屏行为不变，再测试倒置竖屏的视觉上滑=清除、视觉下滑=进入 App。
 
 新编写的实验兼容补丁。目标：iPhone 13 mini / iOS 16.5 / Dopamine RootHide / 已核对的 Mango 版本。尚未真机验证，不宣称全场景已修复。
 
