@@ -189,6 +189,17 @@ TOUCH phase=Began window={164.8,65.0} fixed={203.3,744.3} view=_SAUIPortalView r
 
 不影响任何几何或手势判定逻辑——`WorldMath.h`、`ApplyWorld`、`ContentHookTransform`、`TurnDelta` 均未改动，这一版纯粹是诊断链路本身的完整性修复。
 
+## 0.13.0-alpha13：让悬浮追踪窗和其它插件也跟着倒置转，而不是只诊断灵动岛
+
+用户要求：灵动岛之外，"任何插件"（包括 Mango 的分屏、以及本工程自己的日志悬浮窗）目前都不会跟着屏幕倒置转，这次要一起解决。前置研究澄清了两件容易混的事：
+
+1. 用户已确认设备上本来就装着"另一个真正的倒置插件"（`README.md` 里"保留 Mango 和原来的倒置插件"这句话说的就是它），也就是让 `Orientation()` 报告 `PortraitUpsideDown` 的那个真正方向切换,本身已经存在、World 从未负责实现它。研究了开源的 `34306/upsidedowned` 和它的源头 `khanhduytran0/TrollPad`（两者代码都读过，全文搜了 `Aperture`/`SAUI`/`portal`/`dynamic` 均为零匹配），确认它们采用的手法——`SBTraitsSceneParticipantDelegate._isAllowedToHavePortraitUpsideDown`/`_orientationMode`、`SpringBoard.homeScreenRotationStyle`、`SBApplication.isMedusaCapable`、`supportedInterfaceOrientations` 加 mask——只解决"允许声明这个方向"，从未涉及 System Aperture 这一整个私有子系统。这与 alpha11 的结论一致：灵动岛的触控问题出在一个读物理固定坐标、根本不查方向状态的私有类，换哪种方式触发倒置都不会碰到它。因此这次改动**不**移植这套 idiom 伪装逻辑——本仓库的目标一直是让 Mango/其它插件跟 World 已经存在的倒置状态保持一致，不是重新实现倒置本身。
+2. "插件不跟着转"分成两类，处理方式完全不同：
+   - **本工程自己写的悬浮窗**（`MWDebugWindow`）：是纯粹的 `UIWindow`，不涉及任何私有手势类，之前 alpha10 特意让它"从不被 World 登记为 Root"以保证诊断本身不受几何修正干扰——但这也是它至今不跟着转的唯一原因，纯属这次之前没接。UIKit 对普通 `UIWindow` 的 `transform` 本身就会让其下所有公开手势识别器的 `translationInView:`/`locationInView:`/hit-testing 自动按转后的方向解读,不需要任何 alpha8 那种针对 fixed-space 读数的额外修正。新增 `DebugSetTurned(BOOL)`,在 `Reconcile()` 每次 tick 都根据当前 `active`（`Enabled&&Orientation()==PortraitUpsideDown`,与 World 判断是否要转灵动岛用的同一条件）设置或清除 `DebugWindow.transform` 为绕中心的 180°旋转，与面板可见性（`DebugSetVisible`,只在 `Tracing` 时才创建/显示）完全独立，即使不开 trace 也持续保持同步,不必等到面板被点开。
+   - **其它插件（Mango 分屏等）**：真实的类名和实现方式未知，本文件此前唯一验证过的私有手势类是灵动岛自己的 `SBSystemApertureLongPressGestureRecognizer`,直接猜一个类名去 hook 分屏正是 alpha1-8 在灵动岛上吃过的亏。所以这次新增的是和 alpha11 `CLASSDUMP` 同一思路的**只读探测**,不是修复：`ProbeOtherWindows()`（只在 `Tracing` 时跑,与 `TraceTouches` 同一个开关,不需要额外文件）遍历主屏幕上除 `SBSystemApertureWindow`/自家悬浮窗外的每个窗口,用现有的 `MWInvertedBasis` 判据（灵动岛内容层倒置识别用的同一个函数）逐层检查其视图树里是否有任何视图相对 `fixedCoordinateSpace` 呈现"已经是倒置基向量"的样子。若找到,记一条 `SPLITPROBE window=<类名> inverted=<命中视图类名列表>`,每个窗口类名只记一次防止刷屏。这只回答"分屏用的是哪个窗口/哪些视图看起来已经倒了",不代表这些视图的触控也一定对——灵动岛的教训就是内容朝向对、触控仍可能反,下一步要看真机 `SPLITPROBE` 结果再决定分屏具体怎么跟进,不能跳过这一步直接照搬灵动岛的 hook 集合。
+
+两处改动都不影响现有的灵动岛几何/手势逻辑（`ApplyWorld`/`ContentHookTransform`/`TurnDelta`/`WorldMath.h` 均未改）,悬浮窗的转正只影响它自己的 `UIWindow.transform`,探测只读、不写任何视图。
+
 ## 尚未处理
 
 - 岛落到屏幕底部。alpha2 加了跳过原因日志，未改判定。需要真机复现后读 `SKIP` 行才能定性；另需确认异常时岛内文字对倒置视角是正还是倒，以区分是 Mango 的方向状态问题还是 World 的几何判定问题。

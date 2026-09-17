@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 0.12.0-alpha12
+# MangoUpsideDownWorld 0.13.0-alpha13
 
 新编写的实验兼容补丁。目标：iPhone 13 mini / iOS 16.5 / Dopamine RootHide / 已核对的 Mango 版本。尚未真机验证，不宣称全场景已修复。
 
@@ -20,6 +20,10 @@ alpha1 真机结果：收起态的岛已经能在倒置下显示在正确位置�
 - alpha9 是纯诊断工具，不改变任何已有行为、不是新的修复尝试：新增运行时开关 `MangoUpsideDownWorld.trace`（建法同 `.disabled`），开启后在灵动岛所在窗口的 `sendEvent:` **之后**（不影响命中测试和分发本身）记录每次触摸的阶段、window/fixed 两种坐标、命中视图类名，以及该视图沿父链收集到的全部手势识别器——每个都带真实运行时类名、state、numberOfTouches。已有的 `GESTURE` 行也补上了识别器的真实类名。这样不必再靠推理：即使真正处理拖动的是重写了 `translationInView:`/`velocityInView:` 的私有子类，也能直接从 `TOUCH` 行的 `recognizers` 列表里看到那个类名。
 - alpha10 同样是纯诊断工具：把 alpha9 这些记录同时喂给一个新增的屏幕悬浮球，不用再靠 Filza/SSH 事后去翻日志文件。悬浮球可拖动、显示已捕获行数，点一下展开成一块可滚动的面板，直接在屏幕上看完整历史；再点一下收起；长按面板一次性复制全部历史到剪切板。这个悬浮窗是完全独立的 `UIWindow`，World 从不把它当作 Root 登记，因此本文件里所有几何/手势 hook 都不会作用到它自己身上。
 - **alpha11 的关键突破**：真机 `TOUCH` 追踪日志第一次给出了处理灵动岛拖动的真实类名——`SBSystemApertureLongPressGestureRecognizer`，不是任何 `UIPanGestureRecognizer` 子类。这一件事本身就解释了 alpha7 那次"一行 GESTURE 都没记到"的空探测：不是没测到，是 hook 打错了类——`translationInView:`/`velocityInView:` 是 `UIPanGestureRecognizer` 专有的方法，这个真正干活的类根本不响应它们。也意味着 alpha8 那次取反修复，即使真机上"看起来"方向对了，理论上也不可能是那次取反本身在起作用（它 hook 的方法在这条路径上从未被调用）。本版新增对新发现的两个类（`SBSystemApertureLongPressGestureRecognizer`、日志里同时出现的 `_SAUIPortalView`）做一次性方法列表探测（做法同 alpha5/6 对 `MangoPillManager` 那次），以及对这个手势类的 `locationInView:`/`locationOfTouch:inView:`（`UIGestureRecognizer` 基类都有的公开方法，不像 `translationInView:` 那样专属于 pan）加了只读探测 hook——纯读、不改行为，看它是否真的走这两个方法读位置。详见 EVIDENCE.md。
+- alpha12 让悬浮面板长按复制到的内容真正等于文件日志的全部——之前 `DebugRecord` 只在四个具体日志点被显式调用，`CLASSDUMP`/`TRACK`/`WORLD`/`SKIP` 等其它种类只写进了文件。改成 `Log()` 内部统一镜像后，面板和文件永远同步，不需要每加一种新日志就记得再接一次。
+- **alpha13 的目标不是修灵动岛**（那部分仍在 alpha11 的方向上，等 `LPROBE` 真机结果），而是用户提出的新要求：灵动岛之外，插件本身（包括 Mango 分屏、以及本文件自己的悬浮追踪窗）都不会跟着屏幕倒置转。研究确认设备上已经有另一个独立的倒置插件负责让 `Orientation()` 报告倒置状态本身（`README.md` 里"保留原来的倒置插件"那句话说的就是它）；也研究了开源的 `upsidedowned`/`TrollPad`，确认它们让 SpringBoard declare 支持倒置方向的手法（伪装 iPad 身份、放开 orientation mask）完全没有涉及灵动岛所在的私有子系统，所以不是灵动岛问题的解法，这次也没有移植它——本仓库要做的一直是让 World 已有的倒置状态被更多东西尊重，不是重新发明倒置本身。分两部分处理：
+  - 悬浮追踪窗是本文件自己写的普通 `UIWindow`，不涉及任何私有手势类，只是此前特意没有跟着转（为了不被几何修正干扰诊断）。新增 `DebugSetTurned()`，在 `Reconcile()` 每次 tick（不需要开 trace）都根据 World 是否处于倒置状态给它整体转 180°；普通 `UIWindow.transform` 下，UIKit 自己的手势/命中测试会自动按转后的方向解读，不需要任何针对固定坐标系读数的额外修正——这正是它和灵动岛不同、可以直接转而不需要这一整个文件其它逻辑的原因。
+  - Mango 分屏等其它插件的真实实现未知，直接猜类名去 hook 正是 alpha1-8 在灵动岛上吃过的亏，所以这次只加只读探测：开 trace 后 `ProbeOtherWindows()` 遍历主屏幕上除灵动岛窗口外的每个窗口，用判定灵动岛内容倒置同一个函数（`MWInvertedBasis`）检查其视图树里是否有看起来已经倒置的视图，命中记一条 `SPLITPROBE window=... inverted=...`（按窗口类名去重，不刷屏）。这只是把"分屏不跟转"从描述变成具体类名，读日志之后才能决定下一步怎么接，不代表探测到的东西触控也一定正确——参考灵动岛内容朝向对了但触控仍反的教训。
 
 ## 先准备恢复途径，再安装
 
@@ -64,7 +68,11 @@ TOUCH phase=Moved window={187.3,42.1} fixed={187.3,769.9} view=SomeClass recogni
 - `recognizers`：沿这个视图父链收集到的**全部**手势识别器，每个都带真实运行时类名（不是猜的名字）、`state`、`numberOfTouches`。如果处理拖动的是某个重写了 `translationInView:`/`velocityInView:` 的私有子类，它的类名会直接出现在这里——不需要再靠"有没有 GESTURE 行"去反推。
 - 已有的 `GESTURE` 行现在也带上了 `class=`，同样是识别器的真实运行时类名，一并显示在悬浮面板里。
 
-全程只读：`sendEvent:` 的 hook 在调用原始实现**之后**才读取，不改变命中测试、分发顺序或任何返回值；悬浮球本身是一个独立的 `UIWindow`，World 从不把它登记为 Root，因此本文件其它几何/手势修正逻辑都不会作用到它，与修复逻辑完全独立。悬浮面板最多保留最近 300 条，文件日志仍受现有 512KB 轮转限制。
+全程只读：`sendEvent:` 的 hook 在调用原始实现**之后**才读取，不改变命中测试、分发顺序或任何返回值；悬浮球本身是一个独立的 `UIWindow`，World 从不把它登记为 Root，本文件针对灵动岛的几何/手势修正逻辑都不会作用到它，与修复逻辑完全独立。**alpha13 起悬浮球/面板整体会跟着倒置状态转 180°**（`DebugSetTurned`，不需要开 trace 就会同步），这不是接入了那套修正逻辑，只是给这个普通 `UIWindow` 单独设置了自己的 `transform`——效果上悬浮球现在应始终保持"正面朝向你"，不再是倒置时反着显示。悬浮面板最多保留最近 300 条，文件日志仍受现有 512KB 轮转限制。
+
+alpha13 新增一类只读探测，仅在开 trace 时运行，不需要额外开关：
+
+- `SPLITPROBE window=<类名> inverted=<视图类名列表>`：每次 `Reconcile` 在 trace 打开时，扫一遍主屏幕上除灵动岛窗口和本文件自己的悬浮球外的其它窗口，找视图树里看起来已经是"倒置基向量"的视图（判据与灵动岛内容层用的同一个函数）。**这只是找出 Mango 分屏等其它插件用的是哪个窗口/哪些视图**，不代表触控方向也对——参考灵动岛内容朝向对了但触控仍反的教训，看到这行之后需要先发回来，再决定下一步要不要对着这个类名做更进一步的探测或修正，不要跳过这一步直接假设它能直接复用灵动岛那套 hook。每个窗口类名只记一次，防止刷屏。
 
 alpha11 额外新增两类日志，装上后自动记一次/持续记录，不需要额外开关：
 

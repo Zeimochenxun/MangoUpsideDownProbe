@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.12.0-alpha12. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 0.13.0-alpha13. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -25,10 +25,13 @@ static char StateKey;
 // Forward declarations: the floating debug overlay is defined near the
 // gesture-trace code below, but Log() (defined first, and the single choke
 // point every call site in this file already goes through) mirrors every
-// line into its history, and Reconcile() toggles its visibility on every
-// Tracing transition.
+// line into its history, and Reconcile() toggles its visibility and turn
+// state, and the other-window probe checks window identity against it, all
+// ahead of that definition.
 static void DebugRecord(NSString *line);
 static void DebugSetVisible(BOOL visible);
+static void DebugSetTurned(BOOL turned);
+static UIWindow *DebugWindow;
 
 // Patch-owned state classes, NOT names extracted from Mango.
 @interface MWOwnedTransform : NSObject
@@ -254,6 +257,43 @@ static NSArray<UIWindow *> *ExistingWindows(void){
 #pragma clang diagnostic pop
     return result.array;
 }
+// 0.13.0-alpha13, diagnostic-only (gated by Tracing, same as TraceTouches):
+// the pill is not the only thing that fails to follow the world -- Mango's
+// split-screen UI and any other plugin are separate windows/view trees this
+// file has never looked at, and their real class names are unknown. Rather
+// than guess one and hook it -- the exact mistake alpha1-8 spent this whole
+// file avoiding on the pill -- this sweeps every window on the main screen
+// for the same tell already used to find inverted content inside the pill
+// (MWInvertedBasis: a clean, already-applied half-turn), and logs the real
+// class name of whatever it finds. A hit here is what turns "some other
+// plugin doesn't follow" into a concrete class to target next, the same way
+// alpha11's CLASSDUMP turned a guess into SBSystemApertureLongPressGesture-
+// Recognizer. Never modifies anything it finds; walks are bounded like
+// Contents(), and each window class is logged only once per boot so a
+// steady hit cannot flood the log.
+static NSMutableSet<NSString *> *SeenInvertedWindowClasses;
+static void ProbeInverted(UIView *v,id<UICoordinateSpace> fixed,unsigned depth,NSMutableArray<NSString *> *hits){
+    if(depth>32||hits.count>=8||!CATransform3DIsAffine(v.layer.transform))return;
+    CGPoint a=[v convertPoint:CGPointZero toCoordinateSpace:fixed];
+    CGPoint b=[v convertPoint:CGPointMake(1,0) toCoordinateSpace:fixed];
+    CGPoint c=[v convertPoint:CGPointMake(0,1) toCoordinateSpace:fixed];
+    double dx=b.x-a.x,dy=c.y-a.y;
+    if(MWInvertedBasis(dx,dy,c.x-a.x,b.y-a.y))[hits addObject:NSStringFromClass(v.class)];
+    for(UIView *sub in v.subviews)ProbeInverted(sub,fixed,depth+1,hits);
+}
+static void ProbeOtherWindows(void){
+    if(!SeenInvertedWindowClasses)SeenInvertedWindowClasses=[NSMutableSet set];
+    for(UIWindow *w in ExistingWindows()){
+        if(w.screen!=UIScreen.mainScreen||w==DebugWindow||(WindowClass&&[w isKindOfClass:WindowClass]))continue;
+        NSString *wcls=NSStringFromClass(w.class);
+        if([SeenInvertedWindowClasses containsObject:wcls])continue;
+        NSMutableArray<NSString *> *hits=[NSMutableArray array];
+        ProbeInverted(w,w.screen.fixedCoordinateSpace,0,hits);
+        if(!hits.count)continue;
+        [SeenInvertedWindowClasses addObject:wcls];
+        Log([NSString stringWithFormat:@"SPLITPROBE window=%@ inverted=%@",wcls,[hits componentsJoinedByString:@","]]);
+    }
+}
 static void Reconcile(void){
     if(Busy||Depth||![NSThread isMainThread])return;
     Busy=YES;
@@ -265,7 +305,10 @@ static void Reconcile(void){
             // diagnostic, useful for comparing turned vs. untouched behavior.
             BOOL tracing=access(TracePath,F_OK)==0;
             if(tracing!=Tracing){Tracing=tracing;Log(Tracing?@"TRACE: touch/gesture tracing enabled":@"TRACE: touch/gesture tracing disabled");DebugSetVisible(Tracing);}
-            if(!Enabled||Orientation()!=UIInterfaceOrientationPortraitUpsideDown)return;
+            BOOL active=Enabled&&Orientation()==UIInterfaceOrientationPortraitUpsideDown;
+            DebugSetTurned(active);
+            if(Tracing)ProbeOtherWindows();
+            if(!active)return;
             for(UIWindow *w in ExistingWindows())Discover(w);
             for(UIWindow *w in Windows.allObjects)Discover(w);
             for(UIView *root in Roots.allObjects)ApplyWorld(root);
@@ -496,7 +539,6 @@ static UIWindowScene *MainWindowScene(void){
 - (void)onPan:(UIPanGestureRecognizer *)g;
 - (void)onLongPress:(UILongPressGestureRecognizer *)g;
 @end
-static UIWindow *DebugWindow;
 static UIView *DebugBubble;
 static UILabel *DebugCount;
 static UITextView *DebugPanel;
@@ -584,6 +626,19 @@ static void DebugSetVisible(BOOL visible){
     if(!DebugWindow)return;
     DebugWindow.hidden=!visible;
     if(!visible){DebugExpanded=NO;DebugPanel.hidden=YES;}
+}
+// 0.13.0-alpha13: make the overlay itself follow the same inversion it
+// reports on. Unlike SBSystemApertureWindow, this is a plain UIWindow we
+// wrote ourselves -- no private gesture class underneath it reading a fixed
+// coordinate space -- so a bare half-turn is the whole fix: UIKit's own
+// hit-testing and every gesture recognizer's translationInView:/
+// locationInView: already compose correctly with a window transform, which
+// is exactly why the pill above needs the rest of this file and this does
+// not. Runs every Reconcile tick regardless of Tracing, so the transform is
+// already correct by the time DebugCreate() lazily makes the window visible.
+static void DebugSetTurned(BOOL turned){
+    if(!DebugWindow)return;
+    DebugWindow.transform=turned?CGAffineTransformMakeRotation((CGFloat)M_PI):CGAffineTransformIdentity;
 }
 static void DebugRecord(NSString *line){
     if(!DebugHistory)DebugHistory=[NSMutableArray array];
@@ -833,6 +888,6 @@ static void Install(void){
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
     InstallGestureFix();
     InstallLongPressProbe();
-    Log(@"INSTALLED World 0.12.0-alpha12: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay (all log lines) + long-press class probe");Reconcile();
+    Log(@"INSTALLED World 0.13.0-alpha13: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay (all log lines, now itself turned) + long-press class probe + other-window inversion probe");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}
