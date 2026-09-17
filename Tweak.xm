@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.15.1-alpha15b. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 0.15.2-alpha15c. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -712,9 +712,9 @@ static void DebugCreate(void){
 // version, and a single fixed corner is enough for a control meant to
 // always be reachable.
 //
-// Real-device result: the button appeared but taps produced no response.
-// DebugWindow uses this exact same construction (MWDebugWindow, same
-// windowLevel, a gesture recognizer on a small subview) and has always
+// alpha15 real-device result: the button appeared but taps produced no
+// response. DebugWindow uses this exact same construction (MWDebugWindow,
+// same windowLevel, a gesture recognizer on a small subview) and has always
 // worked, so the difference is not the pattern itself -- it is WHEN each
 // one runs it. DebugWindow is only ever built long after boot, when the
 // user manually creates the trace file, by which point a UIWindowScene is
@@ -724,11 +724,32 @@ static void DebugCreate(void){
 // ready yet -- if MainWindowScene() returned nil at that moment, the old
 // code fell back to initWithFrame:, which can render but, lacking any
 // windowScene, is known not to reliably receive touches on modern
-// scene-based iOS. Fixed by refusing that fallback outright and retrying
-// instead: ArmCreate() now does nothing until a real scene exists, and is
-// called from Reconcile() below (cheap due to the ArmWindow guard below),
-// which already runs on the same 250ms timer Install() itself trusts to
-// eventually observe a ready system.
+// scene-based iOS.
+//
+// alpha15b fixed that: ArmCreate() no longer falls back, and is called from
+// Reconcile() below (cheap due to the ArmWindow guard below) so it retries
+// on the same 250ms timer Install() itself already trusts. Real-device
+// result: ARM READY now fires (confirming the window really does attach to
+// a scene), but ARM TAP still never fires on a confirmed real tap. That
+// rules out the scene-timing theory entirely and narrows this to something
+// between "a touch lands on screen" and "the tap gesture recognizer
+// transitions to Ended" -- which could be a hit-testing/window-ordering
+// problem (the touch never reaches this view at all) or a gesture-
+// recognizer-specific one (the touch reaches the view but the recognizer
+// itself never fires). MWArmButtonView below adds a raw touchesBegan:
+// override directly on the button -- independent of UIGestureRecognizer's
+// own state machine entirely -- so the next real-device log tells these
+// two apart directly instead of guessing further: ARM TOUCHBEGAN with no
+// ARM TAP means the recognizer is the problem; neither firing means the
+// touch itself never arrives.
+@interface MWArmButtonView : UIView
+@end
+@implementation MWArmButtonView
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    Log(@"ARM TOUCHBEGAN");
+    [super touchesBegan:touches withEvent:event];
+}
+@end
 static UIView *ArmButton;
 static UILabel *ArmLabel;
 static void ArmCreate(void){
@@ -741,7 +762,7 @@ static void ArmCreate(void){
     ArmWindow.windowLevel=UIWindowLevelAlert+100000;
     ArmWindow.backgroundColor=UIColor.clearColor;
     ArmWindow.hidden=NO;
-    ArmButton=[[UIView alloc] initWithFrame:CGRectMake(16,screen.size.height-140,44,44)];
+    ArmButton=[[MWArmButtonView alloc] initWithFrame:CGRectMake(16,screen.size.height-140,44,44)];
     ArmButton.layer.cornerRadius=22;ArmButton.clipsToBounds=YES;
     ArmLabel=[[UILabel alloc] initWithFrame:ArmButton.bounds];
     ArmLabel.textAlignment=NSTextAlignmentCenter;
@@ -1233,6 +1254,6 @@ static void Install(void){
     InstallLongPressProbe();
     InstallTouchLocationFix();
     InstallVolumeFix();
-    Log(@"INSTALLED World 0.15.1-alpha15b: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay (all log lines, now itself turned) + long-press class probe + other-window inversion probe (aperture window included) + content structure probe + manual arm/disarm gate (scene-retry fixed) + global UITouch location fix + volume-button escape hatches");Reconcile();
+    Log(@"INSTALLED World 0.15.2-alpha15c: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay (all log lines, now itself turned) + long-press class probe + other-window inversion probe (aperture window included) + content structure probe + manual arm/disarm gate (scene-retry fixed, raw touch diagnostic) + global UITouch location fix + volume-button escape hatches");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}
