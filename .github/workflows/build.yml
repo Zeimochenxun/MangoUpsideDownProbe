@@ -75,11 +75,41 @@ jobs:
       - name: Upload package and build information
         uses: actions/upload-artifact@v4
         with:
-          name: MangoUpsideDownWorld-1.0.0
+          name: MangoUpsideDownWorld-1.0.1
           if-no-files-found: error
           path: |
             packages/*.deb
             build-info/*
             README.md
             EVIDENCE.md
+
+      - name: Build and inspect camera package
+        shell: bash
+        run: |
+          set -euo pipefail
+          export THEOS="$HOME/theos"
+          shasum -a 256 camera/Tweak.xm camera/MangoUpsideDownCamera.plist
+          make -C camera clean
+          make -C camera package FINALPACKAGE=1 2>&1 | tee "$RUNNER_TEMP/mangocamera-build.log"
+          if grep -qi 'incompatible arm64e ABI' "$RUNNER_TEMP/mangocamera-build.log"; then
+            echo 'Refusing package with incompatible arm64e ABI warning'
+            exit 1
+          fi
+          dylib="$(find camera/.theos -name MangoUpsideDownCamera.dylib -type f | head -n 1)"
+          test -n "$dylib"
+          xcrun lipo -info "$dylib"
+          xcrun otool -L "$dylib"
+          xcrun otool -l "$dylib" > "$RUNNER_TEMP/mangocamera-load-commands.txt"
+          mkdir -p camera-build-info
+          cp "$RUNNER_TEMP/mangocamera-build.log" "$RUNNER_TEMP/mangocamera-load-commands.txt" camera-build-info/
+          shasum -a 256 camera/packages/*.deb > camera-build-info/SHA256SUMS.txt
+
+      - name: Upload camera package and build information
+        uses: actions/upload-artifact@v4
+        with:
+          name: MangoUpsideDownCamera-1.0.0
+          if-no-files-found: error
+          path: |
+            camera/packages/*.deb
+            camera-build-info/*
 

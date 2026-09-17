@@ -101,3 +101,17 @@ alpha12：`Log()` 本身现在会把每一行同时喂给悬浮面板——这�
 工程使用 RootHide Theos、iOS 16.5 SDK、Apple Clang（macOS），`ARCHS=arm64e`，`THEOS_PACKAGE_SCHEME=roothide`。运行 `make package FINALPACKAGE=1`。CI 校验 SDK 哈希、拒绝 incompatible arm64e ABI 警告并审查 deb 内容。
 
 GitHub Actions 构建产物包含 deb、编译日志、load commands 和 SHA256。源码在本分支；不包含付费 Mango 二进制。更多原理与已知不足见 EVIDENCE.md。
+
+## MangoUpsideDownCamera：独立的第二个包，让任意 App 的相机跟着倒置转
+
+这是一个**完全独立**的新插件，跟上面的 `MangoUpsideDownWorld` 是两个不同的包（不同 dylib、不同 `control`、不同开关文件），分别安装、分别卸载，互不依赖。
+
+**为什么要单独拆包**：`MangoUpsideDownWorld` 只注入 SpringBoard 这一个进程，出问题最坏情况是 SpringBoard 崩溃/重启，有现成的恢复流程。这次的需求——"任意 App 调用相机时都跟着倒置转"——SpringBoard 管不到别的 App，只能让代码跑进**每一个装了 UIKit 的进程**（`MangoUpsideDownCamera.plist` 里 `Filter.Classes` 写的是 `UIApplication`，意思是"哪个进程里有这个类就注入哪个"，不再是像 `MangoUpsideDownWorld.plist` 那样按 bundle ID 精确指定唯一一个进程）。这个范围一旦出问题，影响面是"整机所有 App"，不再是"重启一下 SpringBoard"能解决的，所以刻意让它跟现有插件完全分开，各自有独立的开关文件——出问题时可以只关掉这一个，不影响另一个。
+
+**这次做的是什么，做不到什么**：一个 App 的界面允不允许转到倒置方向，是这个 App 自己声明的（`supportedInterfaceOrientations` 方法）。苹果的默认值本身就是"除了倒置都允许"，所以几乎所有 App 不特殊声明的话本来就转不到倒置。这次先只 hook `UIViewController` 这个基类自己的默认实现——**如果一个 App（很可能包括苹果自己的相机 App）自己重写了这个方法给出自己的答案，这次的 hook 对它完全不起作用**，这是能力上的真实边界，不是没做完。检测到手机真的物理倒置时（读的是 `UIDevice.orientation`，真实的加速度计数据，跟 Mango、跟 SpringBoard 那边的任何状态都没关系），才会往这个 App 原本的答案里"加"一条"允许倒置"，其它时候完全不改变任何行为。
+
+装机后**优先测系统自带的相机 App**：倒置手机后打开相机，看取景预览是不是真的跟着转了。如果没反应，说明相机 App 自己重写了这个方法，这次的做法覆盖不到——发现是这个情况的话请告知，下一步要做"装机时扫描整个运行时、把每个自己重写过这个方法的类都找出来单独挂 hook"这个覆盖面更大、但风险也更大的版本，而不是一开始就直接上那个版本。也请测一下手头有摄像头权限的第三方 App（扫码类的最方便），看覆盖面有多大。
+
+即使界面允许转成倒置了，**拍照/录像实际拍出来的画面方向是每个 App 自己另外控制的**，这次的改动管不到：本身就正确处理四个方向的 App，画面大概率会自动跟着对；写死拍摄方向不看设备姿态的 App，这次不会让它变对。首次被要求显示成倒置方向的界面，也可能因为从来没被这样测试过而画面错位——这是任何做法都无法完全避免的，只能限制在"手机真的倒置"这一个最小范围内发生。
+
+独立开关文件：`/var/mobile/Library/Preferences/MangoUpsideDownCamera.disabled`，跟 `MangoUpsideDownWorld.disabled` 是两个不同的文件，建法完全一样（Filza 新建空文件或 SSH `touch`）。跟 `MangoUpsideDownWorld` 不同的是，这个文件**每次真正要生效时都会实时检查**（每次系统问"这个界面能不能转到倒置"就查一次），不是只在 App 启动那一刻查一次——所以建这个文件之后，哪怕某个 App 已经在跑、已经装上了这次的 hook，也会立刻不再生效，不需要杀掉重开那个 App，也不需要 respring。删除该文件恢复同理，立即对所有已经在跑的 App 生效。

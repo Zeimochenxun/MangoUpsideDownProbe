@@ -279,3 +279,38 @@ alpha14 的修法分两处，而不是简单地"不再跳过这个窗口"：
 6. 没有倒置插件本身的二进制，不能确认其是否修改 compositor / HID 或仅修改 UIKit。本版没有 backboardd 注入。
 
 测试覆盖：局部语法检查；1000 组仿射半周变换及逆变换；日志中的缩放/非对称中心案例；重复旋转抵消；抵消算子的缩放/位移保持与自逆；倒置基向量判定的接受与拒绝用例；非有限数值拒绝；CI 将检查真实 deb 的 arm64e、RootHide 链接、签名数据、SpringBoard 注入过滤及仅含两个 payload 文件。均不等同于真机验证。第 1 条的修复本身也未经真机验证。
+
+---
+
+# MangoUpsideDownCamera 1.0.0：证据与边界
+
+**从这里开始，以下内容描述的是一个完全独立的第二个插件包**，不是上面 `MangoUpsideDownWorld` 的一部分——不同 dylib、不同 `control`、不同注入配置、不同开关文件，唯一的共同点是同一个 git 仓库、同一份对话历史。之所以拆成两个包而不是加进现有文件，见下面第一条。
+
+## 需求与范围判断
+
+用户提出的需求是：手机倒置时，**任意 App**（不只是系统自带相机）调用摄像头的界面都应该跟着转成倒置显示，不是只有灵动岛和 SpringBoard 自己的界面。
+
+这跟 `MangoUpsideDownWorld` 已经做的所有事情有两处本质区别，都是先查证过再动手：
+
+1. **注入范围**：`MangoUpsideDownWorld.plist` 用 `Filter.Bundles` 精确指定了唯一一个进程（`com.apple.springboard`）。SpringBoard 对别的 App 界面怎么显示完全没有话事权，"任意 App"这个范围要求代码真的跑在**每一个 App 自己的进程里**。查证了 MobileSubstrate 的 filter 机制：`Filter` 字典里除了常见的 `Bundles`（按 bundle ID 精确匹配）、`Executables`（按可执行文件名匹配），还有一个 `Classes` 键（数组），语义是"这个进程里如果加载了这个 Objective-C 类就注入"——这正是"任意 UIKit App，但不包括没有界面的系统后台服务"这个需求的现成机制，不需要完全不写 filter（那样会连 `launchd`、`backboardd` 这类系统进程都注入进去，风险高得多）。`MangoUpsideDownCamera.plist` 用的就是 `Filter.Classes=[UIApplication]`。
+2. **判断依据**：`MangoUpsideDownWorld` 的 `Orientation()` 读的是 Mango 自己注入到 SpringBoard 里的一个类方法——这个类方法**只存在于 SpringBoard 进程里**，在任何其它 App 的进程里读它都是 `nil`。新插件改用 `UIDevice.currentDevice.orientation`——这是 UIKit 自己基于加速度计得出的物理姿态，每个进程里都一样、都是真实数据，跟 Mango、跟 SpringBoard 那边任何状态都没有关系。
+
+**机制上的真实边界**：一个界面允不允许转到倒置方向，是通过 `-[UIViewController supportedInterfaceOrientations]` 这个方法逐个界面自己声明的。苹果自己的文档写着 iPhone 上不重写这个方法时的默认值就是"除了倒置都支持"——也就是说几乎所有 App 默认就是被排除在倒置之外的，要转就得自己在这个方法里加上倒置这个选项。而这个方法苹果自己的指导是"完全替换，不需要调用 `super`"——查证确认了这一点，意味着**只 hook `UIViewController` 这个基类自己的默认实现，对任何自己重写过这个方法的界面类完全无效**，因为那些类的实现根本不会走到基类的这份代码。这是结构性的限制：没有一个单一的 hook 点能透明地拦到"每个 App 自己写的每一种重写"，唯一能拦到某个重写的办法就是直接 hook 那个具体类自己实现的这个方法——但"任意 App"这个范围下，事先不可能知道所有 App 各自用了哪些类。
+
+用户在了解这个限制后，明确选择了**先只做基类 hook 这一步，装机验证系统相机 App 是否已经足够，再决定要不要往风险更大的方向升级**（"全量覆盖"方案需要在每个进程启动时扫描整个 Objective-C 运行时、找出所有自己重写过这个方法的类逐个单独挂 hook，覆盖面更大但改动的类更多、风险面也更大——这次没有做，留作后续步骤）。
+
+## 安全边界设计
+
+- **独立打包**：新建 `camera/` 子目录，独立的 `Tweak.xm`/`control`/`MangoUpsideDownCamera.plist`/`Makefile`，不共享 `MangoUpsideDownWorld` 的任何代码（两个包各自编译、各自注入，即使其中一个的运行时逻辑写错，也不会拖累另一个）。CI (`.github/workflows/build.yml`) 复用同一次 Theos/SDK 安装，新增独立的 `make -C camera package` 构建步骤和独立的产物上传。
+- **不进 SpringBoard**：`Install()` 显式排除 `com.apple.springboard` 这个 bundle ID——那边的倒置处理完全是 `MangoUpsideDownWorld` 的地盘，两份互不知情的代码同时改同一个进程的方向逻辑，正是这个项目自己的 `Conflicts:` 字段一直在防的那类冲突，只是这次防的对象换成了自己的另一个包。
+- **构造函数阶段的时机问题（已修正）**：最初设计里想在 `Install()` 里顺带检查 `UIApplication.sharedApplication` 非空来确认"这是个真的 App 进程"，但 dylib 的 `__attribute__((constructor))` 是在 `dyld` 加载完所有依赖库、但在这个进程自己的 `main()`/`UIApplicationMain()` 跑之前执行的——那个时间点上，`UIApplication` 这个类肯定已经被 `dyld` 映射进内存了（`objc_getClass` 能查到），但**还没有任何 App 实例被创建**，`sharedApplication` 一定是 `nil`。如果真按最初的想法写，这个检查会在每一个正常 App 进程里都判定失败，导致 hook 永远装不上。改成只检查类是否存在（`objc_getClass("UIApplication")!=NULL`），这个检查在 dylib 刚加载的那一刻就已经真实有效，不依赖任何后续的运行时状态。
+- **生成方向通知需要延迟到主线程 run loop**：`[UIDevice.currentDevice beginGeneratingDeviceOrientationNotifications]` 依赖主 run loop 才能真正开始收到硬件方向更新，构造函数执行的那一刻 run loop 还没转起来，所以这一步单独 `dispatch_async` 到主队列延后执行；而给 `UIViewController` 打补丁本身只是改一个类的方法指针，不需要 run loop，所以这部分仍然在构造函数里同步完成，让 hook 尽可能早生效。
+- **失败即透明放行**：跟 `MangoUpsideDownWorld` 的 `Signature()` 同一套做法（各自独立实现，不共享代码，但逻辑一致）——真机上如果 `supportedInterfaceOrientations` 的方法签名跟预期不符，直接不装任何 hook，行为跟没装这个插件完全一样；每次调用都会先拿到真实的原始返回值，只有确认当前物理姿态是倒置时才往上"加"一个倒置支持位，不是凭空捏造一个新的返回值——一个 App 自己已有的限制（比如"只支持竖屏，不支持横屏"）不受影响。
+- **开关文件是实时检查，不是只在启动时查一次**：`MangoUpsideDownWorld` 有一个 250ms 的定时器持续检查自己的开关文件，即使不重启 SpringBoard，改动也能很快生效；这个新插件没有类似的常驻定时器（每个 App 进程只在真的被系统问到方向时才会跑到这段代码），所以特意把开关文件的检查放进了 hook 本身、每次调用都查一次，而不是只在 `Install()` 里查一次——否则关闭这个插件会要求先手动杀掉、重新打开每一个已经在跑的 App 才能确认生效，作为一个"紧急恢复手段"这个可靠性是不够的。
+
+## 尚未处理（这个新包自己的，跟上面 `MangoUpsideDownWorld` 的清单分开记）
+
+- 系统自带相机 App 在这次的基类 hook 下到底跟不跟转，尚未真机验证——README 已经把这一步列为装机后第一个要测的项目。如果不跟转，说明相机 App 自己重写了这个方法，需要真机确认后再决定是否升级到扫描整个运行时逐个 hook 的方案。
+- 覆盖面广度（除了系统相机，还有多少第三方 App 会跟着转）尚未真机验证。
+- 即使界面被允许转到倒置，实际拍摄/录制画面本身的方向是否正确，这次的改动管不到——取决于每个 App 自己怎么读设备姿态来设置拍摄方向，本身处理好四方向的 App 大概率自动跟着对，写死拍摄方向的 App 不会变。
+- 首次被要求以倒置方向渲染的界面是否会出现视觉错位/图层错乱，这属于"从未被这样测试过的界面第一次被要求这样显示"固有的风险，任何做法都无法完全消除，只能真机逐一确认。
