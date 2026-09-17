@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 0.8.0-alpha8：证据与边界
+# MangoUpsideDownWorld 0.9.0-alpha9：证据与边界
 
 这是本次新实现，不是从关联对话中取回的既有 World 源码，也不是给 Fix alpha2 改名。
 
@@ -126,6 +126,20 @@ alpha7 的 `GESTURE` 探测在用户提供的日志里**一行都没有出现**�
 x 轴同样取反：半周旋转会同时反转两个轴，所以被翻转的岛上左/右和上/下一样是镜像的。只取反 y 会修好上报的症状、却把同一个 bug 的水平那一半留在原处，并且引入一个镜像（镜像不是旋转），几何上不自洽。
 
 **置信度与如何被推翻**：上述推理是自洽的，但那个具体的读数者**尚未被观测到**。如果真正起作用的是重写了这两个方法的私有子类，或者读数者取的是 `UITouch` 原始位置而非 pan 识别器的增量，那么本版不会产生任何可观测的变化、方向依旧是反的——那个结果是有信息量的，不是回归，也正是此处保留 `GESTURE` 日志（现在记录 `raw=` 与 `turned=` 两个值）的原因。届时下一步应是记录该识别器的真实类名，而不是再猜一次。
+
+## 0.9.0-alpha9：新增只读触摸/手势追踪工具，不是新的修复尝试
+
+alpha8 的置信度说明留了一个未闭合的问题：`GESTURE` 探测在用户提供的日志里一行都没出现，无法区分"那段时间没测"还是"真正的识别器是重写了 `translationInView:`/`velocityInView:` 的私有子类从而绕过了 hook"。继续靠猜名字、列方法这条路（alpha5-6 已经走到收益递减）解决不了这个问题——需要的是在触摸真实发生的那一刻直接看运行时状态，而不是再猜一个类名去验证。
+
+新增 `TraceTouches()`，由运行时开关 `TracePath`（同 `Disabled` 的建法，`Reconcile()` 里每 250ms 或方向变化通知时检查一次）控制，默认关闭：
+
+- Hook 点是 `WindowClass`（`SBSystemApertureWindow`）的 `sendEvent:`——这是触摸事件到达这个窗口的最早一个可 hook 的公开入口，早于 `hitTest:withEvent:`/`pointInside:withEvent:`（这两个已经被 hook 用于命中兜底）。
+- **严格只读，且顺序很关键**：hook 先调用原始 `sendEvent:`，再读取 `event.allTouches`。UIKit 是在原始实现内部完成命中测试并把结果写进 `UITouch.view` 的，如果反过来先读后调用，读到的会是还没被赋值的视图——这不是任意选择的写法，是保证读到的数据有效的必要顺序。不改变命中测试、分发顺序或任何返回值，与已有的几何修正逻辑完全独立、互不影响。
+- 对每个触点记录：`phase`（`UITouch.phase`，公开属性）、该点在窗口坐标系和 `fixedCoordinateSpace`（物理屏幕坐标）下的位置、命中视图的真实类名，以及沿该视图 superview 链（上限 32 层，与文件里其它遍历同一量级的防御性上限）收集到的**全部**手势识别器——用 `UIView.gestureRecognizers` 这个公开属性读取，去重后逐个记录其真实运行时类名（`NSStringFromClass`，不是猜测）、`state`、`numberOfTouches`。
+- 这解决的正是 alpha8 留下的问题：不管起作用的识别器有没有重写 `translationInView:`/`velocityInView:`，它只要挂在这条 superview 链上就会出现在 `recognizers` 列表里，类名是运行时读出来的事实，不是推理。
+- 同时把这个类名也补进了已有的 `GESTURE api=... class=...` 行——`TurnDelta` 里原本已经拿到 `self`（触发调用的识别器实例），只是没有记录它的类；一行 `NSStringFromClass(self.class)` 就能看出是不是纯 `UIPanGestureRecognizer` 本身。
+- 频率控制：与 `GESTURE` 同样用 0.05 秒节流（一次拖动每帧回调多次），且只在 `Tracing` 为真时才做任何工作——`Tracing` 是一次静态 BOOL 读取，关闭时这个 hook 的开销与调用原始实现之外几乎为零，不影响未开启诊断时的正常行为。
+- 未新增任何几何原语或修正逻辑，`WorldMath.h`/`world_math_test.c` 不变；这里全部是运行时对象自省（`gestureRecognizers`、`state`、`numberOfTouches`、`phase`、`convertPoint:toCoordinateSpace:`），无法在脱离 UIKit 运行时的 C 单测里覆盖，与文件里其它同样依赖真实视图层级的诊断代码（`ProbeMangoSelectors`、`ProbeMangoPillManager`、`WorldHit`）用的是同一类验证方式：只能靠真机日志核验，不靠单测。
 
 ## 尚未处理
 

@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 0.8.0-alpha8
+# MangoUpsideDownWorld 0.9.0-alpha9
 
 新编写的实验兼容补丁。目标：iPhone 13 mini / iOS 16.5 / Dopamine RootHide / 已核对的 Mango 版本。尚未真机验证，不宣称全场景已修复。
 
@@ -16,12 +16,13 @@ alpha1 真机结果：收起态的岛已经能在倒置下显示在正确位置�
 - alpha5 的真机结果：`pillSwipeDownAction`/`pillSwipeUpAction` 零匹配，现在判断这两个其实是 Mango 设置界面里的配置控件，不是手势代码，这条线索排除；`mango_prepareTopDismissReverseGeometryForInteractiveMirror` 挂在应用资源库选择器上，跟灵动岛无关，也排除。唯一坐实的是 **`MangoPillManager`**（定义了 `dismissPill`/`dismissPillAnimated:`），是岛控制器类的强候选。alpha6 把探测从"猜名字"改成直接列出 `MangoPillManager` 自身及其父类链定义的全部方法。
 - alpha6 的真机结果：`MangoPillManager` 全部 17 个方法都是内容生命周期/通知处理，没有任何 pan/touch/gesture 方法——排除了 Mango 自己的代码。alpha7 改成运行时实时抓，对上述两个公开方法只记日志、不改行为。
 - alpha7 的真机结果：滑动期间**一行 `GESTURE` 都没记到**，无法区分是没测到还是被私有子类绕过。但另一条推理已足以否定前四版的整条思路：视图的渲染矩阵和触摸坐标矩阵是同一个，所以转任何一层都不可能只翻画面而不同等翻转同子树内读到的坐标——而转 root（alpha1–3）和转窗口（alpha4，窗口已是 World 能触及的最顶层）方向都仍是反的。唯一自洽的解释是：判断方向的代码读的是屏幕**固定坐标系**（物理位置），窗口的 transform 只把窗口摆在那个空间之内、无法重定义它，所以它永远看到手指的真实物理位置，而 World 把岛从物理顶部搬到了物理底部——它仍按"岛在顶部"判断，于是必然一直反。这也解释了"拖动跟手、但上下判定不跟手"：前者持续读位置并经翻转子树渲染、两半相互抵消，后者在固定坐标系里只取一次符号、从不经过那次翻转。
-- 所以本版（alpha8）**第一次真正尝试修复方向**，且不再动几何：在那个固定坐标系增量进入岛手势处理的唯一入口处取反——仅当 `UIPanGestureRecognizer` 自身的 `.view` 位于某个正在翻转的 root 子树内时，对 `translationInView:`/`velocityInView:` 的返回值取反（x/y 都取，因为半周旋转同时反转两轴）。世界未翻转、已 SUSPEND、非主线程或非有限值一律原样透传。**这个修复基于推理而非观测**：如果真正的读数者是重写了这两个方法的私有子类、或读的是 `UITouch` 原始位置，本版不会有任何可观测变化、方向依旧反——那是有信息量的结果而不是回归。详见 EVIDENCE.md。
+- 所以 alpha8 **第一次真正尝试修复方向**，且不再动几何：在那个固定坐标系增量进入岛手势处理的唯一入口处取反——仅当 `UIPanGestureRecognizer` 自身的 `.view` 位于某个正在翻转的 root 子树内时，对 `translationInView:`/`velocityInView:` 的返回值取反（x/y 都取，因为半周旋转同时反转两轴）。世界未翻转、已 SUSPEND、非主线程或非有限值一律原样透传。**这个修复基于推理而非观测**：如果真正的读数者是重写了这两个方法的私有子类、或读的是 `UITouch` 原始位置，alpha8 不会有任何可观测变化、方向依旧反——那是有信息量的结果而不是回归。
+- alpha9 是纯诊断工具，不改变任何已有行为、不是新的修复尝试：新增运行时开关 `MangoUpsideDownWorld.trace`（建法同 `.disabled`），开启后在灵动岛所在窗口的 `sendEvent:` **之后**（不影响命中测试和分发本身）记录每次触摸的阶段、window/fixed 两种坐标、命中视图类名，以及该视图沿父链收集到的全部手势识别器——每个都带真实运行时类名、state、numberOfTouches。已有的 `GESTURE` 行也补上了识别器的真实类名。这样不必再靠推理：即使真正处理拖动的是重写了 `translationInView:`/`velocityInView:` 的私有子类，也能直接从 `TOUCH` 行的 `recognizers` 列表里看到那个类名。详见 EVIDENCE.md。
 
 ## 先准备恢复途径，再安装
 
 1. 在手机仍正常时，确认电脑能通过 SSH 登录该手机，并保持终端连接；同时确认能从 Dopamine 关闭 tweak 注入后重新越狱。没有可用的恢复途径时先不要装。
-2. 若安装后屏幕仍响应，但位置/触摸异常：用 Filza 在 `/var/mobile/Library/Preferences/` 新建空文件 `MangoUpsideDownWorld.disabled`。主线程正常时约 0.25 秒检测到，恢复可确认属于本补丁的变换；删除标记并 respring 才重新启用。
+2. 若安装后屏幕仍响应，但位置/触摸异常：用 Filza 在 `/var/mobile/Library/Preferences/` 新建空文件 `MangoUpsideDownWorld.disabled`。这个检查只看文件是否存在，不看内容——如果 Filza 的"新建文件"选项不可用或失败，复制该目录下任意一个已有文件、粘贴、再重命名为这个文件名同样有效。主线程正常时约 0.25 秒检测到，恢复可确认属于本补丁的变换；删除标记并 respring 才重新启用。
 3. SSH 可用时，先在 RootHide 的越狱终端环境中运行 `command -v dpkg` 确认包管理命令存在，再用 root 执行 `dpkg -r com.chenxun.mangoupsidedownworld`，随后用已安装的越狱工具 respring。不要在 Windows PowerShell 本地执行 dpkg。
 4. 若卡住/循环重启且 SSH 不可用：按音量加、音量减，然后持续按侧键至 Apple 标志强制重启；在未启用 tweak 注入的越狱状态下移除 World。关闭注入的具体控件以设备上的 Dopamine 界面为准。
 5. Filza 手动恢复时，在 RootHide 当前真实 `.jbroot-…` 下找到 `Library/MobileSubstrate/DynamicLibraries/`，将 **MangoUpsideDownWorld.plist** 改为 `.plist.disabled` 后重新启动 SpringBoard；如实际包使用另一注入目录，以 `dpkg -L com.chenxun.mangoupsidedownworld` 清单为准。不要猜随机 jbroot 路径，不要删除 mango.dylib / MangoOSRendering.dylib。
@@ -38,6 +39,23 @@ alpha1 真机结果：收起态的岛已经能在倒置下显示在正确位置�
 - 若要复现岛落到底部：锁屏后在音乐播放状态点亮屏幕，随后取日志查 `SKIP` 行。同时请记录异常时岛内文字对倒置视角是正还是倒 —— 这一条用于区分是 Mango 的方向状态问题还是 World 的几何判定问题。
 - 日志位于 `/var/mobile/Library/Logs/MangoUpsideDownWorld.log`。`WORLD` 仅证明变换已应用；`SKIP` 说明该轮未施加修正及原因；`HIT fallback` 仅证明窗口回退命中；都不是功能全通过。`NO HOOKS` / `CONFLICT` / `SUSPEND` 表示没有启用或已停止。
 - 如果没有 `TRACK` / `WORLD`，不要叠加更多补丁强制生效：这表示当前窗口结构/方向/版本未满足保护条件。
+
+## 诊断：实时看触摸与手势（alpha9，纯只读）
+
+想直接看清"手指移动灵动岛时系统内部在处理什么"，而不是靠日志反推时，在设备上创建空文件 `/var/mobile/Library/Preferences/MangoUpsideDownWorld.trace`（与 `.disabled` 同目录、同建法：Filza 新建空文件或 SSH `touch`；`access()` 检查只看文件是否存在，不看内容或类型，Filza 里"新建"不可用时复制同目录任意已有文件再粘贴重命名同样有效）。约 0.25 秒内生效，不需要 respring；删除该文件即关闭，同样不需要 respring。
+
+开启后，在岛上滑动会在同一个日志文件里追加 `TOUCH` 行：
+
+```
+TOUCH phase=Moved window={187.3,42.1} fixed={187.3,769.9} view=SomeClass recognizers=UIPanGestureRecognizer(state=Changed,touches=1),...
+```
+
+- `window`/`fixed`：同一个触点在窗口坐标系和屏幕固定坐标系下的位置，两者不同正是 EVIDENCE.md 里"读数者按固定坐标系判断"这条推理的直接体现。
+- `view`：这次触摸命中的视图的真实类名。
+- `recognizers`：沿这个视图父链收集到的**全部**手势识别器，每个都带真实运行时类名（不是猜的名字）、`state`、`numberOfTouches`。如果处理拖动的是某个重写了 `translationInView:`/`velocityInView:` 的私有子类，它的类名会直接出现在这里——不需要再靠"有没有 GESTURE 行"去反推。
+- 已有的 `GESTURE` 行现在也带上了 `class=`，同样是识别器的真实运行时类名。
+
+全程只读：这个 hook 在调用原始 `sendEvent:` **之后**才读取，不改变命中测试、分发顺序或任何返回值，与本文件其它修复逻辑完全独立。采样间隔 0.05 秒，日志仍受现有 512KB 轮转限制，建议只在需要复现的那几秒内保留该标记文件，避免把想看的那几行冲掉。
 
 ## 编译
 

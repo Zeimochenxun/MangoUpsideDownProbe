@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.8.0-alpha8. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 0.9.0-alpha9. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -14,10 +14,11 @@
 #include "WorldMath.h"
 
 static const char *Disabled="/var/mobile/Library/Preferences/MangoUpsideDownWorld.disabled";
+static const char *TracePath="/var/mobile/Library/Preferences/MangoUpsideDownWorld.trace";
 static Class WindowClass, PassClass, ContentClass, ContainerClass;
 static NSHashTable<UIWindow *> *Windows;
 static NSHashTable<UIView *> *Roots;
-static BOOL Enabled, Installed, Busy;
+static BOOL Enabled, Installed, Busy, Tracing;
 static unsigned Depth, Attempts, HitDepth;
 static dispatch_source_t Timer;
 static char StateKey;
@@ -248,6 +249,10 @@ static void Reconcile(void){
         [UIView performWithoutAnimation:^{
             for(UIView *root in Roots.allObjects)RestoreWorld(root);
             if(access(Disabled,F_OK)==0&&Enabled){Enabled=NO;Log(@"DISABLED: restored owned transforms");}
+            // Tracing is independent of Enabled/orientation: it is a read-only
+            // diagnostic, useful for comparing turned vs. untouched behavior.
+            BOOL tracing=access(TracePath,F_OK)==0;
+            if(tracing!=Tracing){Tracing=tracing;Log(Tracing?@"TRACE: touch/gesture tracing enabled":@"TRACE: touch/gesture tracing disabled");}
             if(!Enabled||Orientation()!=UIInterfaceOrientationPortraitUpsideDown)return;
             for(UIWindow *w in ExistingWindows())Discover(w);
             for(UIWindow *w in Windows.allObjects)Discover(w);
@@ -451,17 +456,17 @@ static BOOL InsideTurnedRoot(UIView *v){
 }
 // in/out/inout are Objective-C context-sensitive keywords; name the parameters
 // so they cannot be read as parameter qualifiers.
-static void LogGestureFix(NSString *api,CGPoint raw,CGPoint flipped){
+static void LogGestureFix(NSString *api,NSString *cls,CGPoint raw,CGPoint flipped){
     static double last;double now=CACurrentMediaTime();
     if(now-last<=0.05)return;    // a drag calls this many times per frame
     last=now;
-    Log([NSString stringWithFormat:@"GESTURE api=%@ raw={%.2f,%.2f} turned={%.2f,%.2f}",api,raw.x,raw.y,flipped.x,flipped.y]);
+    Log([NSString stringWithFormat:@"GESTURE api=%@ class=%@ raw={%.2f,%.2f} turned={%.2f,%.2f}",api,cls,raw.x,raw.y,flipped.x,flipped.y]);
 }
-static void LogGestureSkip(NSString *api,UIView *view){
+static void LogGestureSkip(NSString *api,NSString *cls,UIView *view){
     static double last;double now=CACurrentMediaTime();
     if(now-last<=1)return;
     last=now;
-    Log([NSString stringWithFormat:@"GESTURE SKIP api=%@ view=%@ reason=outside-turned-root",api,NSStringFromClass(view.class)]);
+    Log([NSString stringWithFormat:@"GESTURE SKIP api=%@ class=%@ view=%@ reason=outside-turned-root",api,cls,NSStringFromClass(view.class)]);
 }
 // Negate both axes of a fixed-space delta read inside the turned world. Guard
 // non-finite values rather than propagate them, matching how every geometry
@@ -470,6 +475,12 @@ static CGPoint TurnDelta(NSString *api,UIGestureRecognizer *self,CGPoint v){
     if(!InvertGestureAxes||!isfinite(v.x)||!isfinite(v.y))return v;
     if(![NSThread isMainThread])return v;
     UIView *view=self.view;
+    // The runtime class of self, not just the hooked base class: if a private
+    // UIPanGestureRecognizer subclass overrides translationInView:/
+    // velocityInView: this hook is bypassed and never logs at all, but when a
+    // subclass instance reaches here without overriding, self.class already
+    // names it -- no need to guess.
+    NSString *cls=NSStringFromClass(self.class);
     if(!InsideTurnedRoot(view)){
         // A recognizer anchored at or above root (on the aperture window
         // itself, say) is out of scope above and corrected nothing -- which
@@ -477,11 +488,11 @@ static CGPoint TurnDelta(NSString *api,UIGestureRecognizer *self,CGPoint v){
         // at all. Say which one happened, so a run where the direction is
         // still wrong points at the right next step instead of at both.
         if(view.window&&[Windows containsObject:view.window])
-            LogGestureSkip(api,view);
+            LogGestureSkip(api,cls,view);
         return v;
     }
     CGPoint out=CGPointMake(-v.x,-v.y);
-    LogGestureFix(api,v,out);
+    LogGestureFix(api,cls,v,out);
     return out;
 }
 static CGPoint (*OrigTranslation)(id,SEL,UIView *);
@@ -500,6 +511,73 @@ static void InstallGestureFix(void){
         InvertGestureAxes=NO;Log(@"NO GESTURE FIX: signature mismatch");return;}
     MSHookMessageEx(pan,@selector(translationInView:),(IMP)HookTranslation,(IMP *)&OrigTranslation);
     MSHookMessageEx(pan,@selector(velocityInView:),(IMP)HookVelocity,(IMP *)&OrigVelocity);
+}
+
+// Diagnostic-only touch/gesture trace, added in 0.9.0-alpha9. Off by default;
+// toggled at runtime by TracePath, same mechanism as Disabled (see
+// Reconcile). It answers directly, rather than by inference, which class is
+// actually receiving and interpreting a drag on the island: unlike the
+// translationInView:/velocityInView: hooks above, which only ever see calls
+// that reach UIPanGestureRecognizer's own implementation, this dumps every
+// gesture recognizer attached along a touched view's superview chain --
+// including a private subclass that overrides those two methods and so is
+// otherwise invisible here.
+static NSString *StateName(UIGestureRecognizerState st){
+    switch(st){
+        case UIGestureRecognizerStatePossible:return @"Possible";
+        case UIGestureRecognizerStateBegan:return @"Began";
+        case UIGestureRecognizerStateChanged:return @"Changed";
+        case UIGestureRecognizerStateEnded:return @"Ended";
+        case UIGestureRecognizerStateCancelled:return @"Cancelled";
+        case UIGestureRecognizerStateFailed:return @"Failed";
+        default:return @"?";
+    }
+}
+static NSString *PhaseName(UITouchPhase ph){
+    switch(ph){
+        case UITouchPhaseBegan:return @"Began";
+        case UITouchPhaseMoved:return @"Moved";
+        case UITouchPhaseStationary:return @"Stationary";
+        case UITouchPhaseEnded:return @"Ended";
+        case UITouchPhaseCancelled:return @"Cancelled";
+        default:return @"?";
+    }
+}
+static NSString *RecognizerDump(UIView *v){
+    NSMutableArray<NSString *> *out=[NSMutableArray array];
+    NSMutableSet *seen=[NSMutableSet set];
+    for(unsigned n=0;v&&n++<32;v=v.superview){
+        for(UIGestureRecognizer *gr in v.gestureRecognizers){
+            if([seen containsObject:gr])continue;
+            [seen addObject:gr];
+            [out addObject:[NSString stringWithFormat:@"%@(state=%@,touches=%lu)",
+                NSStringFromClass(gr.class),StateName(gr.state),(unsigned long)gr.numberOfTouches]];
+        }
+    }
+    return out.count?[out componentsJoinedByString:@","]:@"none";
+}
+static void TraceTouches(UIWindow *w,UIEvent *e){
+    if(!e.allTouches.count)return;
+    static double last;double now=CACurrentMediaTime();
+    if(now-last<=0.05)return;    // a drag reports many touch batches per frame
+    last=now;
+    id<UICoordinateSpace> fixed=w.screen.fixedCoordinateSpace;
+    for(UITouch *t in e.allTouches){
+        CGPoint win=[t locationInView:w];
+        CGPoint fx=isfinite(win.x)&&isfinite(win.y)?[w convertPoint:win toCoordinateSpace:fixed]:win;
+        Log([NSString stringWithFormat:@"TOUCH phase=%@ window={%.1f,%.1f} fixed={%.1f,%.1f} view=%@ recognizers=%@",
+            PhaseName(t.phase),win.x,win.y,fx.x,fx.y,NSStringFromClass(t.view.class),RecognizerDump(t.view)]);
+    }
+}
+// Strictly read-only: calls through to the original sendEvent: FIRST and
+// inspects the touches only afterward. UIKit performs its hit test and
+// assigns UITouch.view as part of the original implementation's own work, so
+// reading before calling through would see a touch's view before it exists.
+// Nothing here can change dispatch order, hit-testing, or any return value.
+static void (*WindowSendEvent)(id,SEL,UIEvent *);
+static void WindowHookSendEvent(UIWindow *s,SEL c,UIEvent *e){
+    WindowSendEvent(s,c,e);
+    if(Tracing)TraceTouches(s,e);
 }
 #define INSTALL_HOOKS(C,P) \
 MSHookMessageEx(C,@selector(layoutSubviews),(IMP)P##HookLayout,(IMP *)&P##Layout); \
@@ -526,17 +604,19 @@ static void Install(void){
            !Signature(c,@selector(setTransform:),"v",@[@(@encode(CGAffineTransform))])){Log(@"NO HOOKS: geometry signature mismatch");return;}}
     NSArray *hitArgs=@[@(@encode(CGPoint)),@"@"];
     if(!Signature(WindowClass,@selector(hitTest:withEvent:),"@",hitArgs)||!Signature(WindowClass,@selector(pointInside:withEvent:),@encode(BOOL),hitArgs)){Log(@"NO HOOKS: touch signature mismatch");return;}
+    if(!Signature(WindowClass,@selector(sendEvent:),"v",@[@"@"])){Log(@"NO HOOKS: sendEvent signature mismatch");return;}
     Roots=[NSHashTable weakObjectsHashTable];Windows=[NSHashTable weakObjectsHashTable];Enabled=YES;Installed=YES;
     INSTALL_HOOKS(PassClass,Pass);INSTALL_HOOKS(ContentClass,Content);INSTALL_HOOKS(WindowClass,Window);
     INSTALL_TRANSFORM_HOOK(PassClass,Pass);INSTALL_TRANSFORM_HOOK(WindowClass,Window);
     MSHookMessageEx(ContentClass,@selector(setTransform:),(IMP)ContentHookTransform,(IMP *)&ContentTransform);
     MSHookMessageEx(WindowClass,@selector(hitTest:withEvent:),(IMP)HookHit,(IMP *)&OrigHit);
     MSHookMessageEx(WindowClass,@selector(pointInside:withEvent:),(IMP)HookInside,(IMP *)&OrigInside);
+    MSHookMessageEx(WindowClass,@selector(sendEvent:),(IMP)WindowHookSendEvent,(IMP *)&WindowSendEvent);
     [NSNotificationCenter.defaultCenter addObserverForName:@"MangoInterfaceOrientationDidChange" object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){Reconcile();dispatch_async(dispatch_get_main_queue(),^{Reconcile();});}];
     Timer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
     dispatch_source_set_timer(Timer,dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),250*NSEC_PER_MSEC,50*NSEC_PER_MSEC);
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
     InstallGestureFix();
-    Log(@"INSTALLED World 0.8.0-alpha8: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback");Reconcile();
+    Log(@"INSTALLED World 0.9.0-alpha9: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}
