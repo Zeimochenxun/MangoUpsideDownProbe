@@ -78,8 +78,15 @@ def check_macho(name, dylib, expected_kind):
             offset, length = struct.unpack_from("<II", dylib, pos + 8)
             signed = length > 0 and offset + length <= len(dylib)
         pos += size
-    if expected_kind == 6:
-        require(any(".jbroot" in p for p in rpaths + dependencies), "missing RootHide .jbroot linkage")
+    # A read-only probe with only Apple dependencies needs no jailbreak library
+    # lookup. Require RootHide resolution only for actual non-system imports.
+    system_libraries = {"/usr/lib/libSystem.B.dylib", "/usr/lib/libobjc.A.dylib",
+                        "/usr/lib/libc++.1.dylib", "/usr/lib/libc++abi.dylib"}
+    for dependency in dependencies:
+        is_system = dependency.startswith("/System/Library/") or dependency in system_libraries
+        is_roothide = ".jbroot" in dependency or (
+            dependency.startswith("@rpath/") and any(".jbroot" in r for r in rpaths))
+        require(is_system or is_roothide, f"unresolved non-system dependency: {dependency}")
     require(not any(p.startswith("/var/jb/") for p in dependencies), "unexpected hardcoded rootless dependency")
     require(signed, "missing embedded code-signature data")
     if name == "SystemFlipProbeBB.dylib":
@@ -94,4 +101,3 @@ if __name__ == "__main__":
     require(len(sys.argv) > 1, "provide one or more .deb paths")
     for filename in sys.argv[1:]:
         check(Path(filename))
-
