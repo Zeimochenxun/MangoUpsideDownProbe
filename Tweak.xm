@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 0.15.0-alpha15. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 0.15.1-alpha15b. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -40,8 +40,13 @@ static UIWindow *DebugWindow;
 // 0.15.0-alpha15: ArmSetAppearance is defined alongside ArmCreate, after
 // MWDebugController's @implementation (same reason DebugSetVisible needs
 // forward declaring above), but onArmTap: inside that implementation calls
-// it immediately on every tap.
+// it immediately on every tap. ArmCreate itself needs forward declaring for
+// the same reason DebugCreate never did: DebugCreate is only ever called
+// from DebugSetVisible, defined right next to it; ArmCreate is called from
+// Reconcile(), defined earlier in the file, so it can retry every tick
+// until a real UIWindowScene exists (see ArmCreate's own comment).
 static void ArmSetAppearance(void);
+static void ArmCreate(void);
 static UIWindow *ArmWindow;
 
 // Patch-owned state classes, NOT names extracted from Mango.
@@ -360,6 +365,7 @@ static void Reconcile(void){
     @try{
         [UIView performWithoutAnimation:^{
             for(UIView *root in Roots.allObjects)RestoreWorld(root);
+            ArmCreate(); // no-op once ArmWindow exists; retries here until a real UIWindowScene does
             if(access(Disabled,F_OK)==0&&Enabled){Enabled=NO;ManualOn=NO;Log(@"DISABLED: restored owned transforms");}
             // Tracing is independent of Enabled/orientation: it is a read-only
             // diagnostic, useful for comparing turned vs. untouched behavior.
@@ -651,6 +657,7 @@ static void DebugLayout(void){
 - (void)onArmTap:(UITapGestureRecognizer *)g {
     if(g.state!=UIGestureRecognizerStateEnded)return;
     ManualOn=!ManualOn;
+    Log([NSString stringWithFormat:@"ARM TAP now=%@",ManualOn?@"ON":@"OFF"]);
     ArmSetAppearance();
     Reconcile();
 }
@@ -694,9 +701,8 @@ static void DebugCreate(void){
     [DebugPanel addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:DebugController action:@selector(onLongPress:)]];
 }
 // 0.15.0-alpha15: the arm/disarm button. Unlike DebugWindow (lazily created
-// only once Tracing turns on, hidden otherwise), this is created
-// unconditionally from Install() and stays visible the whole time the
-// tweak is running -- ManualOn is the gate the user now has to reach for
+// only once Tracing turns on, hidden otherwise), this needs to exist as
+// early as possible -- ManualOn is the gate the user now has to reach for
 // every time, so the control for it cannot itself be hidden behind another
 // gate. Reuses MWDebugWindow's click-through hitTest as a second,
 // independent instance; no new window class needed. Fixed position
@@ -705,13 +711,32 @@ static void DebugCreate(void){
 // input path this whole file is already being careful with in this
 // version, and a single fixed corner is enough for a control meant to
 // always be reachable.
+//
+// Real-device result: the button appeared but taps produced no response.
+// DebugWindow uses this exact same construction (MWDebugWindow, same
+// windowLevel, a gesture recognizer on a small subview) and has always
+// worked, so the difference is not the pattern itself -- it is WHEN each
+// one runs it. DebugWindow is only ever built long after boot, when the
+// user manually creates the trace file, by which point a UIWindowScene is
+// certainly connected. This was the one thing in the whole file called
+// directly from Install() itself, which retries every 500ms specifically
+// because things this early in SpringBoard's startup are not guaranteed
+// ready yet -- if MainWindowScene() returned nil at that moment, the old
+// code fell back to initWithFrame:, which can render but, lacking any
+// windowScene, is known not to reliably receive touches on modern
+// scene-based iOS. Fixed by refusing that fallback outright and retrying
+// instead: ArmCreate() now does nothing until a real scene exists, and is
+// called from Reconcile() below (cheap due to the ArmWindow guard below),
+// which already runs on the same 250ms timer Install() itself trusts to
+// eventually observe a ready system.
 static UIView *ArmButton;
 static UILabel *ArmLabel;
 static void ArmCreate(void){
     if(ArmWindow)return;
-    CGRect screen=UIScreen.mainScreen.bounds;
     UIWindowScene *scene=MainWindowScene();
-    ArmWindow=scene?[[MWDebugWindow alloc] initWithWindowScene:scene]:[[MWDebugWindow alloc] initWithFrame:screen];
+    if(!scene)return; // retried by the next Reconcile() tick
+    CGRect screen=UIScreen.mainScreen.bounds;
+    ArmWindow=[[MWDebugWindow alloc] initWithWindowScene:scene];
     ArmWindow.frame=screen;
     ArmWindow.windowLevel=UIWindowLevelAlert+100000;
     ArmWindow.backgroundColor=UIColor.clearColor;
@@ -728,6 +753,11 @@ static void ArmCreate(void){
     if(!DebugController)DebugController=[MWDebugController new];
     [ArmButton addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:DebugController action:@selector(onArmTap:)]];
     ArmSetAppearance();
+    // Confirms ArmWindow actually attached to a real scene, and roughly how
+    // many Reconcile() ticks (~250ms each) that took after boot -- directly
+    // useful for telling whether a future report of "button unresponsive"
+    // is this same timing issue recurring versus something else.
+    Log(@"ARM READY");
 }
 // Reflects ManualOn plainly: dark grey "OFF" vs. a saturated red "ON" --
 // arming this now also enables the global UITouch hook and repurposes the
@@ -1203,7 +1233,6 @@ static void Install(void){
     InstallLongPressProbe();
     InstallTouchLocationFix();
     InstallVolumeFix();
-    ArmCreate();
-    Log(@"INSTALLED World 0.15.0-alpha15: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay (all log lines, now itself turned) + long-press class probe + other-window inversion probe (aperture window included) + content structure probe + manual arm/disarm gate + global UITouch location fix + volume-button escape hatches");Reconcile();
+    Log(@"INSTALLED World 0.15.1-alpha15b: window turn + content normalization + skip reasons + gesture delta turn + window hit fallback + touch/gesture trace + floating trace overlay (all log lines, now itself turned) + long-press class probe + other-window inversion probe (aperture window included) + content structure probe + manual arm/disarm gate (scene-retry fixed) + global UITouch location fix + volume-button escape hatches");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}
