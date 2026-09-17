@@ -1,4 +1,5 @@
 #include "../WorldMath.h"
+#include "../Geometry.h"
 #include <assert.h>
 #include <stdio.h>
 static int near(double a,double b){return fabs(a-b)<1e-8;}
@@ -45,5 +46,37 @@ int main(void) {
     // A near-identity skew from floating point still counts as inverted.
     assert(MWInvertedBasis(-1,-1,1.2246e-16,-1.2246e-16));
     assert(!MWFinite((MWTransform){NAN,0,0,1,0,0}));
-    puts("PASS: whole-world half-turn, inverse, scaled content, cancellation and basis guard");
+
+    // Integrated placement: physical screen is 390x844. A Mango aperture
+    // container still left at y=10 must be mirrored to the physical lower edge.
+    MUDFRect screen={0,0,390,844};
+    MUDFRect top={145,10,100,36};
+    MUDFPoint delta={0,0};
+    MUDFRect target={0,0,0,0};
+
+    // Before World turns the parent, the old arithmetic moves down by +788.
+    MUDFAffine uprightParent={1,0,0,1,0,0};
+    assert(MUDFPlan(screen,top,uprightParent,&delta,&target)==MUDFPlanOK);
+    assert(near(target.y,798));
+    assert(near(delta.x,0)&&near(delta.y,788));
+
+    // After World turns the parent, the same fixed-space correction must become
+    // a negative parent-space translation. This is the key integration case.
+    MUDFAffine turnedParent={-1,0,0,-1,0,0};
+    assert(MUDFPlan(screen,top,turnedParent,&delta,&target)==MUDFPlanOK);
+    assert(near(target.y,798));
+    assert(near(delta.x,0)&&near(delta.y,-788));
+
+    // If World already put the island on physical bottom, placement is a no-op.
+    MUDFRect bottom={145,798,100,36};
+    assert(MUDFPlan(screen,bottom,turnedParent,&delta,&target)==MUDFPlanAlreadyAtOtherEdge);
+
+    // Reconstruct a baseline from an owned translation under the turned parent.
+    MUDFRect current=bottom;
+    MUDFPoint owned={0,-788};
+    MUDFRect reconstructed=MUDFBaselineRect(current,turnedParent,owned);
+    assert(near(reconstructed.x,top.x));
+    assert(near(reconstructed.y,top.y));
+
+    puts("PASS: whole-world half-turn plus integrated opposite-edge placement geometry");
 }
