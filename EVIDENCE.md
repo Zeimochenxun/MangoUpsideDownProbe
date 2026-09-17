@@ -217,9 +217,38 @@ alpha14 的修法分两处，而不是简单地"不再跳过这个窗口"：
 
 两个改动都只读，不修改任何几何/手势逻辑（`ApplyWorld`/`ContentHookTransform`/`TurnDelta`/`WorldMath.h` 均未改）。下一步：真机重新开 trace、再打开一次分屏，看 `SPLITPROBE` 里灵动岛窗口这次是否报出除已知三层 `SBFTouchPassThroughView`/`SBSystemApertureContainerView` 之外的新类名，以及 `CONTENTDUMP` 里是否出现一个明显不属于 `SAUIElementView`/通用 `UIView` 这类已知外壳的、看起来像分屏专用的类名。
 
+## 0.15.0-alpha15：全局 UITouch 定位修复 + 手动开关 + 音量键物理恢复通道
+
+用户在看到 alpha14 的分析（灵动岛手势类只定义 `touchesMoved:withEvent:`，`LPROBE` 几乎不触发，暗示真正读位置的是 `UITouch` 自己的 `locationInView:`/`previousLocationInView:`）之后，明确要求：不要再分阶段（先只读探测、验证真的被调用后再改），直接把探测和修改一起做；同时提出三个配套要求，作为接受这次风险的前提。
+
+**为什么这次跟之前 14 个 alpha 都不一样**：`UITouch` 是公开类，这个方法是 SpringBoard 进程内所有代码读取一次触摸位置的必经之路——不只是灵动岛，还包括主屏图标拖动、控制中心、通知中心、锁屏密码输入、Face ID 提示、多任务切换、Spotlight 键盘等等。之前 14 个版本的每一个 hook 都严格限定在某个已用真机日志验证过的私有类上（`PassClass`/`ContentClass`/`WindowClass`/`SBSystemApertureLongPressGestureRecognizer`），出错的影响面天生就被限定在灵动岛自己身上；这次的 hook 类本身没有这层天然限定。
+
+**收紧影响面的两层限定，缺一不可**：
+
+1. **新增 `ManualOn`**——一个全局顶层开关，默认关闭，且**不做任何持久化**（不像 `.disabled`/`.trace` 那样落文件），每次 respring 都从关闭状态重新开始。这不只是给这次新加的两项风险加的门槛：`Reconcile()` 里原来只看 `Enabled&&Orientation()==PortraitUpsideDown` 的 `active` 判断，现在改成 `ManualOn&&Enabled&&Orientation()==PortraitUpsideDown`——`ManualOn` 变成了整个 World（位置/内容修正、命中测试兜底、alpha8 的手势方向修正、这次新加的两项）唯一的顶层门槛，不是分开管理的两套开关。这样设计的原因：`TurnDelta`/`InsideTurnedRoot` 全都通过 `s.outer.applied` 间接感知"是否处于倒置状态"，而 `s.outer.applied` 只有 `ApplyWorld` 会设置，`ApplyWorld` 只有在 `active` 为真时才会跑——把 `ManualOn` 塞进 `active` 本身，其它所有依赖这条链路的逻辑不需要各自单独查一次 `ManualOn`，天然继承这层门槛。唯二两个直接查 `ManualOn` 的例外是 `WorldHit`（它的早退检查在 `active` 计算之外，独立发生）和新加的 `TurnLocation`（下面详述，它对每一次 `UITouch` 调用都会跑，不能依赖任何间接状态）。
+   - 关掉开关不需要新写一套还原逻辑：`Reconcile()` 本来就在每次 tick 开头无条件跑 `RestoreWorld`，跟 `.disabled` 文件触发的还原走的是同一段代码。点开关只是多调一次 `Reconcile()`，让这次还原立刻发生，不用等最多 250ms 的定时器。
+   - 开关本体是屏幕左下角一个常驻的独立小圆点（复用已有的 `MWDebugWindow`，同一个类再开一个实例，不需要新窗口类），**从 `Install()` 里无条件创建**，不像悬浮追踪球那样要等 `Tracing` 打开才出现——这个开关本身就是访问其它一切功能的入口，不能被藏在另一个开关后面。没有加拖动手势（悬浮追踪球有）：这一版本身已经在小心处理输入相关的改动，少一个手势识别器就是少一件需要担心的事。
+   - 复用 `DebugSetTurned()` 让这个新窗口也跟着倒置转正——原因跟悬浮追踪球完全一样（alpha13 已经论证过）：普通 `UIWindow` 的 `transform` 下，UIKit 自己处理手势和渲染都会自动跟着转，不需要额外处理；这次只是同一个函数多转一个窗口。
+
+2. **`InsideTurnedRoot(view)`**——原样复用 `TurnDelta` 已经在用的同一个函数，不是新推理。新增的 `TurnLocation()` 只有在 `ManualOn` 为真**且** `view` 确实在某个正在被转的 root 子树里时才会改动返回值；否则原样返回原始实现的结果。密码输入、Face ID、主屏这些视图永远不会出现在这棵子树里（`Roots` 只收 `Discover()` 在 `WindowClass` 窗口下找到的 `PassClass` 视图），跟 `TurnDelta` 已经安全依赖了 14 个版本的同一条件完全一样。
+
+**`TurnLocation` 的几何**：`locationInView:`/`previousLocationInView:` 返回的是绝对坐标，不是位移，所以 `TurnDelta` 那种直接取负号的做法在几何上没有意义（会把一个点甩到看不懂的坐标去）。正确操作是绕 World 已经在用的同一个 pivot 做镜像：把屏幕固定坐标系的中心点换算进传入的 `view` 自己的坐标系，再让原始点绕这个换算后的中心点镜像。同时镜像 `locationInView:` 和 `previousLocationInView:` 两个值，等价于直接对它们的差值取负（`reflect(a)-reflect(b) == b-a`），所以 `touchesMoved:` 这类靠这两个值算差值方向的代码看到的方向依旧会被纠正，同时每次调用单独拿到的还是一个几何上说得通的坐标，不是负数坐标。
+
+**这次修复不保证成功**：如果灵动岛读位置走的既不是 `UIGestureRecognizer` 的两个方法（alpha11 `LPROBE` 已排除大概率），也不是 `UITouch` 的这两个方法（这次要验证的），而是别的私有方法或者直接读 ivar，这次改动不会有任何可观测效果，但风险已经被上面两层限定收紧，不会比之前更危险。新增的 `TOUCHFIX` 日志行（同 `LogGestureFix` 的限频方式）就是用来看这次是否真的被调用。
+
+**音量键物理恢复通道，为什么不能靠触控**：这次改动本身改的正是"触控怎么读位置"这件事，如果它改错了，触控本身可能表现异常，这时候任何指望靠"再摸一下屏幕"来关闭/回退的方案都不成立。所以恢复通道必须完全不依赖触控——物理音量键是这台设备上少数不经过这条新 hook 链路的输入。
+
+**为什么音量键的映射是运行时自校准，不是硬编码猜测**：`SBVolumeControl`（用公开的 iOS 13.1.3/14.4 runtime header 存档确认过存在 `-handleVolumeButtonWithType:down:` 这个方法，真机上再用现有的 `Signature()` 做一次运行时校验）用一个数字 `type` 区分音量上/下键，这个数字在 iOS 16.5 上对应哪个键没有任何公开文档。考虑过两个替代方案都有明确缺陷：硬编码历史版本的猜测值——猜错的后果是长按你以为是"恢复"的键却触发了"重启"（反过来也一样），而且没有任何办法在装机前验证对错；用公开的 `AVAudioSession` 系统音量电平变化方向去反推——这个方法在音量已经在 0% 或 100% 边界时完全推不出方向，而这恰好是最需要这条恢复通道可靠工作的场景（比如已经静音的时候）。所以选了运行时自校准：开关关闭时这个 hook 是纯透传（`HookHandleVolumeButton` 第一行检查 `ManualOn`，关闭时直接调用原始实现，不进入任何计时逻辑），开关打开后**第一次**长按任意一个键，被记成"上键"（`VolumeUpType`）并立即执行恢复动作；这次开机期间所有后续按键都无歧义。如果第一次长按的其实是物理下键，后果只是这一次给出了"恢复"而不是"重启"——一个自我纠正的轻微不便（现在映射已知，按另一个键就能正确重启），不是危险后果，因为恢复动作天生比重启更保温和，这个误判在下一次按键时就会纠正。
+
+**长按/短按判定与"不能让原始实现看到一个不成对的松手事件"**：用 `dispatch_after` 加每个键各自的世代计数器判断长按（0.6 秒），配合每个键各自的"当前是否按住"字典。**这里有一个容易踩的坑，已经在写这版代码时改正**：如果计时器一到时间就直接把"当前是否按住"标记清掉再触发恢复动作，那么恢复动作（把 `ManualOn` 设回假）执行之后，手指真正松开时触发的"松手"事件会因为标记已经被清掉而被判定为"不是我们在管的按键"，直接原样交给 `SBVolumeControl` 原始实现——原始实现会收到一个从未收到过对应"按下"事件的"松手"事件，这类不成对的事件不是这个私有类原本设计要处理的输入。改正后的写法是："当前是否按住"这个标记只由真正的物理松手事件本身来清除，计时器触发恢复/重启动作时完全不去动它；这样无论计时器有没有触发过动作，松手事件永远能正确判断"这次按下是不是我们吞掉的"，原始实现永远不会看到一个不成对的松手。
+
+不影响任何现有的灵动岛几何/手势逻辑（`ApplyWorld`/`ContentHookTransform`/`WorldMath.h` 均未改），`TurnDelta` 本身也未改，只是它现在依赖的 `active`/`s.outer.applied` 链路多了 `ManualOn` 这一层。
+
 ## 尚未处理
 
 - 岛落到屏幕底部。alpha2 加了跳过原因日志，未改判定。需要真机复现后读 `SKIP` 行才能定性；另需确认异常时岛内文字对倒置视角是正还是倒，以区分是 Mango 的方向状态问题还是 World 的几何判定问题。
+- alpha15 的全局 `UITouch` 修复是否真的被调用、方向是否修好，均需真机验证；`TOUCHFIX` 日志行是唯一的判断依据。
+- alpha15 的音量键校准/恢复/重启这套机制本身尚未真机验证过——README 已经把这一步列为装机后第一件要做的事，且明确要求如果这套机制本身不工作就不要继续测试倒置。
 
 ## 保留风险
 
