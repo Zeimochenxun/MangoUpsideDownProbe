@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import pathlib
+import plistlib
 import subprocess
 import sys
 import tempfile
@@ -23,13 +24,15 @@ with tempfile.TemporaryDirectory() as temporary:
     plists = list(root.rglob("FaceIDOrientationProbe.plist"))
     if len(dylibs) != 1 or len(plists) != 1:
         fail(f"unexpected payload: dylibs={len(dylibs)} plists={len(plists)}")
-    plist_text = plists[0].read_text(encoding="utf-8", errors="strict")
+    with plists[0].open("rb") as stream:
+        injection_filter = plistlib.load(stream).get("Filter", {})
+    executables = injection_filter.get("Executables", [])
     for executable in ("biometrickitd", "coreauthd"):
-        if f"<string>{executable}</string>" not in plist_text:
+        if executable not in executables:
             fail(f"missing executable filter: {executable}")
     forbidden = ("SpringBoard", "mango.dylib", "MangoUpsideDownWorld")
     for item in forbidden:
-        if item in plist_text:
+        if item in executables:
             fail(f"unexpected existing-project target: {item}")
 
 print("package structure OK")
