@@ -1,9 +1,0 @@
-Package: com.chenxun.mangoupsidedownfix
-Name: MangoUpsideDownFix
-Version: 0.2.0~alpha2
-Architecture: iphoneos-arm64e
-Description: Experimental upside-down placement fix for the verified Mango System Aperture path, with pending host tracking and a read-only touch probe.
-Maintainer: Chen Xun
-Author: Chen Xun
-Section: Tweaks
-Depends: mobilesubstrate, firmware (>= 16.0)

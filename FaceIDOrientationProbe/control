@@ -1,0 +1,9 @@
+Package: com.chenxun.faceidorientationprobe
+Name: FaceIDOrientationProbe
+Version: 0.1.0
+Architecture: iphoneos-arm64e
+Description: Read-only runtime image and Objective-C metadata probe for Face ID orientation research on iOS 16.5 RootHide.
+Maintainer: Chen Xun
+Author: Chen Xun
+Section: Tweaks
+Depends: mobilesubstrate, firmware (= 16.5)
