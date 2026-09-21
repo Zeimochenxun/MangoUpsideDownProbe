@@ -1,0 +1,87 @@
+name: Build MangoUpsideDownFix (RootHide)
+
+on:
+  workflow_dispatch:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify geometry arithmetic
+        run: |
+          set -eu
+          xcrun clang -std=c11 -Wall -Wextra -Werror tests/geometry_test.c -o "$RUNNER_TEMP/geometry-test"
+          "$RUNNER_TEMP/geometry-test"
+
+      - name: Check tweak structure and probe read-only discipline
+        run: |
+          set -eu
+          python3 tools/static_check.py
+
+      - name: Install Procursus tools
+        uses: dhinakg/procursus-action@main
+        with:
+          packages: ldid make
+
+      - name: Install RootHide Theos
+        run: |
+          set -eu
+          git clone --recursive https://github.com/roothide/theos.git "$HOME/theos"
+
+      - name: Install iOS 16.5 SDK
+        run: |
+          set -eu
+          mkdir -p "$HOME/theos/sdks"
+          curl --fail --location --retry 3 \
+            https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz \
+            --output "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz"
+          python3 - "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" <<'PY'
+          import hashlib, sys
+          from pathlib import Path
+          actual = hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest()
+          expected = '5e0fd3f01266cce4ce012d4a99b38eb56578fca40d09edc81cd83dee958202fb'
+          if actual != expected:
+              raise SystemExit('SDK checksum mismatch')
+          PY
+          tar -xJf "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" -C "$HOME/theos/sdks"
+
+      - name: Build and inspect RootHide package
+        shell: bash
+        run: |
+          set -euo pipefail
+          export THEOS="$HOME/theos"
+          xcrun clang --version
+          git -C "$THEOS" rev-parse HEAD
+          shasum -a 256 Tweak.xm Geometry.h "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz"
+          make clean
+          make package FINALPACKAGE=1 2>&1 | tee "$RUNNER_TEMP/mangofix-build.log"
+          if grep -qi 'incompatible arm64e ABI' "$RUNNER_TEMP/mangofix-build.log"; then
+            echo 'Refusing package with incompatible arm64e ABI warning'
+            exit 1
+          fi
+          python3 tools/check_package.py packages/*.deb
+          dylib="$(find .theos -name MangoUpsideDownFix.dylib -type f | head -n 1)"
+          test -n "$dylib"
+          xcrun lipo -info "$dylib"
+          xcrun otool -L "$dylib"
+          xcrun otool -l "$dylib" > "$RUNNER_TEMP/mangofix-load-commands.txt"
+          mkdir -p build-info
+          cp "$RUNNER_TEMP/mangofix-build.log" "$RUNNER_TEMP/mangofix-load-commands.txt" build-info/
+          shasum -a 256 packages/*.deb > build-info/SHA256SUMS.txt
+
+      - name: Upload package and build information
+        uses: actions/upload-artifact@v4
+        with:
+          name: MangoUpsideDownFix-0.2.0-alpha2
+          if-no-files-found: error
+          path: |
+            packages/*.deb
+            build-info/*
