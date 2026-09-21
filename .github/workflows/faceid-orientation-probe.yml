@@ -44,6 +44,7 @@ jobs:
           set -euo pipefail
           export THEOS="$HOME/theos"
           cd FaceIDOrientationProbe
+          python3 tools/test_recorder.py
           make clean
           make package FINALPACKAGE=1 2>&1 | tee "$RUNNER_TEMP/build.log"
           if grep -qi "incompatible arm64e ABI" "$RUNNER_TEMP/build.log"; then
@@ -62,7 +63,7 @@ jobs:
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: FaceIDOrientationProbe-0.1.0-RootHide
+          name: FaceIDOrientationProbe-0.2.0-RootHide
           if-no-files-found: error
           path: |
             FaceIDOrientationProbe/packages/*.deb
