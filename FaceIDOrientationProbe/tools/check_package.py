@@ -26,7 +26,11 @@ with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
     assert magic == 0xFEEDFACF and cpu == 0x0100000C and (subtype & 0xFFFFFF) == 2 and filetype == 6
     for value in (b"BiometricKitXPCServerPearl", b"BKFaceDetectStateInfo", b"PearlCoreAnalytics", b"MSHookMessageEx", b"20F66", b"iPhone14,4"):
         assert value in binary, value
-control = subprocess.check_output(["dpkg-deb", "-f", str(package)]).decode()
+control_tar = subprocess.check_output(["dpkg-deb", "--ctrl-tarfile", str(package)])
+with tarfile.open(fileobj=io.BytesIO(control_tar), mode="r:") as archive:
+    controls = [m for m in archive.getmembers() if m.isfile()]
+    assert len(controls) == 1 and pathlib.PurePosixPath(controls[0].name).name == "control", "unexpected maintainer scripts"
+    control = archive.extractfile(controls[0]).read().decode()
 assert "Version: 0.2.0" in control
 assert "Architecture: iphoneos-arm64e" in control
 assert "Package: com.chenxun.faceidorientationprobe" in control
