@@ -1,0 +1,9 @@
+Package: com.chenxun.mangoidleisland
+Name: MangoIdleIsland
+Version: 0.1.0
+Architecture: iphoneos-arm64e
+Description: Experimental noninteractive idle capsule background for Mango on iOS 16.5.
+Maintainer: Chen Xun
+Author: Chen Xun
+Section: Tweaks
+Depends: mobilesubstrate, firmware (= 16.5)
