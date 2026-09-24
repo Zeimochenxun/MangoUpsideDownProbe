@@ -6,7 +6,7 @@
 
 空闲时，在原有灵动岛容器里添加补充背景。若检测到 Mango 原来的「灵动岛液态玻璃」设置已开启、运行时类和初始化签名与已分析 Beta7-1 二进制匹配，则使用 Mango 自己的 `MGLiveBackdropView`，`groupName=Island`、`filterType=go.mangoos.island`，采用原模块相同的构造参数。若设置关闭、配置文件不存在或运行时校验失败，保守地使用系统磨砂材质，并在日志中记录 `[BACKGROUND] kind=UIKit-fallback`。本插件只读取设置，不修改原设置或授权流程。
 
-活动动画期间补充背景留在 Mango 内容下层，跟随容器几何尺寸、按当前活动内容的显示透明度交接；活动内容首次达到完全可见后留约 60ms 重叠窗口，减少合成器第一帧空白。收缩中即使内容层尚未变为 hidden，补充背景也会按活动内容的实际可见度恢复。由于这里没有原生 iOS 设备运行时跟踪结果，不能承诺每种系统动画完全没有一帧闪烁。
+活动动画期间补充背景留在 Mango 内容下层，跟随容器几何尺寸、按当前活动玻璃层的显示透明度交接；活动内容首次达到完全可见后留约 60ms 重叠窗口，减少合成器第一帧空白。收缩中即使内容层尚未变为 hidden，补充背景也会按活动玻璃层的实际可见度恢复。没有活动玻璃层时才参考 SAUIElementView 的可见度。由于这里没有原生 iOS 设备运行时跟踪结果，不能承诺每种系统动画完全没有一帧闪烁。
 
 补充视图不接收触摸，不挂手势识别器，不改变原有视图的 hidden、alpha、transform 或触摸区域。用户报告的“消失后长按仍有震动”说明至少有相关手势路径存在；尚未证明该手势具体属于哪个视图，本版不对它动手。
 
@@ -38,7 +38,7 @@
 
 ## 实现与性能
 
-Hook 运行时检查过的 `SBSystemApertureContainerView.layoutSubviews`、内容视图的 `setHidden:` 与 `SAUIElementView.didMoveToSuperview`，原方法先执行，所有 hook 不修改参数或返回值。变化后会在约一秒内启动 30fps 局部过渡刷新，随后暂停；500ms 的低频兜底扫描只搜索交互型灵动岛窗口（最多 256 个节点）。补充背景位于活动内容下方，不接收触摸。未运行视觉自动化或功耗实测。
+Hook 运行时检查过的 `SBSystemApertureContainerView.layoutSubviews`、内容视图的 `setHidden:`、`SAUIElementView.didMoveToSuperview` / `setAlpha:` 以及 `MGLiveBackdropView.setHidden:`，原方法先执行，所有 hook 不修改参数或返回值。变化后会在约一秒内启动 30fps 局部过渡刷新，随后暂停；500ms 的低频兜底扫描只搜索交互型灵动岛窗口（最多 256 个节点）。补充背景位于活动内容下方，不接收触摸。未运行视觉自动化或功耗实测。
 
 不注入 backboardd；不修改 Mango 文件、授权逻辑、偏好或系统方向。不使用固定函数地址。仅支持 iOS 16.5.0，其余系统自动退出。无法识别关键类或 hook 方法签名时不安装 Hook。安装 0.2.0 将升级本包 0.1.0；不需叠装。
 

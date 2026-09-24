@@ -20,6 +20,8 @@ static Class HostClass, WindowClass, ContentClass, ElementClass, GlassClass;
 static void (*OriginalLayout)(id, SEL);
 static void (*OriginalContentHidden)(id, SEL, BOOL);
 static void (*OriginalElementMove)(id, SEL);
+static void (*OriginalElementAlpha)(id, SEL, CGFloat);
+static void (*OriginalGlassHidden)(id, SEL, BOOL);
 static BOOL InUpdate, Disabled;
 static NSHashTable<UIView *> *Hosts;
 static dispatch_source_t Timer;
@@ -156,15 +158,24 @@ static NSString *Eligibility(UIView *host, CGFloat *activity) {
     NSMutableArray<UIView *> *todo = [host.subviews mutableCopy];
     UIView *own = objc_getAssociatedObject(host, &BackgroundKey);
     NSUInteger count = 0;
+    CGFloat elementOpacity = 0, glassOpacity = 0;
+    BOOL foundGlass = NO;
     while (todo.count && count++ < 256) {
         UIView *v = todo.lastObject; [todo removeLastObject];
         if (v == own) continue;
         if (ElementClass && [v isKindOfClass:ElementClass]) {
-            *activity = MAX(*activity, EffectiveOpacity(v, host));
+            elementOpacity = MAX(elementOpacity, EffectiveOpacity(v, host));
+        }
+        if (GlassClass && [v isKindOfClass:GlassClass]) {
+            foundGlass = YES;
+            if (!CGRectIsEmpty(v.bounds)) glassOpacity = MAX(glassOpacity, EffectiveOpacity(v, host));
         }
         [todo addObjectsFromArray:v.subviews];
     }
     if (todo.count) return @"scan-limit";
+    // If the original glass exists but becomes hidden before the element is
+    // detached, use the glass visibility for handoff, not the element alone.
+    *activity = foundGlass ? glassOpacity : elementOpacity;
     return *activity > 0.01 ? @"activity" : @"background";
 }
 
@@ -197,10 +208,11 @@ static void Update(UIView *host) {
                 if (activity < 0.98) { since = nil; objc_setAssociatedObject(host, &OpaqueSinceKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
                 else if (!since) { since = @(now); objc_setAssociatedObject(host, &OpaqueSinceKey, since, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
                 CGFloat coverage = activity >= 0.98 && now - since.doubleValue < 0.06 ? 0 : activity;
-                bg.alpha = MAX(0, MIN(1, 1 - coverage));
-                bg.hidden = NO;
+                CGFloat backingOpacity = MAX(0, MIN(1, 1 - coverage));
+                if (fabs(bg.alpha - backingOpacity) > 0.001) bg.alpha = backingOpacity;
+                if (bg.hidden) bg.hidden = NO;
             } else {
-                bg.hidden = YES;
+                if (!bg.hidden) bg.hidden = YES;
                 objc_setAssociatedObject(host, &OpaqueSinceKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             }
         }
@@ -248,6 +260,22 @@ static void ElementMoved(id self, SEL cmd) {
     }
 }
 
+static void ElementAlpha(id self, SEL cmd, CGFloat alpha) {
+    OriginalElementAlpha(self, cmd, alpha);
+    if (NSThread.isMainThread) {
+        UIView *host = HostFor(self);
+        if (host) { Pulse(); Update(host); }
+    }
+}
+
+static void GlassHidden(id self, SEL cmd, BOOL hidden) {
+    OriginalGlassHidden(self, cmd, hidden);
+    if (NSThread.isMainThread) {
+        UIView *host = HostFor(self);
+        if (host && objc_getAssociatedObject(host, &BackgroundKey) != self) { Pulse(); Update(host); }
+    }
+}
+
 static void Scan(void) {
     Disabled = access([[LogDir stringByAppendingPathComponent:@"DISABLED"] fileSystemRepresentation], F_OK) == 0;
     NSMutableOrderedSet<UIWindow *> *windows = [NSMutableOrderedSet orderedSetWithArray:UIApplication.sharedApplication.windows];
@@ -284,7 +312,9 @@ __attribute__((constructor)) static void Start(void) {
             }
             if (!ClassMethodSignature(HostClass, @selector(layoutSubviews), "v", 2, NULL) ||
                 !ClassMethodSignature(ContentClass, @selector(setHidden:), "v", 3, "B") ||
-                !ClassMethodSignature(ElementClass, @selector(didMoveToSuperview), "v", 2, NULL)) {
+                !ClassMethodSignature(ElementClass, @selector(didMoveToSuperview), "v", 2, NULL) ||
+                !ClassMethodSignature(ElementClass, @selector(setAlpha:), "v", 3, "d") ||
+                !ClassMethodSignature(GlassClass, @selector(setHidden:), "v", 3, "B")) {
                 Log(@"[SKIP] transition-method-signature-mismatch"); return;
             }
             Hosts = [NSHashTable weakObjectsHashTable];
@@ -292,6 +322,8 @@ __attribute__((constructor)) static void Start(void) {
             MSHookMessageEx(HostClass, @selector(layoutSubviews), (IMP)Layout, (IMP *)&OriginalLayout);
             MSHookMessageEx(ContentClass, @selector(setHidden:), (IMP)ContentHidden, (IMP *)&OriginalContentHidden);
             MSHookMessageEx(ElementClass, @selector(didMoveToSuperview), (IMP)ElementMoved, (IMP *)&OriginalElementMove);
+            MSHookMessageEx(ElementClass, @selector(setAlpha:), (IMP)ElementAlpha, (IMP *)&OriginalElementAlpha);
+            MSHookMessageEx(GlassClass, @selector(setHidden:), (IMP)GlassHidden, (IMP *)&OriginalGlassHidden);
             Scan();
             Timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
             dispatch_source_set_timer(Timer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC/2, NSEC_PER_MSEC*100);
@@ -303,7 +335,7 @@ __attribute__((constructor)) static void Start(void) {
             DisplayLink.preferredFramesPerSecond = 30;
             [DisplayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
             DisplayLink.paused = YES;
-            Log(@"[READY] hooks=layout+hidden+element-move transition-refresh=30fps/1s fallback-scan=500ms");
+            Log(@"[READY] hooks=layout+content-hidden+element-move+element-alpha+glass-hidden transition-refresh=30fps/1s fallback-scan=500ms");
         });
     }
 }
