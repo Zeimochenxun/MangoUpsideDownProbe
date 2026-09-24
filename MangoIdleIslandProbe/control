@@ -1,0 +1,9 @@
+Package: com.chenxun.mangoidleislandprobe
+Name: MangoIdleIslandProbe
+Version: 0.1.0
+Architecture: iphoneos-arm64e
+Description: Bounded read-only SpringBoard view observations for Mango idle island research.
+Maintainer: Chen Xun
+Author: Chen Xun
+Section: Tweaks
+Depends: mobilesubstrate, firmware (= 16.5)

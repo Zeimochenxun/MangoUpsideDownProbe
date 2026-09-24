@@ -1,0 +1,51 @@
+name: Build MangoIdleIslandProbe (RootHide)
+on:
+  workflow_dispatch:
+  push:
+    branches: [mango-idle-island-probe]
+    paths: ["MangoIdleIslandProbe/**", ".github/workflows/mango-idle-island-probe.yml"]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        uses: dhinakg/procursus-action@main
+        with:
+          packages: ldid make
+      - name: Install RootHide Theos
+        run: git clone --recursive https://github.com/roothide/theos.git "$HOME/theos"
+      - name: Install SDK
+        run: |
+          set -eu
+          curl --fail --location --retry 3 https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz --output "$RUNNER_TEMP/sdk.tar.xz"
+          echo "5e0fd3f01266cce4ce012d4a99b38eb56578fca40d09edc81cd83dee958202fb  $RUNNER_TEMP/sdk.tar.xz" | shasum -a 256 -c -
+          mkdir -p "$HOME/theos/sdks"
+          tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$HOME/theos/sdks"
+      - name: Compile and inspect
+        shell: bash
+        run: |
+          set -euo pipefail
+          export THEOS="$HOME/theos"
+          cd MangoIdleIslandProbe
+          make package FINALPACKAGE=1 2>&1 | tee "$RUNNER_TEMP/build.log"
+          if grep -qi "incompatible arm64e ABI" "$RUNNER_TEMP/build.log"; then exit 1; fi
+          python3 tools/check_package.py packages/*.deb
+          dylib="$(find .theos -name MangoIdleIslandProbe.dylib -type f | head -n 1)"
+          xcrun lipo -info "$dylib"
+          xcrun otool -L "$dylib"
+          mkdir -p build-info
+          cp "$RUNNER_TEMP/build.log" build-info/
+          shasum -a 256 packages/*.deb > build-info/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MangoIdleIslandProbe-0.1.0-RootHide
+          if-no-files-found: error
+          path: |
+            MangoIdleIslandProbe/packages/*.deb
+            MangoIdleIslandProbe/build-info/*
+            MangoIdleIslandProbe/README.md
+            MangoIdleIslandProbe/EVIDENCE.md
