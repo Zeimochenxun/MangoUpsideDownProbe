@@ -7,16 +7,49 @@
 #import <unistd.h>
 #import <math.h>
 #import <string.h>
+#import <CoreFoundation/CoreFoundation.h>
 
-// Private names below were observed in the supplied Beta7-1 Probe.log.
-// Only layoutSubviews (void, no arguments) is hooked after signature validation.
-static Class HostClass, WindowClass, ContentClass;
+// Names and Mango's initializer signature were confirmed in the supplied
+// Beta7-1 Mach-O; all hooks/method calls are checked against runtime metadata.
+@interface UIView (MangoIdleGlassInitializer)
+- (instancetype)initWithFrame:(CGRect)frame groupName:(NSString *)name filterType:(NSString *)filter;
+- (void)setLgSpecularEnabledOverride:(id)value;
+@end
+
+static Class HostClass, WindowClass, ContentClass, ElementClass, GlassClass;
 static void (*OriginalLayout)(id, SEL);
+static void (*OriginalContentHidden)(id, SEL, BOOL);
+static void (*OriginalElementMove)(id, SEL);
 static BOOL InUpdate, Disabled;
 static NSHashTable<UIView *> *Hosts;
 static dispatch_source_t Timer;
-static char BackgroundKey, StateKey;
+static CADisplayLink *DisplayLink;
+static CFTimeInterval LastTransition;
+static char BackgroundKey, StateKey, LastElementHostKey, GlassModeKey, OpaqueSinceKey;
 static NSString * const LogDir = @"/var/mobile/Library/Logs/MangoIdleIsland";
+static void Update(UIView *host);
+
+@interface MangoIdleWeakHost : NSObject
+@property (nonatomic, weak) UIView *view;
+@end
+@implementation MangoIdleWeakHost
+@end
+
+@interface MangoIdleFrameObserver : NSObject
+- (void)tick:(CADisplayLink *)link;
+@end
+
+static void Pulse(void) {
+    LastTransition = CACurrentMediaTime();
+    DisplayLink.paused = NO;
+}
+
+@implementation MangoIdleFrameObserver
+- (void)tick:(CADisplayLink *)link {
+    if (CACurrentMediaTime() - LastTransition > 1.0) { link.paused = YES; return; }
+    for (UIView *host in Hosts.allObjects) Update(host);
+}
+@end
 
 static void Log(NSString *event) {
     struct stat st;
@@ -41,67 +74,140 @@ static BOOL Visible(UIView *v) {
     return YES;
 }
 
-static NSString *Eligibility(UIView *host) {
+static BOOL ClassMethodSignature(Class cls, SEL selector, const char *returnType, unsigned int argc, const char *firstExplicitArgument) {
+    Method m = class_getInstanceMethod(cls, selector);
+    if (!m || method_getNumberOfArguments(m) != argc) return NO;
+    char ret[64] = {0};
+    method_getReturnType(m, ret, sizeof(ret));
+    if (strcmp(ret, returnType)) return NO;
+    if (firstExplicitArgument) {
+        char arg[128] = {0};
+        method_getArgumentType(m, 2, arg, sizeof(arg));
+        if (arg[0] != firstExplicitArgument[0]) return NO;
+    }
+    return YES;
+}
+
+static BOOL MangoGlassSetting(void) {
+    // Beta7-1 uses this exact preference key in its island configuration.
+    // Absence/disabled => use UIKit fallback; never force an off feature on.
+    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/com.go.mangoosprefs.plist"];
+    id value = prefs[@"PillGlass.Enabled"];
+    return [value isKindOfClass:NSNumber.class] && [value boolValue];
+}
+
+static BOOL GlassConstructorAvailable(void) {
+    if (!GlassClass || ![GlassClass isSubclassOfClass:UIView.class]) return NO;
+    const char *image = class_getImageName(GlassClass);
+    if (!image || ![[NSString stringWithUTF8String:image] hasSuffix:@"/mangoos.dylib"]) return NO;
+    SEL init = @selector(initWithFrame:groupName:filterType:);
+    // Returns object, args: self, _cmd, CGRect, NSString *, NSString *.
+    if (!ClassMethodSignature(GlassClass, init, "@", 5, "{")) return NO;
+    return YES;
+}
+
+static UIView *CreateBackground(BOOL useMango, CGRect rect) {
+    UIView *view = nil;
+    if (useMango) {
+        view = [[GlassClass alloc] initWithFrame:rect groupName:@"Island" filterType:@"go.mangoos.island"];
+        if ([view isKindOfClass:GlassClass] && ClassMethodSignature(GlassClass, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) {
+            [view setLgSpecularEnabledOverride:(__bridge id)kCFBooleanFalse];
+        }
+    }
+    if (!view) {
+        UIVisualEffectView *fallback = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterialDark]];
+        fallback.backgroundColor = [UIColor colorWithWhite:0 alpha:0.18];
+        fallback.layer.borderWidth = 0.5;
+        fallback.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
+        view = fallback;
+    }
+    view.userInteractionEnabled = NO;
+    view.accessibilityElementsHidden = YES;
+    view.isAccessibilityElement = NO;
+    view.layer.cornerCurve = kCACornerCurveContinuous;
+    // The real activity MGLiveBackdropView had clips=0 in Probe.log;
+    // its CABackdropLayer uses cornerRadius to shape its filters itself.
+    view.clipsToBounds = !useMango;
+    view.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+    objc_setAssociatedObject(view, &GlassModeKey, @(useMango && [view isKindOfClass:GlassClass]), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return view;
+}
+
+static CGFloat EffectiveOpacity(UIView *v, UIView *host) {
+    CGFloat opacity = 1;
+    for (UIView *p = v; p && p != host; p = p.superview) {
+        if (p.hidden || p.layer.hidden) return 0;
+        CALayer *layer = p.layer.presentationLayer ?: p.layer;
+        opacity *= MIN(p.alpha, layer.opacity);
+    }
+    return MAX(0, MIN(1, opacity));
+}
+
+static NSString *Eligibility(UIView *host, CGFloat *activity) {
+    *activity = 0;
     if (Disabled) return @"disabled";
     UIWindow *w = host.window;
     if (![w isKindOfClass:WindowClass] || !w.userInteractionEnabled) return @"window-excluded";
     if (!Visible(host)) return @"host-not-visible";
     CGSize size = host.bounds.size;
-    // Conservative initial gate based on the observed 125 x 36.67 idle host.
-    // Expanded/active geometries are never forced into an idle shape.
-    if (!isfinite(size.width) || !isfinite(size.height) || size.width < 110 || size.width > 140 || size.height < 28 || size.height > 45) return @"geometry-excluded";
+    // Allow an intermediate animated host to retain its backing while its
+    // content fades away; never reposition or resize the system host itself.
+    if (!isfinite(size.width) || !isfinite(size.height) || size.width < 100 || size.width > 350 || size.height < 28 || size.height > 145) return @"geometry-excluded";
     NSMutableArray<UIView *> *todo = [host.subviews mutableCopy];
-    UIView *content = nil;
     UIView *own = objc_getAssociatedObject(host, &BackgroundKey);
     NSUInteger count = 0;
     while (todo.count && count++ < 256) {
         UIView *v = todo.lastObject; [todo removeLastObject];
         if (v == own) continue;
-        if ([v isKindOfClass:ContentClass]) {
-            if (content) return @"ambiguous-content";
-            content = v;
+        if (ElementClass && [v isKindOfClass:ElementClass]) {
+            *activity = MAX(*activity, EffectiveOpacity(v, host));
         }
-        NSString *name = NSStringFromClass(v.class);
-        if ([name hasPrefix:@"SAUI"] || [name isEqualToString:@"MGLiveBackdropView"]) return @"activity-present";
         [todo addObjectsFromArray:v.subviews];
     }
     if (todo.count) return @"scan-limit";
-    // Empty AND explicitly hidden, matching the captured initial state.
-    if (!content || !content.hidden || content.subviews.count) return @"content-not-empty-hidden";
-    return @"idle";
+    return *activity > 0.01 ? @"activity" : @"background";
 }
 
 static void Update(UIView *host) {
     if (InUpdate || !NSThread.isMainThread) return;
     InUpdate = YES;
     @try {
-        NSString *state = Eligibility(host);
-        BOOL show = [state isEqualToString:@"idle"];
-        UIVisualEffectView *bg = objc_getAssociatedObject(host, &BackgroundKey);
-        if (show && !bg) {
-            bg = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterialDark]];
-            bg.userInteractionEnabled = NO;
-            bg.accessibilityElementsHidden = YES;
-            bg.isAccessibilityElement = NO;
-            bg.backgroundColor = [UIColor colorWithWhite:0 alpha:0.18];
-            bg.layer.borderWidth = 0.5;
-            bg.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
-            bg.layer.cornerCurve = kCACornerCurveContinuous;
-            bg.clipsToBounds = YES;
-            objc_setAssociatedObject(host, &BackgroundKey, bg, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        CGFloat activity = 0;
+        NSString *state = Eligibility(host, &activity);
+        BOOL eligible = [state isEqualToString:@"background"] || [state isEqualToString:@"activity"];
+        UIView *bg = objc_getAssociatedObject(host, &BackgroundKey);
+        if (eligible && !bg) {
+            BOOL mango = MangoGlassSetting() && GlassConstructorAvailable();
+            bg = CreateBackground(mango, host.bounds);
+            if (bg) {
+                objc_setAssociatedObject(host, &BackgroundKey, bg, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                Log([NSString stringWithFormat:@"[BACKGROUND] kind=%@", mango ? @"Mango-glass" : @"UIKit-fallback"]);
+            }
         }
-        if (show) {
-            bg.frame = host.bounds;
-            bg.layer.cornerRadius = host.bounds.size.height / 2.0;
-            if (bg.superview != host) [host insertSubview:bg atIndex:0];
-            bg.hidden = NO;
-        } else {
-            bg.hidden = YES;
-            [bg removeFromSuperview];
+        if (bg) {
+            if (eligible) {
+                if (bg.superview != host) [host insertSubview:bg atIndex:0];
+                if (!CGRectEqualToRect(bg.frame, host.bounds)) bg.frame = host.bounds;
+                CGFloat radius = host.bounds.size.height / 2.0;
+                if (bg.layer.cornerRadius != radius) bg.layer.cornerRadius = radius;
+                // A full-opacity element gets two frames of overlap so its
+                // first committed frame can replace an already rendered pill.
+                CFTimeInterval now = CACurrentMediaTime();
+                NSNumber *since = objc_getAssociatedObject(host, &OpaqueSinceKey);
+                if (activity < 0.98) { since = nil; objc_setAssociatedObject(host, &OpaqueSinceKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
+                else if (!since) { since = @(now); objc_setAssociatedObject(host, &OpaqueSinceKey, since, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
+                CGFloat coverage = activity >= 0.98 && now - since.doubleValue < 0.06 ? 0 : activity;
+                bg.alpha = MAX(0, MIN(1, 1 - coverage));
+                bg.hidden = NO;
+            } else {
+                bg.hidden = YES;
+                objc_setAssociatedObject(host, &OpaqueSinceKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
         }
         NSString *old = objc_getAssociatedObject(host, &StateKey);
         if (![old isEqualToString:state]) {
-            Log([NSString stringWithFormat:@"[STATE] host=%p state=%@ size=%.2fx%.2f background=%d", host, state, host.bounds.size.width, host.bounds.size.height, show]);
+            Pulse();
+            Log([NSString stringWithFormat:@"[STATE] host=%p state=%@ size=%.2fx%.2f background=%.2f", (void *)host, state, host.bounds.size.width, host.bounds.size.height, bg.alpha]);
             objc_setAssociatedObject(host, &StateKey, state, OBJC_ASSOCIATION_COPY_NONATOMIC);
         }
     } @finally { InUpdate = NO; }
@@ -111,7 +217,35 @@ static void Layout(id self, SEL cmd) {
     OriginalLayout(self, cmd);
     if (!NSThread.isMainThread) return;
     [Hosts addObject:self];
+    Pulse();
     Update(self);
+}
+
+static UIView *HostFor(UIView *v) {
+    for (UIView *p = v; p; p = p.superview) if ([p isKindOfClass:HostClass]) return p;
+    return nil;
+}
+
+static void ContentHidden(id self, SEL cmd, BOOL hidden) {
+    OriginalContentHidden(self, cmd, hidden);
+    if (NSThread.isMainThread) {
+        UIView *host = HostFor(self);
+        if (host) { Pulse(); Update(host); }
+    }
+}
+
+static void ElementMoved(id self, SEL cmd) {
+    MangoIdleWeakHost *box = objc_getAssociatedObject(self, &LastElementHostKey);
+    UIView *previous = box.view;
+    OriginalElementMove(self, cmd);
+    if (NSThread.isMainThread) {
+        UIView *current = HostFor(self);
+        if (!box) { box = [MangoIdleWeakHost new]; objc_setAssociatedObject(self, &LastElementHostKey, box, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
+        box.view = current;
+        Pulse();
+        if (previous) Update(previous);
+        if (current && current != previous) Update(current);
+    }
 }
 
 static void Scan(void) {
@@ -139,26 +273,37 @@ __attribute__((constructor)) static void Start(void) {
         NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=0.1.0 background=UIKit-material touch=unchanged");
+            Log(@"[SESSION] version=0.2.0 background=Mango-glass-if-enabled transition=backing-overlap touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");
-            if (!HostClass || !WindowClass || !ContentClass || !NSClassFromString(@"MGLiveBackdropView") || ![HostClass isSubclassOfClass:UIView.class] || ![WindowClass isSubclassOfClass:UIWindow.class] || ![ContentClass isSubclassOfClass:UIView.class]) {
+            ElementClass = NSClassFromString(@"SAUIElementView");
+            GlassClass = NSClassFromString(@"MGLiveBackdropView");
+            if (!HostClass || !WindowClass || !ContentClass || !ElementClass || !GlassClass || ![HostClass isSubclassOfClass:UIView.class] || ![WindowClass isSubclassOfClass:UIWindow.class] || ![ContentClass isSubclassOfClass:UIView.class] || ![ElementClass isSubclassOfClass:UIView.class]) {
                 Log(@"[SKIP] expected-runtime-classes-unavailable"); return;
             }
-            Method m = class_getInstanceMethod(HostClass, @selector(layoutSubviews));
-            char ret[16] = {0};
-            if (m) method_getReturnType(m, ret, sizeof(ret));
-            if (!m || strcmp(ret, "v") || method_getNumberOfArguments(m) != 2) { Log(@"[SKIP] layout-signature-mismatch"); return; }
+            if (!ClassMethodSignature(HostClass, @selector(layoutSubviews), "v", 2, NULL) ||
+                !ClassMethodSignature(ContentClass, @selector(setHidden:), "v", 3, "B") ||
+                !ClassMethodSignature(ElementClass, @selector(didMoveToSuperview), "v", 2, NULL)) {
+                Log(@"[SKIP] transition-method-signature-mismatch"); return;
+            }
             Hosts = [NSHashTable weakObjectsHashTable];
             Disabled = access([[LogDir stringByAppendingPathComponent:@"DISABLED"] fileSystemRepresentation], F_OK) == 0;
             MSHookMessageEx(HostClass, @selector(layoutSubviews), (IMP)Layout, (IMP *)&OriginalLayout);
+            MSHookMessageEx(ContentClass, @selector(setHidden:), (IMP)ContentHidden, (IMP *)&OriginalContentHidden);
+            MSHookMessageEx(ElementClass, @selector(didMoveToSuperview), (IMP)ElementMoved, (IMP *)&OriginalElementMove);
             Scan();
             Timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
             dispatch_source_set_timer(Timer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC/2, NSEC_PER_MSEC*100);
             dispatch_source_set_event_handler(Timer, ^{ Scan(); });
             dispatch_resume(Timer);
-            Log(@"[READY] hook=container-layout fallback-scan=500ms");
+            static MangoIdleFrameObserver *observer;
+            observer = [MangoIdleFrameObserver new];
+            DisplayLink = [CADisplayLink displayLinkWithTarget:observer selector:@selector(tick:)];
+            DisplayLink.preferredFramesPerSecond = 30;
+            [DisplayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+            DisplayLink.paused = YES;
+            Log(@"[READY] hooks=layout+hidden+element-move transition-refresh=30fps/1s fallback-scan=500ms");
         });
     }
 }

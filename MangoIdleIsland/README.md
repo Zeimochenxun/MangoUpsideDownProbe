@@ -1,14 +1,16 @@
-# MangoIdleIsland 0.1.0（实验版）
+# MangoIdleIsland 0.2.0（实验版）
 
 适用：iPhone 13 mini，iOS 16.5，Dopamine RootHide，Mango 1.0-Beta7-1；已启用系统灵动岛模拟和 Mango 液态玻璃。仅注入 SpringBoard。独立于 MangoUpsideDownWorld、FaceID 和原来的 Probe。
 
 ## 本版效果与边界
 
-空闲时，在原有灵动岛容器里补一个系统磨砂材质胶囊。活动时撤掉补充背景，让 Mango 原来的内容正常显示。本版空闲背景不是 Mango 的液态玻璃着色器，不能保证外观一致。
+空闲时，在原有灵动岛容器里添加补充背景。若检测到 Mango 原来的「灵动岛液态玻璃」设置已开启、运行时类和初始化签名与已分析 Beta7-1 二进制匹配，则使用 Mango 自己的 `MGLiveBackdropView`，`groupName=Island`、`filterType=go.mangoos.island`，采用原模块相同的构造参数。若设置关闭、配置文件不存在或运行时校验失败，保守地使用系统磨砂材质，并在日志中记录 `[BACKGROUND] kind=UIKit-fallback`。本插件只读取设置，不修改原设置或授权流程。
+
+活动动画期间补充背景留在 Mango 内容下层，跟随容器几何尺寸、按当前活动内容的显示透明度交接；活动内容首次达到完全可见后留约 60ms 重叠窗口，减少合成器第一帧空白。收缩中即使内容层尚未变为 hidden，补充背景也会按活动内容的实际可见度恢复。由于这里没有原生 iOS 设备运行时跟踪结果，不能承诺每种系统动画完全没有一帧闪烁。
 
 补充视图不接收触摸，不挂手势识别器，不改变原有视图的 hidden、alpha、transform 或触摸区域。用户报告的“消失后长按仍有震动”说明至少有相关手势路径存在；尚未证明该手势具体属于哪个视图，本版不对它动手。
 
-保守限制：只接受日志出现过的交互型 SBSystemApertureWindow、可见容器、隐藏且没有子视图的内容层、110–140 × 28–45 点容器。其他尺寸和不确定状态都退出，因此不同模拟机型或横屏不保证显示。已有的倒置/缩放从父视图继承。
+保守限制：只接受交互型 `SBSystemApertureWindow` 的可见容器，尺寸在 100–350 × 28–145 点；超出时隐藏补充背景。此范围涵盖用户日志中的收起、展开与过渡状态，避免旧版只在最终空闲态才显示导致的空白期。已有的倒置/缩放从父视图继承。
 
 观察来源：用户 Probe.log 开始时，容器约 125 × 36.67 点、visible；内容层 hidden=1、childCount=0。活动开始后，内容层与 SAUIElementView/MGLiveBackdropView 出现。采样结束时仍有活动，没有观察到活动结束后再次空闲。
 
@@ -28,17 +30,17 @@
 
 1. 正常竖屏、没有活动：胶囊应显示；原位置长按震动应保持。
 2. 播放音乐：原 Mango 灵动岛应显示，长按展开、进度条/音量拖动正常，不应有额外小胶囊遮挡。
-3. 完全结束活动（仅暂停可能仍保留活动）：胶囊应回到空闲显示。
+3. 完全结束活动（仅暂停可能仍保留活动）：特别观察从放大到缩小直至空闲的一整段动画，背景应连续、外观应与 Mango 活动玻璃相近。
 4. 倒置后重复上面三项，检查位置与原有长按/通知交互。
 5. 息屏、亮屏、锁屏、横屏：不得出现遮挡、残留背景或新增触摸异常。横屏不强制显示。
 
-状态日志：`/var/mobile/Library/Logs/MangoIdleIsland/Status.log`，只在状态变化时写入，约 64 KiB 循环截断，不记录通知文字。`state=idle background=1` 表示补充背景已挂载；其他 state 表示保守退出。每次 Respring 有新的 SESSION。
+状态日志：`/var/mobile/Library/Logs/MangoIdleIsland/Status.log`，只在状态变化时写入，约 64 KiB 循环截断，不记录通知文字。`[BACKGROUND] kind=Mango-glass` 表示真正创建了 Mango 玻璃；`kind=UIKit-fallback` 表示设置或签名检查未能启用 Mango 玻璃。`state=background` 为无可见活动内容；`state=activity` 是过渡/活动期间的连续交接。每次 Respring 有新的 SESSION。
 
 ## 实现与性能
 
-仅 Hook 经运行时检查的 SBSystemApertureContainerView.layoutSubviews（返回 void，无额外参数），原方法先执行。500ms 的主线程兜底扫描仅搜索灵动岛窗口（最多 256 个节点），避免活动边界遗漏；切换最多可能延后约半秒。仅布局调用可能无法覆盖所有内容生命周期，所以保留此扫描，不能宣称零开销或完全无闪烁。
+Hook 运行时检查过的 `SBSystemApertureContainerView.layoutSubviews`、内容视图的 `setHidden:` 与 `SAUIElementView.didMoveToSuperview`，原方法先执行，所有 hook 不修改参数或返回值。变化后会在约一秒内启动 30fps 局部过渡刷新，随后暂停；500ms 的低频兜底扫描只搜索交互型灵动岛窗口（最多 256 个节点）。补充背景位于活动内容下方，不接收触摸。未运行视觉自动化或功耗实测。
 
-不注入 backboardd；不修改 Mango 文件、授权逻辑、偏好或系统方向。不使用固定函数地址。仅支持 iOS 16.5.0，其余系统自动退出。无法识别类或签名时不安装 Hook。
+不注入 backboardd；不修改 Mango 文件、授权逻辑、偏好或系统方向。不使用固定函数地址。仅支持 iOS 16.5.0，其余系统自动退出。无法识别关键类或 hook 方法签名时不安装 Hook。安装 0.2.0 将升级本包 0.1.0；不需叠装。
 
 ## 编译
 
