@@ -12,7 +12,7 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
     data = t.extractfile(b).read()
     magic, cpu, subtype, filetype = struct.unpack_from('<4I', data)
     assert magic == 0xfeedfacf and cpu == 0x100000c and (subtype & 0xffffff) == 2 and filetype == 6
-    for required in [b'MSHookMessageEx', b'SBSystemApertureContainerView', b'Status.log', b'initWithFrame:groupName:filterType:', b'go.mangoos.island', b'PillGlass.Enabled']:
+    for required in [b'MSHookMessageEx', b'SBSystemApertureContainerView', b'Status.log', b'initWithFrame:groupName:filterType:', b'go.mangoos.island', b'PillGlass.Enabled', b'original-island-glass-observed']:
         assert required in data, required
     for forbidden in [b'MSHookFunction', b'locationInView:', b'translationInView:']:
         assert forbidden not in data, forbidden
@@ -20,5 +20,5 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--ctr
     regular = [m for m in t if m.isfile()]
     assert len(regular) == 1 and pathlib.PurePosixPath(regular[0].name).name == 'control'
     control = t.extractfile(regular[0]).read().decode()
-    assert 'Version: 0.2.0' in control and 'Architecture: iphoneos-arm64e' in control
+    assert 'Version: 0.3.0' in control and 'Architecture: iphoneos-arm64e' in control
 print('PASS: arm64e; SpringBoard-only; own dylib/plist only; no maintainer scripts; expected hooks')

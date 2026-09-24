@@ -8,6 +8,7 @@
 #import <math.h>
 #import <string.h>
 #import <CoreFoundation/CoreFoundation.h>
+#import <roothide.h>
 
 // Names and Mango's initializer signature were confirmed in the supplied
 // Beta7-1 Mach-O; all hooks/method calls are checked against runtime metadata.
@@ -22,7 +23,8 @@ static void (*OriginalContentHidden)(id, SEL, BOOL);
 static void (*OriginalElementMove)(id, SEL);
 static void (*OriginalElementAlpha)(id, SEL, CGFloat);
 static void (*OriginalGlassHidden)(id, SEL, BOOL);
-static BOOL InUpdate, Disabled;
+static BOOL InUpdate, Disabled, OriginalIslandGlassSeen, GlassConstructorVerified, GlassConstructionFailed, CachedGlassSetting;
+static CFTimeInterval LastPreferenceRead;
 static NSHashTable<UIView *> *Hosts;
 static dispatch_source_t Timer;
 static CADisplayLink *DisplayLink;
@@ -91,17 +93,25 @@ static BOOL ClassMethodSignature(Class cls, SEL selector, const char *returnType
 }
 
 static BOOL MangoGlassSetting(void) {
-    // Beta7-1 uses this exact preference key in its island configuration.
-    // Absence/disabled => use UIKit fallback; never force an off feature on.
-    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/com.go.mangoosprefs.plist"];
+    CFTimeInterval now = CACurrentMediaTime();
+    if (LastPreferenceRead && now - LastPreferenceRead < 5.0) return CachedGlassSetting;
+    LastPreferenceRead = now;
+    // Match Beta7-1's first preference candidate (jbroot-resolved), then
+    // its rootfs fallback. This is a read-only configuration check.
+    NSString *path = @"/var/mobile/Library/Preferences/com.go.mangoosprefs.plist";
+    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:jbroot(path)];
+    if (!prefs) prefs = [NSDictionary dictionaryWithContentsOfFile:path];
     id value = prefs[@"PillGlass.Enabled"];
-    return [value isKindOfClass:NSNumber.class] && [value boolValue];
+    if ([value respondsToSelector:@selector(boolValue)] && [value boolValue]) { CachedGlassSetting = YES; return YES; }
+    id mainValue = [NSUserDefaults.standardUserDefaults objectForKey:@"MangoPillGlassEnabled"];
+    CachedGlassSetting = [mainValue respondsToSelector:@selector(boolValue)] && [mainValue boolValue];
+    return CachedGlassSetting;
 }
 
 static BOOL GlassConstructorAvailable(void) {
     if (!GlassClass || ![GlassClass isSubclassOfClass:UIView.class]) return NO;
     const char *image = class_getImageName(GlassClass);
-    if (!image || ![[NSString stringWithUTF8String:image] hasSuffix:@"/mangoos.dylib"]) return NO;
+    if (!image || ![[[NSString stringWithUTF8String:image] lastPathComponent] isEqualToString:@"mangoos.dylib"]) return NO;
     SEL init = @selector(initWithFrame:groupName:filterType:);
     // Returns object, args: self, _cmd, CGRect, NSString *, NSString *.
     if (!ClassMethodSignature(GlassClass, init, "@", 5, "{")) return NO;
@@ -112,6 +122,11 @@ static UIView *CreateBackground(BOOL useMango, CGRect rect) {
     UIView *view = nil;
     if (useMango) {
         view = [[GlassClass alloc] initWithFrame:rect groupName:@"Island" filterType:@"go.mangoos.island"];
+        if (!view || ![view isKindOfClass:GlassClass]) {
+            GlassConstructionFailed = YES;
+            Log(@"[GLASS] construction-failed-using-UIKit-until-respring");
+            view = nil;
+        }
         if ([view isKindOfClass:GlassClass] && ClassMethodSignature(GlassClass, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) {
             [view setLgSpecularEnabledOverride:(__bridge id)kCFBooleanFalse];
         }
@@ -168,7 +183,14 @@ static NSString *Eligibility(UIView *host, CGFloat *activity) {
         }
         if (GlassClass && [v isKindOfClass:GlassClass]) {
             foundGlass = YES;
-            if (!CGRectIsEmpty(v.bounds)) glassOpacity = MAX(glassOpacity, EffectiveOpacity(v, host));
+            if (!CGRectIsEmpty(v.bounds)) {
+                CGFloat realOpacity = EffectiveOpacity(v, host);
+                glassOpacity = MAX(glassOpacity, realOpacity);
+                if (realOpacity > 0.01 && !OriginalIslandGlassSeen) {
+                    OriginalIslandGlassSeen = YES;
+                    Log(@"[GLASS] original-island-glass-observed");
+                }
+            }
         }
         [todo addObjectsFromArray:v.subviews];
     }
@@ -187,12 +209,17 @@ static void Update(UIView *host) {
         NSString *state = Eligibility(host, &activity);
         BOOL eligible = [state isEqualToString:@"background"] || [state isEqualToString:@"activity"];
         UIView *bg = objc_getAssociatedObject(host, &BackgroundKey);
-        if (eligible && !bg) {
-            BOOL mango = MangoGlassSetting() && GlassConstructorAvailable();
+        BOOL constructor = eligible && GlassConstructorVerified && !GlassConstructionFailed;
+        BOOL mango = constructor && (OriginalIslandGlassSeen || MangoGlassSetting());
+        BOOL upgrading = eligible && bg && mango && ![objc_getAssociatedObject(bg, &GlassModeKey) boolValue];
+        if (eligible && (!bg || upgrading)) {
+            UIView *old = bg;
             bg = CreateBackground(mango, host.bounds);
             if (bg) {
                 objc_setAssociatedObject(host, &BackgroundKey, bg, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                Log([NSString stringWithFormat:@"[BACKGROUND] kind=%@", mango ? @"Mango-glass" : @"UIKit-fallback"]);
+                [old removeFromSuperview];
+                BOOL realGlass = [objc_getAssociatedObject(bg, &GlassModeKey) boolValue];
+                Log([NSString stringWithFormat:@"[BACKGROUND] kind=%@ source=%@ constructor=%d upgraded=%d", realGlass ? @"Mango-glass" : @"UIKit-fallback", OriginalIslandGlassSeen ? @"observed" : (mango ? @"setting" : @"fallback"), constructor, upgrading]);
             }
         }
         if (bg) {
@@ -301,7 +328,7 @@ __attribute__((constructor)) static void Start(void) {
         NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=0.2.0 background=Mango-glass-if-enabled transition=backing-overlap touch=unchanged");
+            Log(@"[SESSION] version=0.3.0 background=Mango-glass-when-observed transition=backing-overlap touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");
@@ -317,6 +344,8 @@ __attribute__((constructor)) static void Start(void) {
                 !ClassMethodSignature(GlassClass, @selector(setHidden:), "v", 3, "B")) {
                 Log(@"[SKIP] transition-method-signature-mismatch"); return;
             }
+            GlassConstructorVerified = GlassConstructorAvailable();
+            Log([NSString stringWithFormat:@"[GLASS] constructor-verified=%d module=%s", GlassConstructorVerified, class_getImageName(GlassClass) ?: "(unknown)"]);
             Hosts = [NSHashTable weakObjectsHashTable];
             Disabled = access([[LogDir stringByAppendingPathComponent:@"DISABLED"] fileSystemRepresentation], F_OK) == 0;
             MSHookMessageEx(HostClass, @selector(layoutSubviews), (IMP)Layout, (IMP *)&OriginalLayout);
