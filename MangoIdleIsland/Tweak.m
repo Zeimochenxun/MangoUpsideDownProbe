@@ -108,14 +108,19 @@ static BOOL MangoGlassSetting(void) {
     return CachedGlassSetting;
 }
 
-static BOOL GlassConstructorAvailable(void) {
-    if (!GlassClass || ![GlassClass isSubclassOfClass:UIView.class]) return NO;
+static NSString *GlassConstructorIssue(void) {
+    if (!GlassClass || ![GlassClass isSubclassOfClass:UIView.class]) return @"class-not-UIView";
     const char *image = class_getImageName(GlassClass);
-    if (!image || ![[[NSString stringWithUTF8String:image] lastPathComponent] isEqualToString:@"mangoos.dylib"]) return NO;
+    if (!image) return @"missing-image";
+    NSString *name = [[NSString stringWithUTF8String:image] lastPathComponent];
+    // The purchased Beta7-1 package defines the same verified glass API in
+    // mango.dylib and mangoos.dylib. RootHide bound NSClassFromString to
+    // mango.dylib on the user's actual SpringBoard (Status.log).
+    if (![name isEqualToString:@"mango.dylib"] && ![name isEqualToString:@"mangoos.dylib"]) return @"image-not-mango";
     SEL init = @selector(initWithFrame:groupName:filterType:);
     // Returns object, args: self, _cmd, CGRect, NSString *, NSString *.
-    if (!ClassMethodSignature(GlassClass, init, "@", 5, "{")) return NO;
-    return YES;
+    if (!ClassMethodSignature(GlassClass, init, "@", 5, "{")) return @"initializer-signature-mismatch";
+    return nil;
 }
 
 static UIView *CreateBackground(BOOL useMango, CGRect rect) {
@@ -144,9 +149,10 @@ static UIView *CreateBackground(BOOL useMango, CGRect rect) {
     view.layer.cornerCurve = kCACornerCurveContinuous;
     // The real activity MGLiveBackdropView had clips=0 in Probe.log;
     // its CABackdropLayer uses cornerRadius to shape its filters itself.
-    view.clipsToBounds = !useMango;
+    BOOL actualMangoGlass = useMango && [view isKindOfClass:GlassClass];
+    view.clipsToBounds = !actualMangoGlass;
     view.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
-    objc_setAssociatedObject(view, &GlassModeKey, @(useMango && [view isKindOfClass:GlassClass]), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(view, &GlassModeKey, @(actualMangoGlass), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     return view;
 }
 
@@ -181,7 +187,7 @@ static NSString *Eligibility(UIView *host, CGFloat *activity) {
         if (ElementClass && [v isKindOfClass:ElementClass]) {
             elementOpacity = MAX(elementOpacity, EffectiveOpacity(v, host));
         }
-        if (GlassClass && [v isKindOfClass:GlassClass]) {
+        if (GlassClass && ([v isKindOfClass:GlassClass] || [NSStringFromClass(v.class) isEqualToString:@"MGLiveBackdropView"])) {
             foundGlass = YES;
             if (!CGRectIsEmpty(v.bounds)) {
                 CGFloat realOpacity = EffectiveOpacity(v, host);
@@ -328,7 +334,7 @@ __attribute__((constructor)) static void Start(void) {
         NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=0.3.0 background=Mango-glass-when-observed transition=backing-overlap touch=unchanged");
+            Log(@"[SESSION] version=0.4.0 background=Mango-glass-when-enabled transition=backing-overlap touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");
@@ -344,8 +350,9 @@ __attribute__((constructor)) static void Start(void) {
                 !ClassMethodSignature(GlassClass, @selector(setHidden:), "v", 3, "B")) {
                 Log(@"[SKIP] transition-method-signature-mismatch"); return;
             }
-            GlassConstructorVerified = GlassConstructorAvailable();
-            Log([NSString stringWithFormat:@"[GLASS] constructor-verified=%d module=%s", GlassConstructorVerified, class_getImageName(GlassClass) ?: "(unknown)"]);
+            NSString *glassIssue = GlassConstructorIssue();
+            GlassConstructorVerified = !glassIssue;
+            Log([NSString stringWithFormat:@"[GLASS] constructor-verified=%d reason=%@ module=%s", GlassConstructorVerified, glassIssue ?: @"none", class_getImageName(GlassClass) ?: "(unknown)"]);
             Hosts = [NSHashTable weakObjectsHashTable];
             Disabled = access([[LogDir stringByAppendingPathComponent:@"DISABLED"] fileSystemRepresentation], F_OK) == 0;
             MSHookMessageEx(HostClass, @selector(layoutSubviews), (IMP)Layout, (IMP *)&OriginalLayout);
