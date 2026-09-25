@@ -17,6 +17,7 @@
 - (void)setLgSpecularEnabledOverride:(id)value;
 - (NSString *)lgFilterType;
 - (void)reapplyFilterForParameterReload;
+- (void)updateSpecular;
 @end
 
 static Class HostClass, WindowClass, ContentClass, ElementClass, GlassClass;
@@ -27,6 +28,7 @@ static void (*OriginalElementAlpha)(id, SEL, CGFloat);
 static void (*OriginalGlassHidden)(id, SEL, BOOL);
 static void (*OriginalSpecularOverride)(id, SEL, id);
 static void (*OriginalParameterReapply)(id, SEL);
+static void (*OriginalUpdateSpecular)(id, SEL);
 
 static BOOL InUpdate, Disabled, OriginalIslandGlassSeen, GlassConstructorVerified, GlassConstructionFailed, CachedGlassSetting;
 static BOOL ParameterReapplyHookInstalled;
@@ -73,6 +75,39 @@ static void SpecularOverride(id self, SEL cmd, id value) {
              (void *)self, enabled ? @"YES" : @"NO"]);
     }
     OriginalSpecularOverride(self, cmd, value);
+}
+
+static NSString *ProbeIvar(id object, const char *name) {
+    Ivar ivar = class_getInstanceVariable([object class], name);
+    if (!ivar) return @"<missing>";
+    id value = object_getIvar(object, ivar);
+    if (!value) return @"<nil>";
+    if ([value isKindOfClass:[CALayer class]]) {
+        CALayer *layer = value;
+        return [NSString stringWithFormat:@"<%@:%p hidden=%d opacity=%.3f mask=%p super=%p filters=%lu>", NSStringFromClass([value class]), (void *)value, layer.hidden, layer.opacity, (void *)layer.mask, (void *)layer.superlayer, (unsigned long)layer.filters.count];
+    }
+    if ([value isKindOfClass:[UIView class]]) {
+        UIView *view = value;
+        return [NSString stringWithFormat:@"<%@:%p hidden=%d alpha=%.3f window=%p super=%p>", NSStringFromClass([value class]), (void *)value, view.hidden, view.alpha, (void *)view.window, (void *)view.superview];
+    }
+    return [NSString stringWithFormat:@"<%@:%p %@>", NSStringFromClass([value class]), (void *)value, value];
+}
+
+static void LogSpecularProbe(id self, NSString *phase) {
+    if (!IsIslandGlass(self)) return;
+    id enabled = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("Island.SpecularEnabled"), (__bridge CFStringRef)MangoDomain));
+    id opacity = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("Island.SpecularOpacity"), (__bridge CFStringRef)MangoDomain));
+    Log([NSString stringWithFormat:@"[SPECULAR-PROBE] phase=%@ ptr=%p enabled=%@ opacity=%@ _specular=%@ _boost=%@ _boostMask=%@ _dark=%@ _darkMask=%@ _mask=%@",
+         phase, (void *)self, enabled ?: @"<nil>", opacity ?: @"<nil>",
+         ProbeIvar(self, "_specular"), ProbeIvar(self, "_specularBoost"), ProbeIvar(self, "_specularBoostMask"),
+         ProbeIvar(self, "_specularDark"), ProbeIvar(self, "_specularDarkMask"), ProbeIvar(self, "_specularMask")]);
+}
+
+static void UpdateSpecularProbe(id self, SEL cmd) {
+    BOOL island = IsIslandGlass(self);
+    if (island) LogSpecularProbe(self, @"before-updateSpecular");
+    OriginalUpdateSpecular(self, cmd);
+    if (island) LogSpecularProbe(self, @"after-updateSpecular");
 }
 
 static void ParameterReapply(id self, SEL cmd) {
@@ -501,7 +536,7 @@ __attribute__((constructor)) static void Start(void) {
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=1.1.1 background=Mango-glass parameter-reload=global-island-native-reapply+idle-fresh-init touch=unchanged");
+            Log(@"[SESSION] version=1.1.2-probe background=Mango-glass specular-probe=updateSpecular-readonly touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");
