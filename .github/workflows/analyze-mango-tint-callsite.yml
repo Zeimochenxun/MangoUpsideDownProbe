@@ -1,0 +1,68 @@
+name: Analyze Mango Tint Callsite
+
+on:
+  push:
+    branches:
+      - mango-idle-island-probe
+    paths:
+      - '.github/workflows/analyze-mango-tint-callsite.yml'
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout probe repo
+        uses: actions/checkout@v4
+
+      - name: Install LLVM tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm binutils
+
+      - name: Fetch Mango binary
+        run: |
+          git clone --depth=1 https://github.com/Zeimochenxun/Mango.git /tmp/Mango
+          cp '/tmp/Mango/mango/MangoOSRendering(1).dylib' /tmp/MangoOSRendering.dylib
+
+      - name: Analyze TintStrength references
+        run: |
+          set -euxo pipefail
+          BIN=/tmp/MangoOSRendering.dylib
+          OUT=/tmp/tint-callsite-report.txt
+          {
+            echo '=== FILE ==='
+            sha256sum "$BIN"
+            file "$BIN"
+            echo
+            echo '=== CSTRING OFFSETS ==='
+            strings -tx "$BIN" | grep -E 'TintStrength|TintR|TintG|TintB|LightTintColor|DarkTintColor|go\.mangoos\.island|ParametersReloaded' || true
+            echo
+            echo '=== SECTIONS ==='
+            llvm-objdump --macho --section-headers "$BIN" || true
+            echo
+            echo '=== DISASSEMBLY REFERENCES AROUND 0xFE00-0xFF40 ==='
+            llvm-objdump --macho --disassemble --no-show-raw-insn --print-imm-hex "$BIN" > /tmp/disasm.txt
+            grep -n -E -i '0xfedd|0xfee4|0xfeeb|0xfef2|0xff00|0xff10|#0x[eEfF][0-9a-fA-F]{2}' /tmp/disasm.txt -B 25 -A 60 || true
+            echo
+            echo '=== ALL ADRP/ADD CANDIDATES REFERENCING CSTRING PAGE 0xF000/0x10000 ==='
+            grep -n -E -i 'adrp.*0xf000|adrp.*0x10000|add.*0x[eEfF][0-9a-fA-F]{2}|add.*0x[fF][0-9a-fA-F]{3}' /tmp/disasm.txt -B 8 -A 20 || true
+            echo
+            echo '=== FLOAT CONSTANTS NEAR DATA/CSTRING AREA ==='
+            python3 - <<'PY'
+import struct
+p='/tmp/MangoOSRendering.dylib'
+d=open(p,'rb').read()
+for off in range(0xf000, min(len(d)-4,0x10300),4):
+    f=struct.unpack_from('<f',d,off)[0]
+    if f==f and -1000.0 < f < 1000.0 and abs(f) not in (0.0,):
+        if abs(f) <= 100.0:
+            print(hex(off), f)
+PY
+          } | tee "$OUT"
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: mango-tint-callsite-analysis
+          path: /tmp/tint-callsite-report.txt
