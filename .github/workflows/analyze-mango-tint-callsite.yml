@@ -42,52 +42,17 @@ jobs:
             echo '=== SECTIONS ==='
             llvm-objdump --macho --section-headers "$BIN" || true
             echo
-            echo '=== CAPSTONE XREFS TO PARAMETER SUFFIX STRINGS ==='
-            python3 - <<'PY'
-          from capstone import Cs, CS_ARCH_ARM64, CS_MODE_ARM
-          from capstone.arm64 import ARM64_INS_ADRP, ARM64_INS_ADD, ARM64_INS_ADR
-          import struct
-          p='/tmp/MangoOSRendering.dylib'
-          d=open(p,'rb').read()
-          text_start,text_end=0x4000,0xa92c
-          md=Cs(CS_ARCH_ARM64, CS_MODE_ARM)
-          md.detail=True
-          ins=list(md.disasm(d[text_start:text_end], text_start))
-          idx={i.address:n for n,i in enumerate(ins)}
-          targets={0xfedd:'.TintR',0xfee4:'.TintG',0xfeeb:'.TintB',0xfef2:'.TintStrength',0xff00:'.LightTintColor',0xff10:'.DarkTintColor'}
-          hits=[]
-          for n,i in enumerate(ins):
-              # Direct ADR xN, target
-              if i.id==ARM64_INS_ADR and len(i.operands)>=2 and i.operands[1].type==2:
-                  t=i.operands[1].imm
-                  if t in targets:
-                      hits.append((n,t,'ADR'))
-              if i.id!=ARM64_INS_ADRP or len(i.operands)<2 or i.operands[1].type!=2:
-                  continue
-              page=i.operands[1].imm
-              rd=i.operands[0].reg
-              for j in range(n+1,min(n+8,len(ins))):
-                  q=ins[j]
-                  if q.id==ARM64_INS_ADD and len(q.operands)>=3 and q.operands[0].reg==rd and q.operands[1].reg==rd and q.operands[2].type==2:
-                      t=page+q.operands[2].imm
-                      if t in targets:
-                          hits.append((j,t,'ADRP+ADD'))
-                      break
-          print('xref_count',len(hits))
-          for n,t,kind in hits:
-              print('\n--- XREF',targets[t],hex(t),kind,'at',hex(ins[n].address),'---')
-              for k in range(max(0,n-35),min(len(ins),n+70)):
-                  q=ins[k]
-                  mark='>>' if k==n else '  '
-                  print(f'{mark} {q.address:08x}: {q.mnemonic:8s} {q.op_str}')
-          PY
+            echo '=== PRIVATE HEADERS / SECTION OFFSETS ==='
+            llvm-objdump --macho --private-headers "$BIN" || true
             echo
-            echo '=== FULL OBJDUMP SYMBOLIZED DISASSEMBLY ==='
-            llvm-objdump --macho --disassemble --print-imm-hex "$BIN" || true
+            echo '=== HEX AROUND CANDIDATE TEXT OFFSETS ==='
+            xxd -g4 -l 256 -s 0x4000 "$BIN" || true
           } | tee "$OUT"
 
-      - name: Upload report
+      - name: Upload report and binary
         uses: actions/upload-artifact@v4
         with:
           name: mango-tint-callsite-analysis
-          path: /tmp/tint-callsite-report.txt
+          path: |
+            /tmp/tint-callsite-report.txt
+            /tmp/MangoOSRendering.dylib
