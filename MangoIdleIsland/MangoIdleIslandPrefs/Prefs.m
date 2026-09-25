@@ -22,6 +22,7 @@ static CFStringRef const Reload = CFSTR("go.mangoos/ParametersReloaded");
         [item setProperty:low forKey:@"min"];
         [item setProperty:high forKey:@"max"];
         [item setProperty:@YES forKey:@"showValue"];
+        [item setProperty:@NO forKey:@"isContinuous"];
     }
     return item;
 }
