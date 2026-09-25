@@ -50,4 +50,4 @@ jobs:
             MangoIdleIsland/packages/*.deb
             MangoIdleIsland/build-info/*
             MangoIdleIsland/README.md
-            MangoIdleIsland/STATIC_ANALYSIS_1.1.1.md
+            MangoIdleIsland/STATIC_ANALYSIS_1.1.0.md
