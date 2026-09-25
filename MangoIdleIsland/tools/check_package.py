@@ -42,7 +42,9 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'mode=global-island-native-reapply+idle-fresh-init',
         b'global-Island-glass-logic=enabled',
         b'TintRGBARepair101Done',
-        b'version=1.1.0',
+        b'version=1.1.1',
+        b'[SPECULAR]',
+        b'forced=',
     ]:
         assert required in data, required
 
@@ -81,8 +83,8 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--ctr
     regular = [m for m in t if m.isfile()]
     assert len(regular) == 1 and pathlib.PurePosixPath(regular[0].name).name == 'control'
     control = t.extractfile(regular[0]).read().decode()
-    assert 'Version: 1.1.0' in control
+    assert 'Version: 1.1.1' in control
     assert 'Architecture: iphoneos-arm64e' in control
     assert 'Depends: mobilesubstrate, firmware (= 16.5)' in control
 
-print('PASS: MangoIdleIsland 1.1.0 arm64e RootHide; SpringBoard-only; Rendering cache reload -> ParametersReloaded; Island active native reapply/fallback; idle fresh-init; adaptive Light/Dark RGB preserved')
+print('PASS: MangoIdleIsland 1.1.1 arm64e RootHide; SpringBoard-only; Rendering cache reload -> ParametersReloaded; Island active native reapply/fallback; idle fresh-init; adaptive Light/Dark RGB preserved')
