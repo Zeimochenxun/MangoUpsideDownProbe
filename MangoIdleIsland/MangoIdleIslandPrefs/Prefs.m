@@ -46,27 +46,27 @@ static CFStringRef const Reload = CFSTR("go.mangoos/ParametersReloaded");
 
     [self addSectionNamed:@"灵动岛玻璃 · Mango 原版参数"
               description:@"仅调整 Island 表面；其他 Mango 玻璃维持原样。首次拖动或切换后才保存参数。\n\n色调通透：控制 Mango 的 Island.Blur 参数（0–3），用于改变灵动岛玻璃的模糊与通透表现；尚未写入时按 Mango 默认值约 1.7 显示。"
-                     item:[self item:@"色调通透" key:@"Island.Blur" cell:PSSliderCell low:@0 high:@3]]];
+                     item:[self item:@"色调通透" key:@"Island.Blur" cell:PSSliderCell low:@0 high:@3]];
 
     [self addSectionNamed:nil
               description:@"色调强度：控制灵动岛浅色/深色色调的透明度（0–1）。数值越大，色调覆盖越明显；尚未写入时按 Mango 默认透明度约 0.10 显示。"
-                     item:[self item:@"色调强度" key:@"Island.TintStrength" cell:PSSliderCell low:@0 high:@1]]];
+                     item:[self item:@"色调强度" key:@"Island.TintStrength" cell:PSSliderCell low:@0 high:@1]];
 
     [self addSectionNamed:nil
               description:@"边缘光：开启或关闭灵动岛的边缘高光效果。此开关只控制 Island，本效果仍受 Mango 原版边缘光总开关约束。"
-                     item:[self item:@"边缘光" key:@"Island.SpecularEnabled" cell:PSSwitchCell low:nil high:nil]]];
+                     item:[self item:@"边缘光" key:@"Island.SpecularEnabled" cell:PSSwitchCell low:nil high:nil]];
 
     [self addSectionNamed:nil
               description:@"边缘光调整：控制灵动岛边缘光的透明度/强度（0–1）。仅在 Island 边缘光开启且 Mango 原版总开关允许时可见。"
-                     item:[self item:@"边缘光调整" key:@"Island.SpecularOpacity" cell:PSSliderCell low:@0 high:@1]]];
+                     item:[self item:@"边缘光调整" key:@"Island.SpecularOpacity" cell:PSSliderCell low:@0 high:@1]];
 
     [self addSectionNamed:nil
               description:@"光斑：开启或关闭灵动岛玻璃的光斑/色散效果。"
-                     item:[self item:@"光斑" key:@"Island.DispersionEnabled" cell:PSSwitchCell low:nil high:nil]]];
+                     item:[self item:@"光斑" key:@"Island.DispersionEnabled" cell:PSSwitchCell low:nil high:nil]];
 
     [self addSectionNamed:nil
               description:@"光斑强度（全局）：控制 Mango 的全局光斑强度（0–20）。该值不是 Island 独占参数，也会影响其他已启用光斑的 Mango 玻璃。"
-                     item:[self item:@"光斑强度（全局）" key:@"Global.DispersionStrength" cell:PSSliderCell low:@0 high:@20]]];
+                     item:[self item:@"光斑强度（全局）" key:@"Global.DispersionStrength" cell:PSSliderCell low:@0 high:@20]];
 
     return _specifiers;
 }
