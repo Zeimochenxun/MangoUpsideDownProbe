@@ -27,5 +27,5 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--ctr
     regular = [m for m in t if m.isfile()]
     assert len(regular) == 1 and pathlib.PurePosixPath(regular[0].name).name == 'control'
     control = t.extractfile(regular[0]).read().decode()
-    assert 'Version: 0.5.0' in control and 'Architecture: iphoneos-arm64e' in control
+    assert 'Version: 0.5.1' in control and 'Architecture: iphoneos-arm64e' in control
 print('PASS: arm64e; SpringBoard-only tweak; separate preferences bundle; no maintainer scripts')
