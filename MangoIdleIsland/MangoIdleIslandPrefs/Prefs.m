@@ -7,11 +7,62 @@
 
 static CFStringRef const Domain = CFSTR("com.go.mangoosprefs");
 static CFStringRef const Reload = CFSTR("go.mangoos/ParametersReloaded");
+static NSString * const TintUIKey = @"MangoIdleIsland.TintAlpha";
 
 @interface MangoIdlePrefsController : PSListController
 - (id)readValue:(PSSpecifier *)specifier;
 - (void)writeValue:(id)value specifier:(PSSpecifier *)specifier;
 @end
+
+static id CopyValue(NSString *key) {
+    return CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, Domain));
+}
+
+static BOOL ParseRGBAHex(id value, NSString **rgbOut, unsigned *alphaOut) {
+    if (![value isKindOfClass:NSString.class]) return NO;
+    NSString *color = (NSString *)value;
+    if (color.length != 9 || ![color hasPrefix:@"#"]) return NO;
+
+    NSString *hex = [color substringFromIndex:1];
+    NSCharacterSet *bad = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789ABCDEFabcdef"] invertedSet];
+    if ([hex rangeOfCharacterFromSet:bad].location != NSNotFound) return NO;
+
+    unsigned alpha = 0;
+    NSScanner *scanner = [NSScanner scannerWithString:[hex substringFromIndex:6]];
+    if (![scanner scanHexInt:&alpha] || !scanner.isAtEnd || alpha > 255) return NO;
+
+    if (rgbOut) *rgbOut = [hex substringToIndex:6];
+    if (alphaOut) *alphaOut = alpha;
+    return YES;
+}
+
+static NSNumber *CurrentTintAlpha(void) {
+    unsigned alpha = 0;
+    if (ParseRGBAHex(CopyValue(@"Island.LightTintColor"), NULL, &alpha) ||
+        ParseRGBAHex(CopyValue(@"Island.DarkTintColor"), NULL, &alpha)) {
+        return @((double)alpha / 255.0);
+    }
+
+    // MangoOSRendering Beta7's built-in Island record initializes the final
+    // tint RGBA vector to 0,0,0,0.  Do not invent the old 0.10 fallback.
+    return @0.0;
+}
+
+static NSString *ColorWithAlpha(id existing, NSString *fallbackRGB, unsigned alpha) {
+    NSString *rgb = nil;
+    if (!ParseRGBAHex(existing, &rgb, NULL)) rgb = fallbackRGB;
+    return [NSString stringWithFormat:@"#%@%02X", rgb, alpha];
+}
+
+static void PostReload(void) {
+    if (CFPreferencesAppSynchronize(Domain)) {
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                             Reload,
+                                             NULL,
+                                             NULL,
+                                             YES);
+    }
+}
 
 @implementation MangoIdlePrefsController
 
@@ -39,9 +90,7 @@ static CFStringRef const Reload = CFSTR("go.mangoos/ParametersReloaded");
     PSSpecifier *group = sectionName.length
         ? [PSSpecifier groupSpecifierWithName:sectionName]
         : [PSSpecifier emptyGroupSpecifier];
-    if (description.length) {
-        [group setProperty:description forKey:@"footerText"];
-    }
+    if (description.length) [group setProperty:description forKey:@"footerText"];
     [_specifiers addObject:group];
     [_specifiers addObject:item];
 }
@@ -51,12 +100,12 @@ static CFStringRef const Reload = CFSTR("go.mangoos/ParametersReloaded");
     _specifiers = [NSMutableArray new];
 
     [self addSectionNamed:@"灵动岛玻璃 · Mango 原版参数"
-              description:@"仅调整 Island 表面；其他 Mango 玻璃维持原样。首次拖动或切换后才保存参数。\n\n色调通透：控制 Mango 的 Island.Blur 参数（0–3），用于改变灵动岛玻璃的模糊与通透表现；尚未写入时按 Mango 默认值约 1.7 显示。"
+              description:@"仅调整 Island 表面；其他 Mango 玻璃维持原样。首次拖动或切换后才保存参数。\n\n色调通透：控制 Mango 的 Island.Blur 参数（0–3）；Mango Beta7 的 Island 内置默认值为 1.7。"
                      item:[self item:@"色调通透" key:@"Island.Blur" cell:PSSliderCell low:@0 high:@3]];
 
     [self addSectionNamed:nil
-              description:@"色调强度：直接控制 Mango 渲染器的 Island.TintStrength 参数（0–1）。数值越大，色调作用越明显；本项不再修改浅色/深色色值或颜色透明度。尚未写入时按约 0.10 显示。"
-                     item:[self item:@"色调强度" key:@"Island.TintStrength" cell:PSSliderCell low:@0 high:@1]];
+              description:@"色调强度：调整 Mango 最终使用的浅色/深色色调 RGBA 透明度（0–1），并保留两套颜色原有 RGB。0 为不叠加色调；数值接近 1 时色调会明显遮盖玻璃内容。此实现不会再单独写入 Island.TintStrength。"
+                     item:[self item:@"色调强度" key:TintUIKey cell:PSSliderCell low:@0 high:@1]];
 
     [self addSectionNamed:nil
               description:@"边缘光：开启或关闭灵动岛的边缘高光效果。此开关只控制 Island，本效果仍受 Mango 原版边缘光总开关约束。"
@@ -77,13 +126,8 @@ static CFStringRef const Reload = CFSTR("go.mangoos/ParametersReloaded");
     return _specifiers;
 }
 
-static id CopyValue(NSString *key) {
-    return CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, Domain));
-}
-
 static id DefaultValueForKey(NSString *key) {
     if ([key isEqualToString:@"Island.Blur"]) return @1.7;
-    if ([key isEqualToString:@"Island.TintStrength"]) return @0.10;
     if ([key isEqualToString:@"Island.SpecularOpacity"]) return @0.1;
     if ([key isEqualToString:@"Island.SpecularEnabled"]) return @NO;
     if ([key isEqualToString:@"Island.DispersionEnabled"]) return @YES;
@@ -94,6 +138,7 @@ static id DefaultValueForKey(NSString *key) {
 - (id)readValue:(PSSpecifier *)specifier {
     NSString *key = [specifier propertyForKey:@"key"];
     if (!key.length) return nil;
+    if ([key isEqualToString:TintUIKey]) return CurrentTintAlpha();
 
     id actual = CopyValue(key);
     if ([actual isKindOfClass:NSNumber.class]) return actual;
@@ -106,26 +151,29 @@ static id DefaultValueForKey(NSString *key) {
 
     NSNumber *minimum = [specifier propertyForKey:@"min"];
     NSNumber *maximum = [specifier propertyForKey:@"max"];
-    if (minimum && maximum) {
-        double numeric = [value doubleValue];
-        if (!isfinite(numeric)) return;
-        numeric = fmin(maximum.doubleValue, fmax(minimum.doubleValue, numeric));
+    double numeric = [value doubleValue];
+    if (!isfinite(numeric)) return;
+    if (minimum && maximum) numeric = fmin(maximum.doubleValue, fmax(minimum.doubleValue, numeric));
+
+    if ([key isEqualToString:TintUIKey]) {
+        unsigned alpha = (unsigned)lround(numeric * 255.0);
+        NSString *light = ColorWithAlpha(CopyValue(@"Island.LightTintColor"), @"FFFFFF", alpha);
+        NSString *dark = ColorWithAlpha(CopyValue(@"Island.DarkTintColor"), @"000000", alpha);
+
+        CFPreferencesSetAppValue(CFSTR("Island.LightTintColor"), (__bridge CFStringRef)light, Domain);
+        CFPreferencesSetAppValue(CFSTR("Island.DarkTintColor"), (__bridge CFStringRef)dark, Domain);
+
+        // In Beta7 LightTintColor is parsed after the scalar TintStrength and
+        // overwrites the complete light RGBA vector.  Keep one source of truth.
+        CFPreferencesSetAppValue(CFSTR("Island.TintStrength"), NULL, Domain);
+    } else {
         value = @(numeric);
+        CFPreferencesSetAppValue((__bridge CFStringRef)key,
+                                 (__bridge CFPropertyListRef)value,
+                                 Domain);
     }
 
-    // Mango Beta7 exposes TintStrength as its own per-surface parameter.
-    // Keep every preference mapped one-to-one to its real Mango key.
-    CFPreferencesSetAppValue((__bridge CFStringRef)key,
-                             (__bridge CFPropertyListRef)value,
-                             Domain);
-
-    if (CFPreferencesAppSynchronize(Domain)) {
-        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
-                                             Reload,
-                                             NULL,
-                                             NULL,
-                                             YES);
-    }
+    PostReload();
 }
 
 @end
