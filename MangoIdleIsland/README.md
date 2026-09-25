@@ -1,65 +1,120 @@
-# MangoIdleIsland 1.0.0
+# MangoIdleIsland 1.1.0
 
-1.0.0 重写了「设置 → 灵动岛玻璃调整」中的色调强度实现。此前 0.5.1 虽然把该滑块命名为 `Island.TintStrength`，实际保存时却把滑块值转换为颜色字符串末尾的 alpha，并改写 `Island.LightTintColor` / `Island.DarkTintColor`。静态核查 Mango 1.0-Beta7-1 的渲染模块后确认，Mango 存在独立的 `.TintStrength` 参数，因此旧映射不正确。
+适用环境：iPhone 13 mini、iOS 16.5.0、Dopamine RootHide、arm64e、SpringBoard、Mango 约 1.0-Beta7-1。
 
-从 1.0.0 开始，色调强度直接一对一读写 `Island.TintStrength`，不再修改浅色/深色色值或颜色透明度。设置修改后仍写入 `com.go.mangoosprefs` 并发布 `go.mangoos/ParametersReloaded`，由现有参数刷新路径重新应用 Island 玻璃参数。CI 额外检查 PreferenceBundle 必须包含 `Island.TintStrength`，并禁止旧的 `Island.LightTintColor` / `Island.DarkTintColor` 映射重新进入构建产物。
+1.1.0 的目标是让「灵动岛玻璃调整」真正成为 **Mango Island 材质域的统一参数入口**：只作用于 `filterType=go.mangoos.island`，同时覆盖 MangoIdleIsland 创建的静止态玻璃与 Mango 自己管理的通知、Live Activity、展开及其他 SystemAperture 活动态玻璃。
 
-本版同时保留 0.5.1 已补齐的逐项设置说明。色调通透、色调强度、边缘光、边缘光调整、光斑和全局光斑强度均显示对应作用范围。
+## 核心变化
 
-适用：iPhone 13 mini，iOS 16.5，Dopamine RootHide，Mango 1.0-Beta7-1；已启用系统灵动岛模拟和 Mango 液态玻璃。仅注入 SpringBoard。独立于 MangoUpsideDownWorld、FaceID 和原来的 Probe。
+### 使用 Mango 完整参数重载链
 
-## 参数映射
+设置页仍写入 `com.go.mangoosprefs`，但不再把“写入偏好”等同于“renderer 已更新”。Beta7-1 静态调用链确认：
 
-- 色调通透 → `Island.Blur`，范围 0–3，未写入时界面按约 1.7 显示。
-- 色调强度 → `Island.TintStrength`，范围 0–1，未写入时界面按约 0.10 显示。
-- 边缘光 → `Island.SpecularEnabled`。
-- 边缘光调整 → `Island.SpecularOpacity`，范围 0–1。
-- 光斑 → `Island.DispersionEnabled`。
-- 光斑强度（全局）→ `Global.DispersionStrength`，范围 0–20；该值不是 Island 独占参数，也会影响其他启用光斑的 Mango 玻璃。
+`com.go.mangoosprefs/Reload`
+→ MangoOSRendering 重读参数缓存
+→ `go.mangoos/ParametersReloaded`
+→ 已存在的 `MGLiveBackdropView` reapply
 
-仅当明确开启 Island 边缘光时，解除 Mango 原始活动玻璃及本插件空闲玻璃针对 Island 的边缘光禁用覆盖；关闭时保留原行为。旧版动画、位置和触摸逻辑不变。
+因此 1.1.0 在设置保存后首先发布 `com.go.mangoosprefs/Reload`，由 MangoOSRendering 自己完成缓存失效/重读，再进入 Mango 原生 live-filter 刷新链。
 
-## 本版效果与边界
+### Active glass 原位刷新，不重建
 
-空闲时，在原有灵动岛容器里添加补充背景。若 Mango 液态玻璃已启用，或已经观察到活动时的原版玻璃，则使用 Mango 的 `MGLiveBackdropView`，`groupName=Island`、`filterType=go.mangoos.island`。若尚未确认其可用，暂时使用系统磨砂；观察到原版玻璃后可自动升级。
+Mango Active 状态已有自己的 `MGLiveBackdropView`。1.1.0 不删除、不替换、不覆盖第二个完整玻璃，也不接管 SystemAperture/MangoPillElement/MangoPillManager 生命周期。
 
-活动动画期间补充背景留在 Mango 内容下层，跟随容器几何尺寸、按当前活动玻璃层的显示透明度交接；活动内容首次达到完全可见后留约 60ms 重叠窗口，减少合成器第一帧空白。收缩中即使内容层尚未变为 hidden，补充背景也会按活动玻璃层的实际可见度恢复。没有活动玻璃层时才参考 SAUIElementView 的可见度。
+插件会观察 `MGLiveBackdropView.reapplyFilterForParameterReload`。收到 `go.mangoos/ParametersReloaded` 后：
 
-补充视图不接收触摸，不挂手势识别器，不改变原有视图的 hidden、alpha、transform 或触摸区域。
+- 若对应 `go.mangoos.island` Active glass 已被 Mango 原生 reapply，记录 `observed-mango-refresh`，不重复处理；
+- 若没有观察到 reapply，且运行时签名严格匹配 `void/no-args`，只对这个**现存 Active 对象**调用同一个 Mango 原生 selector，记录 `invoked-fallback`；
+- selector 不存在或签名不匹配则不冒险，记录 `no-safe-runtime-refresh`。
 
-保守限制：只接受交互型 `SBSystemApertureWindow` 的可见容器，尺寸在 100–350 × 28–145 点；超出时隐藏补充背景。已有的倒置/缩放从父视图继承。
+绝不通过 `removeFromSuperview` 或重新 `initWithFrame:` 重建 Mango Active glass。
 
-## 安装前先准备恢复
+### Idle glass 继续 fresh-init
 
-1. 保留现有 Mango 和倒置补丁；不要覆盖它们的 dylib。
-2. 确认知道如何在 Dopamine 关闭 tweak 注入后重新越狱，并能在关闭注入后打开 Sileo/Filza。
-3. 若安装后 SpringBoard 循环崩溃或黑屏：重启手机，在 Dopamine 关闭 tweak 注入后重新越狱，再用 Sileo 卸载 **MangoIdleIsland**（包名 `com.chenxun.mangoidleisland`）。卸载后才恢复注入。不要删除 Mango 原文件。
-4. 仅需停止显示且 Filza 可用时：在 `/var/mobile/Library/Logs/MangoIdleIsland/` 新建名为 `DISABLED` 的空文件，约一秒内隐藏补充背景；此文件不能阻止启动阶段发生的崩溃，出现崩溃优先按第 3 项恢复。删除该文件可恢复显示。
-5. RootHide 的注入目录会受其环境映射影响，不提供猜测的固定隐藏根路径。手动删除时只删除本包的 MangoIdleIsland.dylib 与 MangoIdleIsland.plist，优先使用 Sileo 卸载。
+已知 Beta7 在 MangoIdleIsland 自己创建的 Idle `MGLiveBackdropView` 上，部分参数（尤其 Blur）原位 reapply 可能导致玻璃暂时消失，Respring 后才恢复。因此 Idle 仍沿用 1.0.1 的安全策略：只删除**属于 MangoIdleIsland 的 Idle 背景**，再以 `groupName=Island`、`filterType=go.mangoos.island` 创建新实例。
 
-## 安装与实机检查
+### 严格按 Island filterType 限定
 
-使用 Filza/Sileo 安装 **iphoneos-arm64e / RootHide** deb，Respring，等待约 12 秒。不需要再次转换此包。
+所有新增 global-Island 逻辑都以 `lgFilterType == go.mangoos.island` 为准，而不是判断“是不是我们自己的 Idle view”。这使参数覆盖 Idle + Active Island glass，同时避免修改 Mango 的 Clock、CoverSheet 或其他 glass domain。
 
-依次检查：
+### 不制造双层全强度玻璃
 
-1. 正常竖屏、没有活动：胶囊应显示；原位置长按震动应保持。
-2. 播放音乐：原 Mango 灵动岛应显示，长按展开、进度条/音量拖动正常，不应有额外小胶囊遮挡。
-3. 完全结束活动：观察从放大到缩小直至空闲的一整段动画，背景应连续、外观应与 Mango 活动玻璃相近。
-4. 调整「色调强度」到明显不同的数值，确认空闲 Island 视觉发生变化；再触发活动 Island，确认参数重载没有破坏原有交互。
-5. 倒置后重复上述检查，确认位置、长按、通知交互及玻璃视觉正常。
-6. 息屏、亮屏、锁屏、横屏：不得出现遮挡、残留背景或新增触摸异常。横屏不强制显示。
+原有 Idle/Active handoff 保留：Idle backing 根据 Mango-owned Island glass 的实际有效 opacity 衰减；Active 完全可见后 Idle 接近 0。仍保留约 60 ms 的首次提交过渡保护，避免切换第一帧空白。1.1.0 进一步把活动玻璃检测收紧为真正的 `go.mangoos.island`。
 
-状态日志：`/var/mobile/Library/Logs/MangoIdleIsland/Status.log`。`[GLASS] constructor-verified=1 reason=none module=.../mango.dylib` 表示运行时类及签名通过；`[GLASS] original-island-glass-observed` 表示在活动岛内发现原有玻璃；`[BACKGROUND] kind=Mango-glass` 才说明本插件确实创建了 Mango 玻璃。每次 Respring 有新的 SESSION。
+## 设置映射
 
-## 实现与性能
+- 色调通透 → `Island.Blur`（0–3，界面默认约 1.7）
+- 色调强度 → 修改 `Island.LightTintColor` / `Island.DarkTintColor` 各自 RGBA alpha（0–1），**保留两套 RGB**；清除旧 `Island.TintStrength` 标量
+- 边缘光 → `Island.SpecularEnabled`
+- 边缘光调整 → `Island.SpecularOpacity`（0–1）
+- 光斑 → `Island.DispersionEnabled`
+- 光斑强度（全局）→ `Global.DispersionStrength`（0–20）
 
-Hook 运行时检查过的 `SBSystemApertureContainerView.layoutSubviews`、内容视图的 `setHidden:`、`SAUIElementView.didMoveToSuperview` / `setAlpha:` 以及 `MGLiveBackdropView.setHidden:`，原方法先执行，所有 hook 不修改参数或返回值。变化后会在约一秒内启动 30fps 局部过渡刷新，随后暂停；500ms 的低频兜底扫描只搜索交互型灵动岛窗口（最多 256 个节点）。补充背景位于活动内容下方，不接收触摸。
+`Global.DispersionStrength` 确实是全局键，因此仍明确标为“全局”。虽然二进制存在 `.DispersionStrength` 后缀线索，1.1.0 不在缺乏足够证据时擅自写入所谓 `Island.DispersionStrength`。
 
-不注入 backboardd；不修改 Mango 原始文件、授权逻辑或系统方向。仅设置页面主动改动原版玻璃偏好。不使用固定函数地址。仅支持 iOS 16.5.0，其余系统自动退出。无法识别关键类或 hook 方法签名时不安装 Hook。安装 1.0.0 将升级此前 0.5.x；不需叠装。卸载插件不会自动移除已经写入 `com.go.mangoosprefs` 的 Island 偏好值。
+## Tint 与 Active 自适应颜色
 
-## 编译
+Beta7-1 中可见 `lg_updateTint`、`traitCollectionDidChange:`、`userInterfaceStyle`、`resolvedColorWithTraitCollection:` 等路径，说明 Active glass 存在 trait/style 感知的 tint 更新机制。
 
-RootHide Theos + iPhoneOS16.5 SDK + Apple Clang，`make package FINALPACKAGE=1`。`ARCHS=arm64e`，`THEOS_PACKAGE_SCHEME=roothide`；不要用普通 rootless 的 arm64 包冒充 RootHide 构建。GitHub 工作流执行编译、包结构、PreferenceBundle 参数映射及 Mach-O 架构检查。
+1.1.0 不把 Light/Dark 强制改成同一种颜色，也不叠加固定 UIKit tint。色调强度只修改当前 Light 和 Dark 色值各自的 alpha，保留它们原有 RGB 差异，以尽量不破坏 Mango 已存在的自适应链。
 
-1.0.0 的核心修复是将色调强度恢复为 Mango 原生的一对一 `Island.TintStrength` 参数语义；编译和静态验证通过后仍需真机确认视觉幅度与 Mango 原版一致。
+静态分析尚不能证明 wallpaper luminance 是否直接决定 Light/Dark 选择，因此该部分必须以实机视觉测试为准。详见 `STATIC_ANALYSIS_1.1.0.md`。
+
+## 诊断日志
+
+日志：`/var/mobile/Library/Logs/MangoIdleIsland/Status.log`
+
+参数更新时新增：
+
+```text
+[PARAMETERS] notification=go.mangoos/ParametersReloaded generation=...
+[PARAMETERS] generation=... island-glass-count=2 idle=1 active=1
+[ISLAND-GLASS] owner=idle ...
+[ISLAND-GLASS] owner=active ...
+[GLASS-REFRESH] owner=active method=reapplyFilterForParameterReload result=observed-mango-refresh
+[GLASS-REFRESH] owner=active method=reapplyFilterForParameterReload result=invoked-fallback
+[GLASS-REFRESH] owner=active result=no-safe-runtime-refresh
+[GLASS-REFRESH] owner=idle method=fresh-init result=rebuilt
+```
+
+不会每帧记录参数日志。
+
+## 性能与安全边界
+
+- 单一 MangoIdleIsland tweak，不新增“修复插件的修复插件”。
+- 仅注入 SpringBoard。
+- 不修改 Mango 原始 dylib，不 patch 固定地址。
+- 不触碰 orientation、触摸、手势或 hit testing。
+- 不使用 `MSHookFunction`。
+- 500 ms fallback scan 保留，只扫描 SystemAperture 相关窗口且每棵树最多 256 节点。
+- DisplayLink 仍只在状态过渡后短时以 30 fps 运行约 1 秒，随后暂停。
+- 参数 refresh 为事件驱动；快速重复通知通过 generation 合并，避免反复重建 Idle glass。
+
+## 实机验收
+
+安装 1.1.0、Respring，等待插件初始化后依次测试：
+
+1. 无活动时调整“色调通透”，Idle Island glass 应变化。
+2. 触发通知或 Live Activity，再调同一项，Active Mango glass 应变化。
+3. 调 Tint：Idle 与 Active 都应响应；Active 原有背景颜色/明暗自适应不能被彻底抹掉。
+4. 开/关边缘光：Idle 与 Active 应统一。
+5. 调整边缘光强度：Idle 与 Active 应统一。
+6. 开/关光斑及调整全局光斑强度，观察两种状态。
+7. 反复 Idle → Active → Idle：不得出现双层全强度玻璃、重复边缘光、永久空白、玻璃消失或残留 View。
+8. 快速连续改参数：不得 SpringBoard crash / safe mode，CPU 不应长期异常。
+
+正常情况下 Active 应优先出现 `observed-mango-refresh`。如果大量出现 `invoked-fallback`，说明 Mango 原生 observer 在目标设备/状态下没有按静态链预期触发，应以日志继续定位，而不是重建 Active glass。
+
+## 恢复
+
+若安装后 SpringBoard 循环崩溃：重启设备，在 Dopamine 关闭 tweak 注入后重新越狱，再从 Sileo 卸载 `com.chenxun.mangoidleisland`，之后再恢复注入。不要删除或替换 Mango 原文件。
+
+仅需临时停用显示且 Filza 可用时，可在 `/var/mobile/Library/Logs/MangoIdleIsland/` 创建空文件 `DISABLED`；约一个 fallback scan 周期后插件停止更新自己的 Idle 背景。删除该文件可恢复。
+
+## 构建
+
+RootHide Theos + iPhoneOS16.5 SDK + Apple Clang：`make package FINALPACKAGE=1`。
+
+构建约束：`ARCHS=arm64e`、`THEOS_PACKAGE_SCHEME=roothide`、SpringBoard-only。CI 会运行 `tools/check_package.py`、检查 arm64e Mach-O、依赖并上传 `MangoIdleIsland-1.1.0-RootHide` artifact。
+
+静态验证和 CI 成功不等于完成实机验收；Active adaptive tint、各 SystemAperture 状态的实际 refresh、视觉交接仍需目标 iPhone 13 mini 验证。
