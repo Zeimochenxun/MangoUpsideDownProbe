@@ -1,8 +1,10 @@
-# MangoIdleIsland 0.5.0（玻璃参数首版，实验版）
+# MangoIdleIsland 0.5.1（设置说明修复）
+
+0.5.1 修复「设置 → 灵动岛玻璃调整」中六个具体选项缺少逐项说明的问题。现在色调通透、色调强度、边缘光、边缘光调整、光斑和全局光斑强度都会显示对应的解释文字与作用范围。此修复只调整 PreferenceBundle 的界面说明和包版本，不改变参数键、默认值、写入方式、动画、玻璃渲染或 SpringBoard Hook 逻辑。
 
 0.5.0 在既有动画上增加独立的「设置 → 灵动岛玻璃调整」页面。提供色调通透、色调强度、边缘光开关与强度、光斑开关和全局光斑强度，使用 Mango 1.0-Beta7-1 的 Island 参数。光斑强度是 **Mango 全局值**，可能影响其他玻璃；边缘光仍受 Mango 总开关控制。设置首次改动之前不写入任何默认值。选择调节后按原版方式写入 `com.go.mangoosprefs` 并发布参数重载通知，尝试同步更新空闲与活动 Island 玻璃。
 
-仅当明确开启 Island 边缘光时，解除 Mango 原始活动玻璃及本插件空闲玻璃针对 Island 的边缘光禁用覆盖；关闭时保留原行为。旧版动画、位置和触摸逻辑不变。**0.5.0 未经设备实测；若设置页面打不开或 SpringBoard 崩溃，按下文恢复步骤卸载本版并装回 0.4.0。**
+仅当明确开启 Island 边缘光时，解除 Mango 原始活动玻璃及本插件空闲玻璃针对 Island 的边缘光禁用覆盖；关闭时保留原行为。旧版动画、位置和触摸逻辑不变。**0.5.x 未经完整设备矩阵实测；若设置页面打不开或 SpringBoard 崩溃，按下文恢复步骤卸载本版并装回 0.4.0。**
 
 适用：iPhone 13 mini，iOS 16.5，Dopamine RootHide，Mango 1.0-Beta7-1；已启用系统灵动岛模拟和 Mango 液态玻璃。仅注入 SpringBoard。独立于 MangoUpsideDownWorld、FaceID 和原来的 Probe。
 
@@ -44,10 +46,10 @@
 
 Hook 运行时检查过的 `SBSystemApertureContainerView.layoutSubviews`、内容视图的 `setHidden:`、`SAUIElementView.didMoveToSuperview` / `setAlpha:` 以及 `MGLiveBackdropView.setHidden:`，原方法先执行，所有 hook 不修改参数或返回值。变化后会在约一秒内启动 30fps 局部过渡刷新，随后暂停；500ms 的低频兜底扫描只搜索交互型灵动岛窗口（最多 256 个节点）。补充背景位于活动内容下方，不接收触摸。未运行视觉自动化或功耗实测。
 
-不注入 backboardd；不修改 Mango 原始文件、授权逻辑或系统方向。仅设置页面主动改动原版玻璃偏好。不使用固定函数地址。仅支持 iOS 16.5.0，其余系统自动退出。无法识别关键类或 hook 方法签名时不安装 Hook。安装 0.5.0 将升级本包 0.4.0；不需叠装。卸载插件不会自动移除已写入的 Island 偏好值。
+不注入 backboardd；不修改 Mango 原始文件、授权逻辑或系统方向。仅设置页面主动改动原版玻璃偏好。不使用固定函数地址。仅支持 iOS 16.5.0，其余系统自动退出。无法识别关键类或 hook 方法签名时不安装 Hook。安装 0.5.1 将升级本包 0.5.0；不需叠装。卸载插件不会自动移除已写入的 Island 偏好值。
 
 ## 编译
 
 RootHide Theos + iPhoneOS16.5 SDK + Apple Clang，`make package FINALPACKAGE=1`。ARCHS=arm64e，THEOS_PACKAGE_SCHEME=roothide；不要用普通 rootless 的 arm64 包冒充 RootHide 构建。GitHub 工作流执行编译、包结构及 Mach-O 架构检查。
 
-这是实机待验证的参数适配首版。编译和静态验证通过不等于已证明所有系统场景正确。
+这是实机待验证的参数适配版本。编译和静态验证通过不等于已证明所有系统场景正确。
