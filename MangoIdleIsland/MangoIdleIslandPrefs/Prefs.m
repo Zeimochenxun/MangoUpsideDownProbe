@@ -16,7 +16,13 @@ static CFStringRef const Reload = CFSTR("go.mangoos/ParametersReloaded");
 @implementation MangoIdlePrefsController
 
 - (PSSpecifier *)item:(NSString *)name key:(NSString *)key cell:(PSCellType)cell low:(NSNumber *)low high:(NSNumber *)high {
-    PSSpecifier *item = [PSSpecifier preferenceSpecifierNamed:name target:self set:@selector(writeValue:specifier:) get:@selector(readValue:) detail:nil cell:cell edit:nil];
+    PSSpecifier *item = [PSSpecifier preferenceSpecifierNamed:name
+                                                        target:self
+                                                           set:@selector(writeValue:specifier:)
+                                                           get:@selector(readValue:)
+                                                        detail:nil
+                                                          cell:cell
+                                                          edit:nil];
     [item setProperty:key forKey:@"key"];
     if (low && high) {
         [item setProperty:low forKey:@"min"];
@@ -49,7 +55,7 @@ static CFStringRef const Reload = CFSTR("go.mangoos/ParametersReloaded");
                      item:[self item:@"色调通透" key:@"Island.Blur" cell:PSSliderCell low:@0 high:@3]];
 
     [self addSectionNamed:nil
-              description:@"色调强度：控制灵动岛浅色/深色色调的透明度（0–1）。数值越大，色调覆盖越明显；尚未写入时按 Mango 默认透明度约 0.10 显示。"
+              description:@"色调强度：直接控制 Mango 渲染器的 Island.TintStrength 参数（0–1）。数值越大，色调作用越明显；本项不再修改浅色/深色色值或颜色透明度。尚未写入时按约 0.10 显示。"
                      item:[self item:@"色调强度" key:@"Island.TintStrength" cell:PSSliderCell low:@0 high:@1]];
 
     [self addSectionNamed:nil
@@ -75,22 +81,9 @@ static id CopyValue(NSString *key) {
     return CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, Domain));
 }
 
-// Beta7's tint control stores RGB plus a 00..FF alpha byte, not a second blur.
-static NSNumber *CurrentTintStrength(void) {
-    NSString *color = CopyValue(@"Island.LightTintColor");
-    if (![color isKindOfClass:NSString.class] || color.length != 9 || ![color hasPrefix:@"#"]) return @(26.0 / 255.0);
-    unsigned value = 0;
-    NSScanner *scanner = [NSScanner scannerWithString:[color substringFromIndex:7]];
-    if (![scanner scanHexInt:&value] || !scanner.isAtEnd || value > 255) return @(26.0 / 255.0);
-    return @((double)value / 255.0);
-}
-
-- (id)readValue:(PSSpecifier *)specifier {
-    NSString *key = [specifier propertyForKey:@"key"];
-    if ([key isEqualToString:@"Island.TintStrength"]) return CurrentTintStrength();
-    id actual = CopyValue(key);
-    if ([actual isKindOfClass:NSNumber.class]) return actual;
+static id DefaultValueForKey(NSString *key) {
     if ([key isEqualToString:@"Island.Blur"]) return @1.7;
+    if ([key isEqualToString:@"Island.TintStrength"]) return @0.10;
     if ([key isEqualToString:@"Island.SpecularOpacity"]) return @0.1;
     if ([key isEqualToString:@"Island.SpecularEnabled"]) return @NO;
     if ([key isEqualToString:@"Island.DispersionEnabled"]) return @YES;
@@ -98,39 +91,41 @@ static NSNumber *CurrentTintStrength(void) {
     return nil;
 }
 
-static NSString *ColorWithAlpha(id existing, NSString *fallback, unsigned alpha) {
-    NSString *rgb = fallback;
-    if ([existing isKindOfClass:NSString.class] && [existing length] == 9 && [existing hasPrefix:@"#"]) {
-        NSString *candidate = [existing substringWithRange:NSMakeRange(1, 6)];
-        NSCharacterSet *bad = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789ABCDEFabcdef"] invertedSet];
-        if ([candidate rangeOfCharacterFromSet:bad].location == NSNotFound) rgb = candidate;
-    }
-    return [NSString stringWithFormat:@"#%@%02X", rgb, alpha];
+- (id)readValue:(PSSpecifier *)specifier {
+    NSString *key = [specifier propertyForKey:@"key"];
+    if (!key.length) return nil;
+
+    id actual = CopyValue(key);
+    if ([actual isKindOfClass:NSNumber.class]) return actual;
+    return DefaultValueForKey(key);
 }
 
 - (void)writeValue:(id)value specifier:(PSSpecifier *)specifier {
     NSString *key = [specifier propertyForKey:@"key"];
-    if (!key || ![value isKindOfClass:NSNumber.class]) return;
-    if ([key isEqualToString:@"Island.TintStrength"]) {
-        double val = [value doubleValue];
-        if (!isfinite(val)) return;
-        unsigned alpha = (unsigned)lround(fmin(1.0, fmax(0.0, val)) * 255.0);
-        NSString *light = ColorWithAlpha(CopyValue(@"Island.LightTintColor"), @"FFFFFF", alpha);
-        NSString *dark = ColorWithAlpha(CopyValue(@"Island.DarkTintColor"), @"000000", alpha);
-        CFPreferencesSetAppValue(CFSTR("Island.LightTintColor"), (__bridge CFStringRef)light, Domain);
-        CFPreferencesSetAppValue(CFSTR("Island.DarkTintColor"), (__bridge CFStringRef)dark, Domain);
-    } else {
-        NSNumber *minimum = [specifier propertyForKey:@"min"];
-        NSNumber *maximum = [specifier propertyForKey:@"max"];
-        if (minimum && maximum) {
-            double val = [value doubleValue];
-            if (!isfinite(val)) return;
-            value = @(fmin(maximum.doubleValue, fmax(minimum.doubleValue, val)));
-        }
-        CFPreferencesSetAppValue((__bridge CFStringRef)key, (__bridge CFPropertyListRef)value, Domain);
+    if (!key.length || ![value isKindOfClass:NSNumber.class]) return;
+
+    NSNumber *minimum = [specifier propertyForKey:@"min"];
+    NSNumber *maximum = [specifier propertyForKey:@"max"];
+    if (minimum && maximum) {
+        double numeric = [value doubleValue];
+        if (!isfinite(numeric)) return;
+        numeric = fmin(maximum.doubleValue, fmax(minimum.doubleValue, numeric));
+        value = @(numeric);
     }
+
+    // Mango Beta7 exposes TintStrength as its own per-surface parameter.
+    // Keep every preference mapped one-to-one to its real Mango key.
+    CFPreferencesSetAppValue((__bridge CFStringRef)key,
+                             (__bridge CFPropertyListRef)value,
+                             Domain);
+
     if (CFPreferencesAppSynchronize(Domain)) {
-        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), Reload, NULL, NULL, YES);
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                             Reload,
+                                             NULL,
+                                             NULL,
+                                             YES);
     }
 }
+
 @end
