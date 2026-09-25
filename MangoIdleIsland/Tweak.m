@@ -10,12 +10,13 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import <roothide.h>
 
-// Names and Mango's initializer signature were confirmed in the supplied
-// Beta7-1 Mach-O; all hooks/method calls are checked against runtime metadata.
+// Beta7-1 runtime surface verified against the supplied Mango binaries.
+// Every optional Mango method is signature-gated before it is hooked/called.
 @interface UIView (MangoIdleGlassInitializer)
 - (instancetype)initWithFrame:(CGRect)frame groupName:(NSString *)name filterType:(NSString *)filter;
 - (void)setLgSpecularEnabledOverride:(id)value;
 - (NSString *)lgFilterType;
+- (void)reapplyFilterForParameterReload;
 @end
 
 static Class HostClass, WindowClass, ContentClass, ElementClass, GlassClass;
@@ -25,21 +26,28 @@ static void (*OriginalElementMove)(id, SEL);
 static void (*OriginalElementAlpha)(id, SEL, CGFloat);
 static void (*OriginalGlassHidden)(id, SEL, BOOL);
 static void (*OriginalSpecularOverride)(id, SEL, id);
+static void (*OriginalParameterReapply)(id, SEL);
+
 static BOOL InUpdate, Disabled, OriginalIslandGlassSeen, GlassConstructorVerified, GlassConstructionFailed, CachedGlassSetting;
+static BOOL ParameterReapplyHookInstalled;
 static CFTimeInterval LastPreferenceRead;
 static NSHashTable<UIView *> *Hosts;
 static dispatch_source_t Timer;
 static CADisplayLink *DisplayLink;
 static CFTimeInterval LastTransition;
-static char BackgroundKey, StateKey, LastElementHostKey, GlassModeKey, OpaqueSinceKey;
+static uint64_t ParameterReloadGeneration;
+static char BackgroundKey, StateKey, LastElementHostKey, GlassModeKey, OpaqueSinceKey, LastParameterReapplyKey;
+
 static NSString * const MangoDomain = @"com.go.mangoosprefs";
+static NSString * const IslandFilterType = @"go.mangoos.island";
 static NSString * const LogDir = @"/var/mobile/Library/Logs/MangoIdleIsland";
+
 static void Update(UIView *host);
 static void Pulse(void);
 static void Log(NSString *event);
+static UIView *HostFor(UIView *v);
 static BOOL ClassMethodSignature(Class cls, SEL selector, const char *returnType, unsigned int argc, const char *firstExplicitArgument);
 
-// An absent setting preserves Beta7's original edge-light decision.
 static BOOL IslandEdgeOptIn(void) {
     CFPreferencesAppSynchronize((__bridge CFStringRef)MangoDomain);
     id value = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("Island.SpecularEnabled"), (__bridge CFStringRef)MangoDomain));
@@ -49,26 +57,111 @@ static BOOL IslandEdgeOptIn(void) {
 static BOOL IsIslandGlass(id object) {
     if (!GlassConstructorVerified || !GlassClass || ![object isKindOfClass:GlassClass]) return NO;
     if (!ClassMethodSignature(GlassClass, @selector(lgFilterType), "@", 2, NULL)) return NO;
-    return [[object lgFilterType] isEqualToString:@"go.mangoos.island"];
+    return [[object lgFilterType] isEqualToString:IslandFilterType];
 }
 
 static void SpecularOverride(id self, SEL cmd, id value) {
-    // Mango Beta7 normally passes @NO when creating the activity glass.
-    // Only an explicit Island opt-in releases that override. Other surfaces
-    // and the absence of an opt-in keep the original arguments untouched.
+    // Beta7 creates some active Island glass with an explicit @NO override.
+    // Releasing only that Island override when the user explicitly enables
+    // Island specular lets Mango's own parameter loader decide the effect.
     if (!Disabled && [value respondsToSelector:@selector(boolValue)] && ![value boolValue] && IsIslandGlass(self) && IslandEdgeOptIn()) value = nil;
     OriginalSpecularOverride(self, cmd, value);
 }
 
-static void ParametersChanged(void) {
-    if (!NSThread.isMainThread || !Hosts || Disabled) return;
+static void ParameterReapply(id self, SEL cmd) {
+    OriginalParameterReapply(self, cmd);
+    if (IsIslandGlass(self)) {
+        objc_setAssociatedObject(self, &LastParameterReapplyKey, @(CACurrentMediaTime()), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+}
 
-    // Beta7's in-place reapply path is not reliable for the idle copy: Blur
-    // can disappear until SpringBoard reconstructs MGLiveBackdropView. Treat a
-    // parameter reload like a tiny local respring instead: discard only our
-    // idle background and let its verified Mango initializer read fresh prefs.
-    // Never mutate/reapply Mango's original active SystemAperture glass here.
+static NSMutableOrderedSet<UIView *> *CollectIslandGlasses(void) {
+    NSMutableOrderedSet<UIView *> *result = [NSMutableOrderedSet orderedSet];
+    for (UIView *host in Hosts.allObjects) {
+        NSMutableArray<UIView *> *todo = [NSMutableArray arrayWithObject:host];
+        NSUInteger count = 0;
+        while (todo.count && count++ < 256) {
+            UIView *v = todo.lastObject;
+            [todo removeLastObject];
+            if (IsIslandGlass(v)) [result addObject:v];
+            [todo addObjectsFromArray:v.subviews];
+        }
+    }
+    return result;
+}
+
+static BOOL IsIdleOwnedGlass(UIView *glass, UIView **hostOut) {
+    UIView *host = HostFor(glass);
+    if (hostOut) *hostOut = host;
+    return host && objc_getAssociatedObject(host, &BackgroundKey) == glass;
+}
+
+static void LogIslandGlass(UIView *glass, NSString *owner, UIView *host) {
+    NSString *filter = IsIslandGlass(glass) ? [glass lgFilterType] : @"(non-island)";
+    Log([NSString stringWithFormat:@"[ISLAND-GLASS] owner=%@ class=%@ ptr=%p filterType=%@ window=%p host=%p alpha=%.3f hidden=%d idle-owned=%d",
+         owner,
+         NSStringFromClass(glass.class),
+         (void *)glass,
+         filter ?: @"(nil)",
+         (void *)glass.window,
+         (void *)host,
+         glass.alpha,
+         glass.hidden,
+         [owner isEqualToString:@"idle"]]);
+}
+
+static void RefreshActiveIslandGlass(UIView *glass, CFTimeInterval eventTime) {
+    // Keep Mango's active MGLiveBackdropView instance and lifecycle intact.
+    // Only update the Island-only specular override and use Mango's own
+    // reapply selector when its normal ParametersReloaded observer did not.
+    BOOL edgeEnabled = IslandEdgeOptIn();
+    if (ClassMethodSignature(GlassClass, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) {
+        [glass setLgSpecularEnabledOverride:edgeEnabled ? nil : (__bridge id)kCFBooleanFalse];
+    }
+
+    NSNumber *last = objc_getAssociatedObject(glass, &LastParameterReapplyKey);
+    BOOL observed = last && last.doubleValue >= eventTime - 0.15;
+    if (observed) {
+        Log([NSString stringWithFormat:@"[GLASS-REFRESH] owner=active ptr=%p method=reapplyFilterForParameterReload result=observed-mango-refresh", (void *)glass]);
+        return;
+    }
+
+    if (ParameterReapplyHookInstalled && ClassMethodSignature(GlassClass, @selector(reapplyFilterForParameterReload), "v", 2, NULL)) {
+        [glass reapplyFilterForParameterReload];
+        Log([NSString stringWithFormat:@"[GLASS-REFRESH] owner=active ptr=%p method=reapplyFilterForParameterReload result=invoked-fallback", (void *)glass]);
+    } else {
+        Log([NSString stringWithFormat:@"[GLASS-REFRESH] owner=active ptr=%p result=no-safe-runtime-refresh", (void *)glass]);
+    }
+}
+
+static void ParametersChanged(CFTimeInterval eventTime, uint64_t generation) {
+    if (!NSThread.isMainThread || !Hosts || Disabled || generation != ParameterReloadGeneration) return;
+
     LastPreferenceRead = 0;
+    NSMutableOrderedSet<UIView *> *islandGlasses = CollectIslandGlasses();
+    NSUInteger idleCount = 0, activeCount = 0;
+    NSMutableArray<UIView *> *active = [NSMutableArray array];
+
+    for (UIView *glass in islandGlasses) {
+        UIView *host = nil;
+        BOOL idleOwned = IsIdleOwnedGlass(glass, &host);
+        NSString *owner = idleOwned ? @"idle" : @"active";
+        if (idleOwned) idleCount++; else { activeCount++; [active addObject:glass]; }
+        LogIslandGlass(glass, owner, host);
+    }
+
+    Log([NSString stringWithFormat:@"[PARAMETERS] generation=%llu island-glass-count=%lu idle=%lu active=%lu",
+         (unsigned long long)generation,
+         (unsigned long)islandGlasses.count,
+         (unsigned long)idleCount,
+         (unsigned long)activeCount]);
+
+    // Active instances belong to Mango. Never remove or recreate them.
+    for (UIView *glass in active) RefreshActiveIslandGlass(glass, eventTime);
+
+    // Beta7's in-place reapply is not reliable for our idle copy (notably
+    // Blur may disappear until reconstruction). Rebuild only the view owned
+    // by MangoIdleIsland using the same verified Island initializer.
     NSUInteger rebuilt = 0;
     for (UIView *host in Hosts.allObjects) {
         UIView *bg = objc_getAssociatedObject(host, &BackgroundKey);
@@ -77,19 +170,26 @@ static void ParametersChanged(void) {
             objc_setAssociatedObject(host, &OpaqueSinceKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             [bg removeFromSuperview];
             rebuilt++;
+            Log([NSString stringWithFormat:@"[GLASS-REFRESH] owner=idle ptr=%p method=fresh-init result=rebuilt", (void *)bg]);
         }
         Update(host);
     }
     Pulse();
-    Log([NSString stringWithFormat:@"[PARAMETERS] rebuilt=%lu mode=fresh-init", (unsigned long)rebuilt]);
+    Log([NSString stringWithFormat:@"[PARAMETERS] rebuilt-idle=%lu mode=global-island-native-reapply+idle-fresh-init", (unsigned long)rebuilt]);
 }
 
 static void MangoReload(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     (void)center; (void)observer; (void)name; (void)object; (void)userInfo;
-    // Give Mango's own notification handler a short turn to refresh any
-    // internal parameter cache, then create our idle glass from fresh state.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 80 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
-        ParametersChanged();
+    CFTimeInterval eventTime = CACurrentMediaTime();
+    uint64_t generation = ++ParameterReloadGeneration;
+    Log([NSString stringWithFormat:@"[PARAMETERS] notification=go.mangoos/ParametersReloaded generation=%llu", (unsigned long long)generation]);
+
+    // MangoOSRendering's verified chain reloads its preference cache before
+    // publishing ParametersReloaded. Give all Mango observers one main-loop
+    // turn; coalescing also prevents rapid UI changes from rebuilding Idle
+    // glass repeatedly.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 180 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+        ParametersChanged(eventTime, generation);
     });
 }
 
@@ -156,8 +256,6 @@ static BOOL MangoGlassSetting(void) {
     CFTimeInterval now = CACurrentMediaTime();
     if (LastPreferenceRead && now - LastPreferenceRead < 5.0) return CachedGlassSetting;
     LastPreferenceRead = now;
-    // Match Beta7-1's first preference candidate (jbroot-resolved), then
-    // its rootfs fallback. This is a read-only configuration check.
     NSString *path = @"/var/mobile/Library/Preferences/com.go.mangoosprefs.plist";
     NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:jbroot(path)];
     if (!prefs) prefs = [NSDictionary dictionaryWithContentsOfFile:path];
@@ -173,12 +271,8 @@ static NSString *GlassConstructorIssue(void) {
     const char *image = class_getImageName(GlassClass);
     if (!image) return @"missing-image";
     NSString *name = [[NSString stringWithUTF8String:image] lastPathComponent];
-    // The purchased Beta7-1 package defines the same verified glass API in
-    // mango.dylib and mangoos.dylib. RootHide bound NSClassFromString to
-    // mango.dylib on the user's actual SpringBoard (Status.log).
     if (![name isEqualToString:@"mango.dylib"] && ![name isEqualToString:@"mangoos.dylib"]) return @"image-not-mango";
     SEL init = @selector(initWithFrame:groupName:filterType:);
-    // Returns object, args: self, _cmd, CGRect, NSString *, NSString *.
     if (!ClassMethodSignature(GlassClass, init, "@", 5, "{")) return @"initializer-signature-mismatch";
     return nil;
 }
@@ -186,7 +280,7 @@ static NSString *GlassConstructorIssue(void) {
 static UIView *CreateBackground(BOOL useMango, CGRect rect) {
     UIView *view = nil;
     if (useMango) {
-        view = [[GlassClass alloc] initWithFrame:rect groupName:@"Island" filterType:@"go.mangoos.island"];
+        view = [[GlassClass alloc] initWithFrame:rect groupName:@"Island" filterType:IslandFilterType];
         if (!view || ![view isKindOfClass:GlassClass]) {
             GlassConstructionFailed = YES;
             Log(@"[GLASS] construction-failed-using-UIKit-until-respring");
@@ -207,8 +301,6 @@ static UIView *CreateBackground(BOOL useMango, CGRect rect) {
     view.accessibilityElementsHidden = YES;
     view.isAccessibilityElement = NO;
     view.layer.cornerCurve = kCACornerCurveContinuous;
-    // The real activity MGLiveBackdropView had clips=0 in Probe.log;
-    // its CABackdropLayer uses cornerRadius to shape its filters itself.
     BOOL actualMangoGlass = useMango && [view isKindOfClass:GlassClass];
     view.clipsToBounds = !actualMangoGlass;
     view.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
@@ -233,8 +325,6 @@ static NSString *Eligibility(UIView *host, CGFloat *activity) {
     if (![w isKindOfClass:WindowClass] || !w.userInteractionEnabled) return @"window-excluded";
     if (!Visible(host)) return @"host-not-visible";
     CGSize size = host.bounds.size;
-    // Allow an intermediate animated host to retain its backing while its
-    // content fades away; never reposition or resize the system host itself.
     if (!isfinite(size.width) || !isfinite(size.height) || size.width < 100 || size.width > 350 || size.height < 28 || size.height > 145) return @"geometry-excluded";
     NSMutableArray<UIView *> *todo = [host.subviews mutableCopy];
     UIView *own = objc_getAssociatedObject(host, &BackgroundKey);
@@ -244,10 +334,10 @@ static NSString *Eligibility(UIView *host, CGFloat *activity) {
     while (todo.count && count++ < 256) {
         UIView *v = todo.lastObject; [todo removeLastObject];
         if (v == own) continue;
-        if (ElementClass && [v isKindOfClass:ElementClass]) {
-            elementOpacity = MAX(elementOpacity, EffectiveOpacity(v, host));
-        }
-        if (GlassClass && ([v isKindOfClass:GlassClass] || [NSStringFromClass(v.class) isEqualToString:@"MGLiveBackdropView"])) {
+        if (ElementClass && [v isKindOfClass:ElementClass]) elementOpacity = MAX(elementOpacity, EffectiveOpacity(v, host));
+        // Only Island-domain Mango glass is allowed to control the idle/active
+        // handoff. Other Mango glass surfaces must not suppress Idle Island.
+        if (IsIslandGlass(v)) {
             foundGlass = YES;
             if (!CGRectIsEmpty(v.bounds)) {
                 CGFloat realOpacity = EffectiveOpacity(v, host);
@@ -261,8 +351,6 @@ static NSString *Eligibility(UIView *host, CGFloat *activity) {
         [todo addObjectsFromArray:v.subviews];
     }
     if (todo.count) return @"scan-limit";
-    // If the original glass exists but becomes hidden before the element is
-    // detached, use the glass visibility for handoff, not the element alone.
     *activity = foundGlass ? glassOpacity : elementOpacity;
     return *activity > 0.01 ? @"activity" : @"background";
 }
@@ -285,7 +373,9 @@ static void Update(UIView *host) {
                 objc_setAssociatedObject(host, &BackgroundKey, bg, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
                 [old removeFromSuperview];
                 BOOL realGlass = [objc_getAssociatedObject(bg, &GlassModeKey) boolValue];
-                Log([NSString stringWithFormat:@"[BACKGROUND] kind=%@ source=%@ constructor=%d upgraded=%d", realGlass ? @"Mango-glass" : @"UIKit-fallback", OriginalIslandGlassSeen ? @"observed" : (mango ? @"setting" : @"fallback"), constructor, upgrading]);
+                Log([NSString stringWithFormat:@"[BACKGROUND] kind=%@ source=%@ constructor=%d upgraded=%d",
+                     realGlass ? @"Mango-glass" : @"UIKit-fallback",
+                     OriginalIslandGlassSeen ? @"observed" : (mango ? @"setting" : @"fallback"), constructor, upgrading]);
             }
         }
         if (bg) {
@@ -294,12 +384,15 @@ static void Update(UIView *host) {
                 if (!CGRectEqualToRect(bg.frame, host.bounds)) bg.frame = host.bounds;
                 CGFloat radius = host.bounds.size.height / 2.0;
                 if (bg.layer.cornerRadius != radius) bg.layer.cornerRadius = radius;
-                // A full-opacity element gets two frames of overlap so its
-                // first committed frame can replace an already rendered pill.
                 CFTimeInterval now = CACurrentMediaTime();
                 NSNumber *since = objc_getAssociatedObject(host, &OpaqueSinceKey);
-                if (activity < 0.98) { since = nil; objc_setAssociatedObject(host, &OpaqueSinceKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
-                else if (!since) { since = @(now); objc_setAssociatedObject(host, &OpaqueSinceKey, since, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
+                if (activity < 0.98) {
+                    since = nil;
+                    objc_setAssociatedObject(host, &OpaqueSinceKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                } else if (!since) {
+                    since = @(now);
+                    objc_setAssociatedObject(host, &OpaqueSinceKey, since, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                }
                 CGFloat coverage = activity >= 0.98 && now - since.doubleValue < 0.06 ? 0 : activity;
                 CGFloat backingOpacity = MAX(0, MIN(1, 1 - coverage));
                 if (fabs(bg.alpha - backingOpacity) > 0.001) bg.alpha = backingOpacity;
@@ -312,10 +405,13 @@ static void Update(UIView *host) {
         NSString *old = objc_getAssociatedObject(host, &StateKey);
         if (![old isEqualToString:state]) {
             Pulse();
-            Log([NSString stringWithFormat:@"[STATE] host=%p state=%@ size=%.2fx%.2f background=%.2f", (void *)host, state, host.bounds.size.width, host.bounds.size.height, bg.alpha]);
+            Log([NSString stringWithFormat:@"[STATE] host=%p state=%@ size=%.2fx%.2f background=%.2f",
+                 (void *)host, state, host.bounds.size.width, host.bounds.size.height, bg.alpha]);
             objc_setAssociatedObject(host, &StateKey, state, OBJC_ASSOCIATION_COPY_NONATOMIC);
         }
-    } @finally { InUpdate = NO; }
+    } @finally {
+        InUpdate = NO;
+    }
 }
 
 static void Layout(id self, SEL cmd) {
@@ -345,7 +441,10 @@ static void ElementMoved(id self, SEL cmd) {
     OriginalElementMove(self, cmd);
     if (NSThread.isMainThread) {
         UIView *current = HostFor(self);
-        if (!box) { box = [MangoIdleWeakHost new]; objc_setAssociatedObject(self, &LastElementHostKey, box, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
+        if (!box) {
+            box = [MangoIdleWeakHost new];
+            objc_setAssociatedObject(self, &LastElementHostKey, box, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
         box.view = current;
         Pulse();
         if (previous) Update(previous);
@@ -363,7 +462,7 @@ static void ElementAlpha(id self, SEL cmd, CGFloat alpha) {
 
 static void GlassHidden(id self, SEL cmd, BOOL hidden) {
     OriginalGlassHidden(self, cmd, hidden);
-    if (NSThread.isMainThread) {
+    if (NSThread.isMainThread && IsIslandGlass(self)) {
         UIView *host = HostFor(self);
         if (host && objc_getAssociatedObject(host, &BackgroundKey) != self) { Pulse(); Update(host); }
     }
@@ -393,50 +492,78 @@ __attribute__((constructor)) static void Start(void) {
         if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"]) return;
         NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
+
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=1.0.1 background=Mango-glass parameter-reload=fresh-init touch=unchanged");
+            Log(@"[SESSION] version=1.1.0 background=Mango-glass parameter-reload=global-island-native-reapply+idle-fresh-init touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");
             ElementClass = NSClassFromString(@"SAUIElementView");
             GlassClass = NSClassFromString(@"MGLiveBackdropView");
-            if (!HostClass || !WindowClass || !ContentClass || !ElementClass || !GlassClass || ![HostClass isSubclassOfClass:UIView.class] || ![WindowClass isSubclassOfClass:UIWindow.class] || ![ContentClass isSubclassOfClass:UIView.class] || ![ElementClass isSubclassOfClass:UIView.class]) {
-                Log(@"[SKIP] expected-runtime-classes-unavailable"); return;
+
+            if (!HostClass || !WindowClass || !ContentClass || !ElementClass || !GlassClass ||
+                ![HostClass isSubclassOfClass:UIView.class] || ![WindowClass isSubclassOfClass:UIWindow.class] ||
+                ![ContentClass isSubclassOfClass:UIView.class] || ![ElementClass isSubclassOfClass:UIView.class]) {
+                Log(@"[SKIP] expected-runtime-classes-unavailable");
+                return;
             }
             if (!ClassMethodSignature(HostClass, @selector(layoutSubviews), "v", 2, NULL) ||
                 !ClassMethodSignature(ContentClass, @selector(setHidden:), "v", 3, "B") ||
                 !ClassMethodSignature(ElementClass, @selector(didMoveToSuperview), "v", 2, NULL) ||
                 !ClassMethodSignature(ElementClass, @selector(setAlpha:), "v", 3, "d") ||
                 !ClassMethodSignature(GlassClass, @selector(setHidden:), "v", 3, "B")) {
-                Log(@"[SKIP] transition-method-signature-mismatch"); return;
+                Log(@"[SKIP] transition-method-signature-mismatch");
+                return;
             }
+
             NSString *glassIssue = GlassConstructorIssue();
             GlassConstructorVerified = !glassIssue;
-            Log([NSString stringWithFormat:@"[GLASS] constructor-verified=%d reason=%@ module=%s", GlassConstructorVerified, glassIssue ?: @"none", class_getImageName(GlassClass) ?: "(unknown)"]);
+            Log([NSString stringWithFormat:@"[GLASS] constructor-verified=%d reason=%@ module=%s",
+                 GlassConstructorVerified, glassIssue ?: @"none", class_getImageName(GlassClass) ?: "(unknown)"]);
+
             Hosts = [NSHashTable weakObjectsHashTable];
             Disabled = access([[LogDir stringByAppendingPathComponent:@"DISABLED"] fileSystemRepresentation], F_OK) == 0;
+
             MSHookMessageEx(HostClass, @selector(layoutSubviews), (IMP)Layout, (IMP *)&OriginalLayout);
             MSHookMessageEx(ContentClass, @selector(setHidden:), (IMP)ContentHidden, (IMP *)&OriginalContentHidden);
             MSHookMessageEx(ElementClass, @selector(didMoveToSuperview), (IMP)ElementMoved, (IMP *)&OriginalElementMove);
             MSHookMessageEx(ElementClass, @selector(setAlpha:), (IMP)ElementAlpha, (IMP *)&OriginalElementAlpha);
             MSHookMessageEx(GlassClass, @selector(setHidden:), (IMP)GlassHidden, (IMP *)&OriginalGlassHidden);
-            if (GlassConstructorVerified && ClassMethodSignature(GlassClass, @selector(lgFilterType), "@", 2, NULL) && ClassMethodSignature(GlassClass, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) {
+
+            if (GlassConstructorVerified &&
+                ClassMethodSignature(GlassClass, @selector(lgFilterType), "@", 2, NULL) &&
+                ClassMethodSignature(GlassClass, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) {
                 MSHookMessageEx(GlassClass, @selector(setLgSpecularEnabledOverride:), (IMP)SpecularOverride, (IMP *)&OriginalSpecularOverride);
-                Log(@"[GLASS] edge-override-hook=installed island-only opt-in");
+                Log(@"[GLASS] edge-override-hook=installed island-only");
             }
-            CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, MangoReload, CFSTR("go.mangoos/ParametersReloaded"), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
+
+            if (GlassConstructorVerified &&
+                ClassMethodSignature(GlassClass, @selector(reapplyFilterForParameterReload), "v", 2, NULL)) {
+                MSHookMessageEx(GlassClass, @selector(reapplyFilterForParameterReload), (IMP)ParameterReapply, (IMP *)&OriginalParameterReapply);
+                ParameterReapplyHookInstalled = YES;
+                Log(@"[GLASS] parameter-reapply-hook=installed island-observer");
+            } else {
+                Log(@"[GLASS] parameter-reapply-hook=unavailable");
+            }
+
+            CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, MangoReload,
+                                            CFSTR("go.mangoos/ParametersReloaded"), NULL,
+                                            CFNotificationSuspensionBehaviorDeliverImmediately);
+
             Scan();
             Timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
             dispatch_source_set_timer(Timer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC/2, NSEC_PER_MSEC*100);
             dispatch_source_set_event_handler(Timer, ^{ Scan(); });
             dispatch_resume(Timer);
+
             static MangoIdleFrameObserver *observer;
             observer = [MangoIdleFrameObserver new];
             DisplayLink = [CADisplayLink displayLinkWithTarget:observer selector:@selector(tick:)];
             DisplayLink.preferredFramesPerSecond = 30;
             [DisplayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
             DisplayLink.paused = YES;
-            Log(@"[READY] hooks=layout+content-hidden+element-move+element-alpha+glass-hidden transition-refresh=30fps/1s fallback-scan=500ms");
+
+            Log(@"[READY] hooks=layout+content-hidden+element-move+element-alpha+glass-hidden+island-reapply transition-refresh=30fps/1s fallback-scan=500ms global-Island-glass-logic=enabled");
         });
     }
 }
