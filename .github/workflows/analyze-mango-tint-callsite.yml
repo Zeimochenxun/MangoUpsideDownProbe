@@ -15,10 +15,11 @@ jobs:
       - name: Checkout probe repo
         uses: actions/checkout@v4
 
-      - name: Install LLVM tools
+      - name: Install analysis tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm binutils
+          sudo apt-get install -y llvm binutils python3-pip
+          python3 -m pip install --break-system-packages capstone
 
       - name: Fetch Mango binary
         run: |
@@ -41,24 +42,48 @@ jobs:
             echo '=== SECTIONS ==='
             llvm-objdump --macho --section-headers "$BIN" || true
             echo
-            echo '=== DISASSEMBLY REFERENCES AROUND 0xFE00-0xFF40 ==='
-            llvm-objdump --macho --disassemble --no-show-raw-insn --print-imm-hex "$BIN" > /tmp/disasm.txt
-            grep -n -E -i '0xfedd|0xfee4|0xfeeb|0xfef2|0xff00|0xff10|#0x[eEfF][0-9a-fA-F]{2}' /tmp/disasm.txt -B 25 -A 60 || true
-            echo
-            echo '=== ALL ADRP/ADD CANDIDATES REFERENCING CSTRING PAGE 0xF000/0x10000 ==='
-            grep -n -E -i 'adrp.*0xf000|adrp.*0x10000|add.*0x[eEfF][0-9a-fA-F]{2}|add.*0x[fF][0-9a-fA-F]{3}' /tmp/disasm.txt -B 8 -A 20 || true
-            echo
-            echo '=== FLOAT CONSTANTS NEAR DATA/CSTRING AREA ==='
+            echo '=== CAPSTONE XREFS TO PARAMETER SUFFIX STRINGS ==='
             python3 - <<'PY'
+          from capstone import Cs, CS_ARCH_ARM64, CS_MODE_ARM
+          from capstone.arm64 import ARM64_INS_ADRP, ARM64_INS_ADD, ARM64_INS_ADR
           import struct
           p='/tmp/MangoOSRendering.dylib'
           d=open(p,'rb').read()
-          for off in range(0xf000, min(len(d)-4,0x10300),4):
-              f=struct.unpack_from('<f',d,off)[0]
-              if f==f and -1000.0 < f < 1000.0 and abs(f) not in (0.0,):
-                  if abs(f) <= 100.0:
-                      print(hex(off), f)
+          text_start,text_end=0x4000,0xa92c
+          md=Cs(CS_ARCH_ARM64, CS_MODE_ARM)
+          md.detail=True
+          ins=list(md.disasm(d[text_start:text_end], text_start))
+          idx={i.address:n for n,i in enumerate(ins)}
+          targets={0xfedd:'.TintR',0xfee4:'.TintG',0xfeeb:'.TintB',0xfef2:'.TintStrength',0xff00:'.LightTintColor',0xff10:'.DarkTintColor'}
+          hits=[]
+          for n,i in enumerate(ins):
+              # Direct ADR xN, target
+              if i.id==ARM64_INS_ADR and len(i.operands)>=2 and i.operands[1].type==2:
+                  t=i.operands[1].imm
+                  if t in targets:
+                      hits.append((n,t,'ADR'))
+              if i.id!=ARM64_INS_ADRP or len(i.operands)<2 or i.operands[1].type!=2:
+                  continue
+              page=i.operands[1].imm
+              rd=i.operands[0].reg
+              for j in range(n+1,min(n+8,len(ins))):
+                  q=ins[j]
+                  if q.id==ARM64_INS_ADD and len(q.operands)>=3 and q.operands[0].reg==rd and q.operands[1].reg==rd and q.operands[2].type==2:
+                      t=page+q.operands[2].imm
+                      if t in targets:
+                          hits.append((j,t,'ADRP+ADD'))
+                      break
+          print('xref_count',len(hits))
+          for n,t,kind in hits:
+              print('\n--- XREF',targets[t],hex(t),kind,'at',hex(ins[n].address),'---')
+              for k in range(max(0,n-35),min(len(ins),n+70)):
+                  q=ins[k]
+                  mark='>>' if k==n else '  '
+                  print(f'{mark} {q.address:08x}: {q.mnemonic:8s} {q.op_str}')
           PY
+            echo
+            echo '=== FULL OBJDUMP SYMBOLIZED DISASSEMBLY ==='
+            llvm-objdump --macho --disassemble --print-imm-hex "$BIN" || true
           } | tee "$OUT"
 
       - name: Upload report
