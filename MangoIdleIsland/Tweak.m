@@ -35,6 +35,7 @@ static char BackgroundKey, StateKey, LastElementHostKey, GlassModeKey, OpaqueSin
 static NSString * const MangoDomain = @"com.go.mangoosprefs";
 static NSString * const LogDir = @"/var/mobile/Library/Logs/MangoIdleIsland";
 static void Update(UIView *host);
+static void Pulse(void);
 static void Log(NSString *event);
 static BOOL ClassMethodSignature(Class cls, SEL selector, const char *returnType, unsigned int argc, const char *firstExplicitArgument);
 
