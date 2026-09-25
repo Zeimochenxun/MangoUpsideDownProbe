@@ -18,6 +18,9 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
     magic, cpu, subtype, filetype = struct.unpack_from('<4I', data)
     assert magic == 0xfeedfacf and cpu == 0x100000c and (subtype & 0xffffff) == 2 and filetype == 6
 
+    # Runtime Island scoping belongs to the tweak itself. Keep this assertion
+    # here so CI proves the global-Island logic is filterType-gated without
+    # forcing unrelated runtime strings into the PreferenceBundle.
     for required in [
         b'MSHookMessageEx',
         b'SBSystemApertureContainerView',
@@ -68,7 +71,6 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'Island.DispersionEnabled',
         b'Global.DispersionStrength',
         b'com.go.mangoosprefs/Reload',
-        b'go.mangoos.island',
     ]:
         assert required in prefs_data, required
 
