@@ -6,7 +6,9 @@
 #import <math.h>
 
 static CFStringRef const Domain = CFSTR("com.go.mangoosprefs");
-static CFStringRef const Reload = CFSTR("go.mangoos/ParametersReloaded");
+// Beta7-1 MangoOSRendering listens here, reloads its parameter cache, then
+// publishes go.mangoos/ParametersReloaded to existing live filter instances.
+static CFStringRef const RenderReload = CFSTR("com.go.mangoosprefs/Reload");
 static NSString * const TintUIKey = @"MangoIdleIsland.TintAlpha";
 
 @interface MangoIdlePrefsController : PSListController
@@ -42,9 +44,6 @@ static NSNumber *CurrentTintAlpha(void) {
         ParseRGBAHex(CopyValue(@"Island.DarkTintColor"), NULL, &alpha)) {
         return @((double)alpha / 255.0);
     }
-
-    // MangoOSRendering Beta7's built-in Island record initializes the final
-    // tint RGBA vector to 0,0,0,0.  Do not invent the old 0.10 fallback.
     return @0.0;
 }
 
@@ -55,13 +54,16 @@ static NSString *ColorWithAlpha(id existing, NSString *fallbackRGB, unsigned alp
 }
 
 static void PostReload(void) {
-    if (CFPreferencesAppSynchronize(Domain)) {
-        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
-                                             Reload,
-                                             NULL,
-                                             NULL,
-                                             YES);
-    }
+    if (!CFPreferencesAppSynchronize(Domain)) return;
+
+    // Do not jump straight to ParametersReloaded: the verified Beta7-1
+    // Rendering callback on com.go.mangoosprefs/Reload performs the important
+    // cache re-read first and then publishes ParametersReloaded itself.
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         RenderReload,
+                                         NULL,
+                                         NULL,
+                                         YES);
 }
 
 @implementation MangoIdlePrefsController
@@ -99,28 +101,28 @@ static void PostReload(void) {
     if (_specifiers) return _specifiers;
     _specifiers = [NSMutableArray new];
 
-    [self addSectionNamed:@"灵动岛玻璃 · Mango 原版参数"
-              description:@"全局调整灵动岛玻璃：同一套 Island 参数同时作用于静止态和 Mango 活动态；不叠加第二层玻璃。首次拖动或切换后才保存参数。\n\n色调通透：控制 Mango 的 Island.Blur 参数（0–3）；Mango Beta7 的 Island 内置默认值为 1.7。"
+    [self addSectionNamed:@"灵动岛玻璃 · Mango Island 全局参数"
+              description:@"只调整 filterType=go.mangoos.island 的 Mango 灵动岛玻璃。设置先触发 MangoOSRendering 参数缓存重载，再由 Mango 原生 ParametersReloaded 链刷新活动态；空闲态由本插件安全 fresh-init。不会用第二层完整玻璃覆盖活动态。\n\n色调通透：控制 Island.Blur（0–3）；Mango Beta7 内置默认约为 1.7。"
                      item:[self item:@"色调通透" key:@"Island.Blur" cell:PSSliderCell low:@0 high:@3]];
 
     [self addSectionNamed:nil
-              description:@"色调强度：调整 Mango 最终使用的浅色/深色色调 RGBA 透明度（0–1），并保留两套颜色原有 RGB。0 为不叠加色调；数值接近 1 时色调会明显遮盖玻璃内容。此实现不会再单独写入 Island.TintStrength。"
+              description:@"色调强度：只修改 Island.LightTintColor / Island.DarkTintColor 各自 RGBA 的 alpha（0–1），保留两套颜色原有 RGB，不把浅色/深色色调强制合并，因此不会主动切断 Mango 活动态现有的 Light/Dark 自适应链。"
                      item:[self item:@"色调强度" key:TintUIKey cell:PSSliderCell low:@0 high:@1]];
 
     [self addSectionNamed:nil
-              description:@"边缘光：开启或关闭灵动岛的边缘高光效果。此开关只控制 Island，本效果仍受 Mango 原版边缘光总开关约束。"
+              description:@"边缘光：开启或关闭 Island 边缘高光。补丁按 go.mangoos.island 判断实例，静止态与 Mango 活动态共用同一设置；仍受 Mango 原版全局边缘光条件约束。"
                      item:[self item:@"边缘光" key:@"Island.SpecularEnabled" cell:PSSwitchCell low:nil high:nil]];
 
     [self addSectionNamed:nil
-              description:@"边缘光调整：控制灵动岛边缘光的透明度/强度（0–1）。仅在 Island 边缘光开启且 Mango 原版总开关允许时可见。"
+              description:@"边缘光调整：控制 Island.SpecularOpacity（0–1）。仅在 Island 边缘光开启且 Mango 原版全局条件允许时可见。"
                      item:[self item:@"边缘光调整" key:@"Island.SpecularOpacity" cell:PSSliderCell low:@0 high:@1]];
 
     [self addSectionNamed:nil
-              description:@"光斑：开启或关闭灵动岛玻璃的光斑/色散效果。"
+              description:@"光斑：开启或关闭 Island.DispersionEnabled。"
                      item:[self item:@"光斑" key:@"Island.DispersionEnabled" cell:PSSwitchCell low:nil high:nil]];
 
     [self addSectionNamed:nil
-              description:@"光斑强度（全局）：控制 Mango 的全局光斑强度（0–20）。该值不是 Island 独占参数，也会影响其他已启用光斑的 Mango 玻璃。"
+              description:@"光斑强度（全局）：控制 Mango 的 Global.DispersionStrength（0–20）。该键不是 Island 独占，也会影响其他已启用光斑的 Mango 玻璃；1.1.0 不虚构未验证的 Island 专用强度键。"
                      item:[self item:@"光斑强度（全局）" key:@"Global.DispersionStrength" cell:PSSliderCell low:@0 high:@20]];
 
     return _specifiers;
@@ -163,8 +165,8 @@ static id DefaultValueForKey(NSString *key) {
         CFPreferencesSetAppValue(CFSTR("Island.LightTintColor"), (__bridge CFStringRef)light, Domain);
         CFPreferencesSetAppValue(CFSTR("Island.DarkTintColor"), (__bridge CFStringRef)dark, Domain);
 
-        // In Beta7 LightTintColor is parsed after the scalar TintStrength and
-        // overwrites the complete light RGBA vector.  Keep one source of truth.
+        // Beta7 parses full Light/Dark RGBA values after the scalar tint value.
+        // Keep one source of truth and preserve the two RGB variants separately.
         CFPreferencesSetAppValue(CFSTR("Island.TintStrength"), NULL, Domain);
     } else {
         value = @(numeric);
