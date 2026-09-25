@@ -44,7 +44,7 @@ jobs:
           shasum -a 256 packages/*.deb > build-info/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: MangoIdleIsland-0.5.1-RootHide
+          name: MangoIdleIsland-1.0.0-RootHide
           if-no-files-found: error
           path: |
             MangoIdleIsland/packages/*.deb
