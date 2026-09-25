@@ -22,6 +22,7 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'MSHookMessageEx',
         b'SBSystemApertureContainerView',
         b'Status.log',
+        b'GlassProbe.log',
         b'initWithFrame:groupName:filterType:',
         b'go.mangoos.island',
         b'PillGlass.Enabled',
@@ -41,12 +42,22 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'mode=global-island-native-reapply+idle-fresh-init',
         b'global-Island-glass-logic=enabled',
         b'TintRGBARepair101Done',
-        b'version=1.1.2-probe',
-        b'[SPECULAR]',
-        b'forced=',
-        b'[SPECULAR-PROBE]',
-        b'before-updateSpecular',
-        b'after-updateSpecular',
+        b'version=1.1.3-probe',
+        b'hooks=initializer+updateSpecular',
+        b'scope=all-MGLiveBackdropView',
+        b'readonly=1',
+        b'[GLASS113-INIT]',
+        b'[GLASS113-ATTACH100]',
+        b'[GLASS113-ATTACH500]',
+        b'[GLASS113-UPDATE-BEFORE]',
+        b'[GLASS113-UPDATE-AFTER]',
+        b'[GLASS113-EXISTING]',
+        b'[GLASS113-SCAN]',
+        b'group=',
+        b'initFilter=',
+        b'filter=',
+        b'window=',
+        b'super=',
         b'_specularBoost',
         b'_specularDark',
     ]:
@@ -85,8 +96,8 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--ctr
     regular = [m for m in t if m.isfile()]
     assert len(regular) == 1 and pathlib.PurePosixPath(regular[0].name).name == 'control'
     control = t.extractfile(regular[0]).read().decode()
-    assert 'Version: 1.1.2' in control
+    assert 'Version: 1.1.3' in control
     assert 'Architecture: iphoneos-arm64e' in control
     assert 'Depends: mobilesubstrate, firmware (= 16.5)' in control
 
-print('PASS: MangoIdleIsland 1.1.2 arm64e RootHide; read-only Active updateSpecular probe included; Island scoping preserved')
+print('PASS: MangoIdleIsland 1.1.3 arm64e RootHide; read-only all-MGLiveBackdropView init/updateSpecular lifecycle probe included')
