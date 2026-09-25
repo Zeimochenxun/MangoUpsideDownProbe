@@ -3,13 +3,15 @@
 #import <math.h>
 
 static CFStringRef const MangoPrefsDomain = CFSTR("com.go.mangoosprefs");
-static CFStringRef const MangoReloadName = CFSTR("go.mangoos/ParametersReloaded");
+static CFStringRef const MangoRenderReloadName = CFSTR("com.go.mangoosprefs/Reload");
 static CFStringRef const RepairDomain = CFSTR("com.chenxun.mangoidleisland");
 static CFStringRef const RepairDoneKey = CFSTR("TintRGBARepair101Done");
 
 static void PostMangoReload(void) {
+    // Beta7-1 MangoOSRendering reloads its cached parameter table on this
+    // notification and then emits go.mangoos/ParametersReloaded to live views.
     CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
-                                         MangoReloadName,
+                                         MangoRenderReloadName,
                                          NULL,
                                          NULL,
                                          YES);
@@ -29,8 +31,8 @@ __attribute__((constructor)) static void RepairTintState101(void) {
 
         // MangoIdleIsland 1.0.0 was the only released build of this tweak that
         // wrote the standalone scalar, and it clamped that value to 0...1.
-        // Mango Beta7 starts the Island tint RGBA at 0,0,0,0; a nonzero scalar
-        // therefore creates a black tint unless a full color value overrides it.
+        // Beta7 starts Island tint RGBA at 0,0,0,0, so that legacy scalar can
+        // produce a black tint unless a complete color value overrides it.
         if ([standalone isKindOfClass:NSNumber.class]) {
             double value = [standalone doubleValue];
             if (isfinite(value) && value >= 0.0 && value <= 1.0) {
@@ -43,8 +45,6 @@ __attribute__((constructor)) static void RepairTintState101(void) {
         CFPreferencesAppSynchronize(RepairDomain);
 
         if (repaired) {
-            // Notify immediately, then once more after all SpringBoard tweak
-            // constructors have had time to register their Darwin observers.
             PostMangoReload();
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
                            dispatch_get_main_queue(), ^{ PostMangoReload(); });
