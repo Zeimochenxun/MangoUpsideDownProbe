@@ -16,7 +16,6 @@
 - (instancetype)initWithFrame:(CGRect)frame groupName:(NSString *)name filterType:(NSString *)filter;
 - (void)setLgSpecularEnabledOverride:(id)value;
 - (NSString *)lgFilterType;
-- (void)reapplyFilterForParameterReload;
 @end
 
 static Class HostClass, WindowClass, ContentClass, ElementClass, GlassClass;
@@ -62,33 +61,35 @@ static void SpecularOverride(id self, SEL cmd, id value) {
 
 static void ParametersChanged(void) {
     if (!NSThread.isMainThread || !Hosts || Disabled) return;
-    BOOL enabled = IslandEdgeOptIn();
-    NSUInteger refreshed = 0;
+
+    // Beta7's in-place reapply path is not reliable for the idle copy: Blur
+    // can disappear until SpringBoard reconstructs MGLiveBackdropView. Treat a
+    // parameter reload like a tiny local respring instead: discard only our
+    // idle background and let its verified Mango initializer read fresh prefs.
+    // Never mutate/reapply Mango's original active SystemAperture glass here.
+    LastPreferenceRead = 0;
+    NSUInteger rebuilt = 0;
     for (UIView *host in Hosts.allObjects) {
-        NSMutableArray<UIView *> *todo = [NSMutableArray arrayWithObject:host];
-        NSUInteger scanned = 0;
-        while (todo.count && scanned++ < 256) {
-            UIView *v = todo.lastObject; [todo removeLastObject];
-            if (IsIslandGlass(v)) {
-                if (ClassMethodSignature(GlassClass, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) {
-                    // Own background and Mango's original active glass share
-                    // the surface-pref policy, without touching global glass.
-                    [v setLgSpecularEnabledOverride:enabled ? nil : (__bridge id)kCFBooleanFalse];
-                }
-                if (ClassMethodSignature(GlassClass, @selector(reapplyFilterForParameterReload), "v", 2, NULL)) {
-                    [v reapplyFilterForParameterReload];
-                }
-                refreshed++;
-            }
-            [todo addObjectsFromArray:v.subviews];
+        UIView *bg = objc_getAssociatedObject(host, &BackgroundKey);
+        if (bg) {
+            objc_setAssociatedObject(host, &BackgroundKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(host, &OpaqueSinceKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            [bg removeFromSuperview];
+            rebuilt++;
         }
+        Update(host);
     }
-    Log([NSString stringWithFormat:@"[PARAMETERS] refreshed=%lu edge=%d", (unsigned long)refreshed, enabled]);
+    Pulse();
+    Log([NSString stringWithFormat:@"[PARAMETERS] rebuilt=%lu mode=fresh-init", (unsigned long)rebuilt]);
 }
 
 static void MangoReload(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     (void)center; (void)observer; (void)name; (void)object; (void)userInfo;
-    dispatch_async(dispatch_get_main_queue(), ^{ ParametersChanged(); });
+    // Give Mango's own notification handler a short turn to refresh any
+    // internal parameter cache, then create our idle glass from fresh state.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 80 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+        ParametersChanged();
+    });
 }
 
 @interface MangoIdleWeakHost : NSObject
@@ -392,7 +393,7 @@ __attribute__((constructor)) static void Start(void) {
         NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=0.5.0 background=Mango-glass island-parameters=opt-in touch=unchanged");
+            Log(@"[SESSION] version=1.0.1 background=Mango-glass parameter-reload=fresh-init touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");
