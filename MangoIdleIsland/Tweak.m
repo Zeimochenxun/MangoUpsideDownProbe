@@ -61,10 +61,17 @@ static BOOL IsIslandGlass(id object) {
 }
 
 static void SpecularOverride(id self, SEL cmd, id value) {
-    // Beta7 creates some active Island glass with an explicit @NO override.
-    // Releasing only that Island override when the user explicitly enables
-    // Island specular lets Mango's own parameter loader decide the effect.
-    if (!Disabled && [value respondsToSelector:@selector(boolValue)] && ![value boolValue] && IsIslandGlass(self) && IslandEdgeOptIn()) value = nil;
+    // Beta7 Active Island can install its own @NO override after the shared
+    // Island preference has already enabled specular. 1.1.0 changed @NO to
+    // nil, but device testing proved nil still follows the Active default-off
+    // path. For Island glass only, make the user's explicit preference the
+    // authoritative override: @YES when enabled, @NO when disabled.
+    if (!Disabled && IsIslandGlass(self)) {
+        BOOL enabled = IslandEdgeOptIn();
+        value = enabled ? (__bridge id)kCFBooleanTrue : (__bridge id)kCFBooleanFalse;
+        Log([NSString stringWithFormat:@"[SPECULAR] ptr=%p intercepted=1 forced=%@",
+             (void *)self, enabled ? @"YES" : @"NO"]);
+    }
     OriginalSpecularOverride(self, cmd, value);
 }
 
@@ -116,7 +123,7 @@ static void RefreshActiveIslandGlass(UIView *glass, CFTimeInterval eventTime) {
     // reapply selector when its normal ParametersReloaded observer did not.
     BOOL edgeEnabled = IslandEdgeOptIn();
     if (ClassMethodSignature(GlassClass, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) {
-        [glass setLgSpecularEnabledOverride:edgeEnabled ? nil : (__bridge id)kCFBooleanFalse];
+        [glass setLgSpecularEnabledOverride:edgeEnabled ? (__bridge id)kCFBooleanTrue : (__bridge id)kCFBooleanFalse];
     }
 
     NSNumber *last = objc_getAssociatedObject(glass, &LastParameterReapplyKey);
@@ -287,7 +294,7 @@ static UIView *CreateBackground(BOOL useMango, CGRect rect) {
             view = nil;
         }
         if ([view isKindOfClass:GlassClass] && ClassMethodSignature(GlassClass, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) {
-            [view setLgSpecularEnabledOverride:IslandEdgeOptIn() ? nil : (__bridge id)kCFBooleanFalse];
+            [view setLgSpecularEnabledOverride:IslandEdgeOptIn() ? (__bridge id)kCFBooleanTrue : (__bridge id)kCFBooleanFalse];
         }
     }
     if (!view) {
@@ -494,7 +501,7 @@ __attribute__((constructor)) static void Start(void) {
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=1.1.0 background=Mango-glass parameter-reload=global-island-native-reapply+idle-fresh-init touch=unchanged");
+            Log(@"[SESSION] version=1.1.1 background=Mango-glass parameter-reload=global-island-native-reapply+idle-fresh-init touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");
@@ -534,7 +541,7 @@ __attribute__((constructor)) static void Start(void) {
                 ClassMethodSignature(GlassClass, @selector(lgFilterType), "@", 2, NULL) &&
                 ClassMethodSignature(GlassClass, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) {
                 MSHookMessageEx(GlassClass, @selector(setLgSpecularEnabledOverride:), (IMP)SpecularOverride, (IMP *)&OriginalSpecularOverride);
-                Log(@"[GLASS] edge-override-hook=installed island-only");
+                Log(@"[GLASS] edge-override-hook=installed island-only explicit-boolean");
             }
 
             if (GlassConstructorVerified &&
