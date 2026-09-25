@@ -17,6 +17,7 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
     data = t.extractfile(b).read()
     magic, cpu, subtype, filetype = struct.unpack_from('<4I', data)
     assert magic == 0xfeedfacf and cpu == 0x100000c and (subtype & 0xffffff) == 2 and filetype == 6
+
     for required in [
         b'MSHookMessageEx',
         b'SBSystemApertureContainerView',
@@ -25,18 +26,27 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'go.mangoos.island',
         b'PillGlass.Enabled',
         b'original-island-glass-observed',
-        b'Island.SpecularEnabled',
         b'go.mangoos/ParametersReloaded',
-        b'mode=fresh-init',
-        b'Island.TintStrength',
+        b'com.go.mangoosprefs/Reload',
+        b'Island.SpecularEnabled',
+        b'reapplyFilterForParameterReload',
+        b'island-glass-count=',
+        b'owner=active',
+        b'owner=idle',
+        b'observed-mango-refresh',
+        b'invoked-fallback',
+        b'no-safe-runtime-refresh',
+        b'mode=global-island-native-reapply+idle-fresh-init',
+        b'global-Island-glass-logic=enabled',
         b'TintRGBARepair101Done',
+        b'version=1.1.0',
     ]:
         assert required in data, required
+
     for forbidden in [
         b'MSHookFunction',
         b'locationInView:',
         b'translationInView:',
-        b'reapplyFilterForParameterReload',
     ]:
         assert forbidden not in data, forbidden
 
@@ -45,12 +55,20 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
     pmagic, pcpu, psubtype, ptype = struct.unpack_from('<4I', prefs_data)
     assert pmagic == 0xfeedfacf and pcpu == 0x100000c and (psubtype & 0xffffff) == 2 and ptype == 6
 
-    # 1.0.1 tint UI must operate on Mango's final light/dark RGBA values.
+    # The preference bundle must expose only real Beta7 parameter keys. Tint
+    # intentionally edits Light/Dark RGBA alpha while preserving each RGB.
     for required in [
         b'MangoIdleIsland.TintAlpha',
+        b'Island.Blur',
         b'Island.LightTintColor',
         b'Island.DarkTintColor',
-        b'Island.TintStrength',  # only cleared to remove the 1.0.0 scalar state
+        b'Island.TintStrength',  # cleared, not used as the UI source of truth
+        b'Island.SpecularEnabled',
+        b'Island.SpecularOpacity',
+        b'Island.DispersionEnabled',
+        b'Global.DispersionStrength',
+        b'com.go.mangoosprefs/Reload',
+        b'go.mangoos.island',
     ]:
         assert required in prefs_data, required
 
@@ -61,6 +79,8 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--ctr
     regular = [m for m in t if m.isfile()]
     assert len(regular) == 1 and pathlib.PurePosixPath(regular[0].name).name == 'control'
     control = t.extractfile(regular[0]).read().decode()
-    assert 'Version: 1.0.1' in control and 'Architecture: iphoneos-arm64e' in control
+    assert 'Version: 1.1.0' in control
+    assert 'Architecture: iphoneos-arm64e' in control
+    assert 'Depends: mobilesubstrate, firmware (= 16.5)' in control
 
-print('PASS: 1.0.1 arm64e; fresh-init Mango glass reload; RGBA tint-alpha control; one-time 1.0.0 TintStrength repair; SpringBoard-only tweak')
+print('PASS: MangoIdleIsland 1.1.0 arm64e RootHide; SpringBoard-only; Rendering cache reload -> ParametersReloaded; Island active native reapply/fallback; idle fresh-init; adaptive Light/Dark RGB preserved')
