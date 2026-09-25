@@ -19,7 +19,8 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         assert forbidden not in data, forbidden
     prefs = next(m for m in regular if m.name.endswith('/MangoIdleIslandPrefs.bundle/MangoIdleIslandPrefs'))
     pmagic, pcpu, psubtype, ptype = struct.unpack_from('<4I', t.extractfile(prefs).read())
-    assert pmagic == 0xfeedfacf and pcpu == 0x100000c and (psubtype & 0xffffff) == 2 and ptype == 8
+    # Theos bundle.mk links preference bundles as Mach-O MH_DYLIB (6).
+    assert pmagic == 0xfeedfacf and pcpu == 0x100000c and (psubtype & 0xffffff) == 2 and ptype == 6
     entry = next(m for m in regular if m.name.endswith('/PreferenceLoader/Preferences/MangoIdleIslandPrefs.plist'))
     assert plistlib.loads(t.extractfile(entry).read())['entry']['bundle'] == 'MangoIdleIslandPrefs'
 with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--ctrl-tarfile', package]))) as t:
