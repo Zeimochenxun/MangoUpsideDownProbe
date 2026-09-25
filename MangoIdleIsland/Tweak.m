@@ -56,12 +56,12 @@ static void SpecularOverride(id self, SEL cmd, id value) {
     // Mango Beta7 normally passes @NO when creating the activity glass.
     // Only an explicit Island opt-in releases that override. Other surfaces
     // and the absence of an opt-in keep the original arguments untouched.
-    if ([value respondsToSelector:@selector(boolValue)] && ![value boolValue] && IsIslandGlass(self) && IslandEdgeOptIn()) value = nil;
+    if (!Disabled && [value respondsToSelector:@selector(boolValue)] && ![value boolValue] && IsIslandGlass(self) && IslandEdgeOptIn()) value = nil;
     OriginalSpecularOverride(self, cmd, value);
 }
 
 static void ParametersChanged(void) {
-    if (!NSThread.isMainThread || !Hosts) return;
+    if (!NSThread.isMainThread || !Hosts || Disabled) return;
     BOOL enabled = IslandEdgeOptIn();
     NSUInteger refreshed = 0;
     for (UIView *host in Hosts.allObjects) {
