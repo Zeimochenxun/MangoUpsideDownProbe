@@ -3,15 +3,16 @@
 #import <math.h>
 
 static CFStringRef const MangoPrefsDomain = CFSTR("com.go.mangoosprefs");
+static CFStringRef const MangoReloadName = CFSTR("go.mangoos/ParametersReloaded");
 static CFStringRef const RepairDomain = CFSTR("com.chenxun.mangoidleisland");
 static CFStringRef const RepairDoneKey = CFSTR("TintRGBARepair101Done");
 
-static BOOL ValidRGBAString(id value) {
-    if (![value isKindOfClass:NSString.class]) return NO;
-    NSString *s = (NSString *)value;
-    if (s.length != 9 || ![s hasPrefix:@"#"]) return NO;
-    NSCharacterSet *bad = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789ABCDEFabcdef"] invertedSet];
-    return [[s substringFromIndex:1] rangeOfCharacterFromSet:bad].location == NSNotFound;
+static void PostMangoReload(void) {
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         MangoReloadName,
+                                         NULL,
+                                         NULL,
+                                         YES);
 }
 
 __attribute__((constructor)) static void RepairTintState101(void) {
@@ -22,30 +23,31 @@ __attribute__((constructor)) static void RepairTintState101(void) {
         id done = CFBridgingRelease(CFPreferencesCopyAppValue(RepairDoneKey, RepairDomain));
         if ([done respondsToSelector:@selector(boolValue)] && [done boolValue]) return;
 
+        BOOL repaired = NO;
         CFPreferencesAppSynchronize(MangoPrefsDomain);
         id standalone = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("Island.TintStrength"), MangoPrefsDomain));
-        id light = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("Island.LightTintColor"), MangoPrefsDomain));
-        id dark = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("Island.DarkTintColor"), MangoPrefsDomain));
 
-        // 1.0.0 could leave a scalar tint alpha while Mango's built-in Island
-        // RGB defaults are all zero.  That turns the tint into a black overlay.
-        // LightTintColor is parsed later and replaces the whole light RGBA
-        // vector, so the standalone scalar is also redundant once colors exist.
+        // MangoIdleIsland 1.0.0 was the only released build of this tweak that
+        // wrote the standalone scalar, and it clamped that value to 0...1.
+        // Mango Beta7 starts the Island tint RGBA at 0,0,0,0; a nonzero scalar
+        // therefore creates a black tint unless a full color value overrides it.
         if ([standalone isKindOfClass:NSNumber.class]) {
             double value = [standalone doubleValue];
             if (isfinite(value) && value >= 0.0 && value <= 1.0) {
                 CFPreferencesSetAppValue(CFSTR("Island.TintStrength"), NULL, MangoPrefsDomain);
-                CFPreferencesAppSynchronize(MangoPrefsDomain);
-
-                // Do not synthesize tint colors during migration.  With no
-                // existing color values this restores Mango's native 0 alpha;
-                // with valid colors their original RGBA remains untouched.
-                (void)ValidRGBAString(light);
-                (void)ValidRGBAString(dark);
+                repaired = CFPreferencesAppSynchronize(MangoPrefsDomain);
             }
         }
 
         CFPreferencesSetAppValue(RepairDoneKey, kCFBooleanTrue, RepairDomain);
         CFPreferencesAppSynchronize(RepairDomain);
+
+        if (repaired) {
+            // Notify immediately, then once more after all SpringBoard tweak
+            // constructors have had time to register their Darwin observers.
+            PostMangoReload();
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
+                           dispatch_get_main_queue(), ^{ PostMangoReload(); });
+        }
     }
 }
