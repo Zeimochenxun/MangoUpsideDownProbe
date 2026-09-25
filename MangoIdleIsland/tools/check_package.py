@@ -28,6 +28,8 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'Island.SpecularEnabled',
         b'go.mangoos/ParametersReloaded',
         b'mode=fresh-init',
+        b'Island.TintStrength',
+        b'TintRGBARepair101Done',
     ]:
         assert required in data, required
     for forbidden in [
@@ -41,13 +43,16 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
     prefs_member = next(m for m in regular if m.name.endswith('/MangoIdleIslandPrefs.bundle/MangoIdleIslandPrefs'))
     prefs_data = t.extractfile(prefs_member).read()
     pmagic, pcpu, psubtype, ptype = struct.unpack_from('<4I', prefs_data)
-    # Theos bundle.mk links preference bundles as Mach-O MH_DYLIB (6).
     assert pmagic == 0xfeedfacf and pcpu == 0x100000c and (psubtype & 0xffffff) == 2 and ptype == 6
 
-    # TintStrength remains a real standalone Mango parameter.
-    assert b'Island.TintStrength' in prefs_data
-    assert b'Island.LightTintColor' not in prefs_data
-    assert b'Island.DarkTintColor' not in prefs_data
+    # 1.0.1 tint UI must operate on Mango's final light/dark RGBA values.
+    for required in [
+        b'MangoIdleIsland.TintAlpha',
+        b'Island.LightTintColor',
+        b'Island.DarkTintColor',
+        b'Island.TintStrength',  # only cleared to remove the 1.0.0 scalar state
+    ]:
+        assert required in prefs_data, required
 
     entry = next(m for m in regular if m.name.endswith('/PreferenceLoader/Preferences/MangoIdleIslandPrefs.plist'))
     assert plistlib.loads(t.extractfile(entry).read())['entry']['bundle'] == 'MangoIdleIslandPrefs'
@@ -58,4 +63,4 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--ctr
     control = t.extractfile(regular[0]).read().decode()
     assert 'Version: 1.0.1' in control and 'Architecture: iphoneos-arm64e' in control
 
-print('PASS: 1.0.1 arm64e; fresh-init Mango glass reload; direct Island.TintStrength mapping; SpringBoard-only tweak; no in-place filter reapply')
+print('PASS: 1.0.1 arm64e; fresh-init Mango glass reload; RGBA tint-alpha control; one-time 1.0.0 TintStrength repair; SpringBoard-only tweak')
