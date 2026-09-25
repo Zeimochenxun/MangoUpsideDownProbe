@@ -27,9 +27,15 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'original-island-glass-observed',
         b'Island.SpecularEnabled',
         b'go.mangoos/ParametersReloaded',
+        b'mode=fresh-init',
     ]:
         assert required in data, required
-    for forbidden in [b'MSHookFunction', b'locationInView:', b'translationInView:']:
+    for forbidden in [
+        b'MSHookFunction',
+        b'locationInView:',
+        b'translationInView:',
+        b'reapplyFilterForParameterReload',
+    ]:
         assert forbidden not in data, forbidden
 
     prefs_member = next(m for m in regular if m.name.endswith('/MangoIdleIslandPrefs.bundle/MangoIdleIslandPrefs'))
@@ -38,7 +44,7 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
     # Theos bundle.mk links preference bundles as Mach-O MH_DYLIB (6).
     assert pmagic == 0xfeedfacf and pcpu == 0x100000c and (psubtype & 0xffffff) == 2 and ptype == 6
 
-    # 1.0.0 must map the slider directly to Mango's real TintStrength key.
+    # TintStrength remains a real standalone Mango parameter.
     assert b'Island.TintStrength' in prefs_data
     assert b'Island.LightTintColor' not in prefs_data
     assert b'Island.DarkTintColor' not in prefs_data
@@ -50,6 +56,6 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--ctr
     regular = [m for m in t if m.isfile()]
     assert len(regular) == 1 and pathlib.PurePosixPath(regular[0].name).name == 'control'
     control = t.extractfile(regular[0]).read().decode()
-    assert 'Version: 1.0.0' in control and 'Architecture: iphoneos-arm64e' in control
+    assert 'Version: 1.0.1' in control and 'Architecture: iphoneos-arm64e' in control
 
-print('PASS: 1.0.0 arm64e; direct Island.TintStrength mapping; SpringBoard-only tweak; separate preferences bundle; no maintainer scripts')
+print('PASS: 1.0.1 arm64e; fresh-init Mango glass reload; direct Island.TintStrength mapping; SpringBoard-only tweak; no in-place filter reapply')
