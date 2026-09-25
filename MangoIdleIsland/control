@@ -1,8 +1,8 @@
 Package: com.chenxun.mangoidleisland
 Name: MangoIdleIsland
-Version: 0.4.0
+Version: 0.5.0
 Architecture: iphoneos-arm64e
-Description: Mango glass-backed idle capsule with transition handoff on iOS 16.5.
+Description: Mango glass-backed idle capsule and optional native island glass controls.
 Maintainer: Chen Xun
 Author: Chen Xun
 Section: Tweaks

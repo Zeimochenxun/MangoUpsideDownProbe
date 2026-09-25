@@ -1,10 +1,14 @@
-# MangoIdleIsland 0.4.0（实验版）
+# MangoIdleIsland 0.5.0（玻璃参数首版，实验版）
+
+0.5.0 在既有动画上增加独立的「设置 → 灵动岛玻璃调整」页面。提供色调通透、色调强度、边缘光开关与强度、光斑开关和全局光斑强度，使用 Mango 1.0-Beta7-1 的 Island 参数。光斑强度是 **Mango 全局值**，可能影响其他玻璃；边缘光仍受 Mango 总开关控制。设置首次改动之前不写入任何默认值。选择调节后按原版方式写入 `com.go.mangoosprefs` 并发布参数重载通知，尝试同步更新空闲与活动 Island 玻璃。
+
+仅当明确开启 Island 边缘光时，解除 Mango 原始活动玻璃及本插件空闲玻璃针对 Island 的边缘光禁用覆盖；关闭时保留原行为。旧版动画、位置和触摸逻辑不变。**0.5.0 未经设备实测；若设置页面打不开或 SpringBoard 崩溃，按下文恢复步骤卸载本版并装回 0.4.0。**
 
 适用：iPhone 13 mini，iOS 16.5，Dopamine RootHide，Mango 1.0-Beta7-1；已启用系统灵动岛模拟和 Mango 液态玻璃。仅注入 SpringBoard。独立于 MangoUpsideDownWorld、FaceID 和原来的 Probe。
 
 ## 本版效果与边界
 
-空闲时，在原有灵动岛容器里添加补充背景。运行时类与构造签名经验证，并且 Mango 液态玻璃设置显示为开启，或在灵动岛活动中观察到 Mango 原始玻璃视图时，补充背景使用 Mango 自己的 `MGLiveBackdropView`，`groupName=Island`、`filterType=go.mangoos.island`。Mango 的配置优先从 RootHide 映射路径读取，再回退系统路径。若开机后还没有观察到活动玻璃，且设置读取不到，则暂时使用系统磨砂；首次看到原有 Mango 玻璃后自动升级材质，无需 Respring。原版 0.2.0 即使后来检测到玻璃也不会升级。0.3.0 又错误地只接受由 mangoos.dylib 提供的运行时类；用户提供的 `Status.log` 证实实际类来自 mango.dylib，因此 0.3.0 一直显示 `constructor-verified=0`。0.4.0 根据两份实际 Beta7-1 二进制的签名，接受上述两种来源。本插件只读取设置，不修改原设置或授权流程。
+空闲时，在原有灵动岛容器里添加补充背景。若 Mango 液态玻璃已启用，或已经观察到活动时的原版玻璃，则使用 Mango 的 `MGLiveBackdropView`，`groupName=Island`、`filterType=go.mangoos.island`。若尚未确认其可用，暂时使用系统磨砂；观察到原版玻璃后可自动升级。0.4.0 已根据用户日志修复运行时玻璃类来自 mango.dylib 的识别错误。0.5.0 在此基础上允许用户主动更改已确认的 Island 外观参数，不涉及授权流程。
 
 活动动画期间补充背景留在 Mango 内容下层，跟随容器几何尺寸、按当前活动玻璃层的显示透明度交接；活动内容首次达到完全可见后留约 60ms 重叠窗口，减少合成器第一帧空白。收缩中即使内容层尚未变为 hidden，补充背景也会按活动玻璃层的实际可见度恢复。没有活动玻璃层时才参考 SAUIElementView 的可见度。由于这里没有原生 iOS 设备运行时跟踪结果，不能承诺每种系统动画完全没有一帧闪烁。
 
@@ -40,10 +44,10 @@
 
 Hook 运行时检查过的 `SBSystemApertureContainerView.layoutSubviews`、内容视图的 `setHidden:`、`SAUIElementView.didMoveToSuperview` / `setAlpha:` 以及 `MGLiveBackdropView.setHidden:`，原方法先执行，所有 hook 不修改参数或返回值。变化后会在约一秒内启动 30fps 局部过渡刷新，随后暂停；500ms 的低频兜底扫描只搜索交互型灵动岛窗口（最多 256 个节点）。补充背景位于活动内容下方，不接收触摸。未运行视觉自动化或功耗实测。
 
-不注入 backboardd；不修改 Mango 文件、授权逻辑、偏好或系统方向。不使用固定函数地址。仅支持 iOS 16.5.0，其余系统自动退出。无法识别关键类或 hook 方法签名时不安装 Hook。安装 0.4.0 将升级本包 0.3.0；不需叠装。
+不注入 backboardd；不修改 Mango 原始文件、授权逻辑或系统方向。仅设置页面主动改动原版玻璃偏好。不使用固定函数地址。仅支持 iOS 16.5.0，其余系统自动退出。无法识别关键类或 hook 方法签名时不安装 Hook。安装 0.5.0 将升级本包 0.4.0；不需叠装。卸载插件不会自动移除已写入的 Island 偏好值。
 
 ## 编译
 
 RootHide Theos + iPhoneOS16.5 SDK + Apple Clang，`make package FINALPACKAGE=1`。ARCHS=arm64e，THEOS_PACKAGE_SCHEME=roothide；不要用普通 rootless 的 arm64 包冒充 RootHide 构建。GitHub 工作流执行编译、包结构及 Mach-O 架构检查。
 
-这是首个实机待验证修复包。编译和静态验证通过不等于已证明所有系统场景正确。
+这是实机待验证的参数适配首版。编译和静态验证通过不等于已证明所有系统场景正确。

@@ -9,3 +9,5 @@ MangoIdleIsland_CFLAGS = -fobjc-arc -fblocks -Wall -Wextra -Werror -Wno-deprecat
 MangoIdleIsland_FRAMEWORKS = Foundation UIKit QuartzCore
 MangoIdleIsland_LIBRARIES = substrate
 include $(THEOS_MAKE_PATH)/tweak.mk
+SUBPROJECTS += MangoIdleIslandPrefs
+include $(THEOS_MAKE_PATH)/aggregate.mk

@@ -15,6 +15,8 @@
 @interface UIView (MangoIdleGlassInitializer)
 - (instancetype)initWithFrame:(CGRect)frame groupName:(NSString *)name filterType:(NSString *)filter;
 - (void)setLgSpecularEnabledOverride:(id)value;
+- (NSString *)lgFilterType;
+- (void)reapplyFilterForParameterReload;
 @end
 
 static Class HostClass, WindowClass, ContentClass, ElementClass, GlassClass;
@@ -23,6 +25,7 @@ static void (*OriginalContentHidden)(id, SEL, BOOL);
 static void (*OriginalElementMove)(id, SEL);
 static void (*OriginalElementAlpha)(id, SEL, CGFloat);
 static void (*OriginalGlassHidden)(id, SEL, BOOL);
+static void (*OriginalSpecularOverride)(id, SEL, id);
 static BOOL InUpdate, Disabled, OriginalIslandGlassSeen, GlassConstructorVerified, GlassConstructionFailed, CachedGlassSetting;
 static CFTimeInterval LastPreferenceRead;
 static NSHashTable<UIView *> *Hosts;
@@ -30,8 +33,63 @@ static dispatch_source_t Timer;
 static CADisplayLink *DisplayLink;
 static CFTimeInterval LastTransition;
 static char BackgroundKey, StateKey, LastElementHostKey, GlassModeKey, OpaqueSinceKey;
+static NSString * const MangoDomain = @"com.go.mangoosprefs";
 static NSString * const LogDir = @"/var/mobile/Library/Logs/MangoIdleIsland";
 static void Update(UIView *host);
+static void Log(NSString *event);
+static BOOL ClassMethodSignature(Class cls, SEL selector, const char *returnType, unsigned int argc, const char *firstExplicitArgument);
+
+// An absent setting preserves Beta7's original edge-light decision.
+static BOOL IslandEdgeOptIn(void) {
+    CFPreferencesAppSynchronize((__bridge CFStringRef)MangoDomain);
+    id value = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("Island.SpecularEnabled"), (__bridge CFStringRef)MangoDomain));
+    return [value isKindOfClass:NSNumber.class] && [value boolValue];
+}
+
+static BOOL IsIslandGlass(id object) {
+    if (!GlassConstructorVerified || !GlassClass || ![object isKindOfClass:GlassClass]) return NO;
+    if (!ClassMethodSignature(GlassClass, @selector(lgFilterType), "@", 2, NULL)) return NO;
+    return [[object lgFilterType] isEqualToString:@"go.mangoos.island"];
+}
+
+static void SpecularOverride(id self, SEL cmd, id value) {
+    // Mango Beta7 normally passes @NO when creating the activity glass.
+    // Only an explicit Island opt-in releases that override. Other surfaces
+    // and the absence of an opt-in keep the original arguments untouched.
+    if ([value respondsToSelector:@selector(boolValue)] && ![value boolValue] && IsIslandGlass(self) && IslandEdgeOptIn()) value = nil;
+    OriginalSpecularOverride(self, cmd, value);
+}
+
+static void ParametersChanged(void) {
+    if (!NSThread.isMainThread || !Hosts) return;
+    BOOL enabled = IslandEdgeOptIn();
+    NSUInteger refreshed = 0;
+    for (UIView *host in Hosts.allObjects) {
+        NSMutableArray<UIView *> *todo = [NSMutableArray arrayWithObject:host];
+        NSUInteger scanned = 0;
+        while (todo.count && scanned++ < 256) {
+            UIView *v = todo.lastObject; [todo removeLastObject];
+            if (IsIslandGlass(v)) {
+                if (ClassMethodSignature(GlassClass, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) {
+                    // Own background and Mango's original active glass share
+                    // the surface-pref policy, without touching global glass.
+                    [v setLgSpecularEnabledOverride:enabled ? nil : (__bridge id)kCFBooleanFalse];
+                }
+                if (ClassMethodSignature(GlassClass, @selector(reapplyFilterForParameterReload), "v", 2, NULL)) {
+                    [v reapplyFilterForParameterReload];
+                }
+                refreshed++;
+            }
+            [todo addObjectsFromArray:v.subviews];
+        }
+    }
+    Log([NSString stringWithFormat:@"[PARAMETERS] refreshed=%lu edge=%d", (unsigned long)refreshed, enabled]);
+}
+
+static void MangoReload(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    (void)center; (void)observer; (void)name; (void)object; (void)userInfo;
+    dispatch_async(dispatch_get_main_queue(), ^{ ParametersChanged(); });
+}
 
 @interface MangoIdleWeakHost : NSObject
 @property (nonatomic, weak) UIView *view;
@@ -133,7 +191,7 @@ static UIView *CreateBackground(BOOL useMango, CGRect rect) {
             view = nil;
         }
         if ([view isKindOfClass:GlassClass] && ClassMethodSignature(GlassClass, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) {
-            [view setLgSpecularEnabledOverride:(__bridge id)kCFBooleanFalse];
+            [view setLgSpecularEnabledOverride:IslandEdgeOptIn() ? nil : (__bridge id)kCFBooleanFalse];
         }
     }
     if (!view) {
@@ -334,7 +392,7 @@ __attribute__((constructor)) static void Start(void) {
         NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=0.4.0 background=Mango-glass-when-enabled transition=backing-overlap touch=unchanged");
+            Log(@"[SESSION] version=0.5.0 background=Mango-glass island-parameters=opt-in touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");
@@ -360,6 +418,11 @@ __attribute__((constructor)) static void Start(void) {
             MSHookMessageEx(ElementClass, @selector(didMoveToSuperview), (IMP)ElementMoved, (IMP *)&OriginalElementMove);
             MSHookMessageEx(ElementClass, @selector(setAlpha:), (IMP)ElementAlpha, (IMP *)&OriginalElementAlpha);
             MSHookMessageEx(GlassClass, @selector(setHidden:), (IMP)GlassHidden, (IMP *)&OriginalGlassHidden);
+            if (GlassConstructorVerified && ClassMethodSignature(GlassClass, @selector(lgFilterType), "@", 2, NULL) && ClassMethodSignature(GlassClass, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) {
+                MSHookMessageEx(GlassClass, @selector(setLgSpecularEnabledOverride:), (IMP)SpecularOverride, (IMP *)&OriginalSpecularOverride);
+                Log(@"[GLASS] edge-override-hook=installed island-only opt-in");
+            }
+            CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, MangoReload, CFSTR("go.mangoos/ParametersReloaded"), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
             Scan();
             Timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
             dispatch_source_set_timer(Timer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC/2, NSEC_PER_MSEC*100);
