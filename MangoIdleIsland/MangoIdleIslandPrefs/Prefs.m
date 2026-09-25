@@ -100,7 +100,7 @@ static void PostReload(void) {
     _specifiers = [NSMutableArray new];
 
     [self addSectionNamed:@"灵动岛玻璃 · Mango 原版参数"
-              description:@"仅调整 Island 表面；其他 Mango 玻璃维持原样。首次拖动或切换后才保存参数。\n\n色调通透：控制 Mango 的 Island.Blur 参数（0–3）；Mango Beta7 的 Island 内置默认值为 1.7。"
+              description:@"全局调整灵动岛玻璃：同一套 Island 参数同时作用于静止态和 Mango 活动态；不叠加第二层玻璃。首次拖动或切换后才保存参数。\n\n色调通透：控制 Mango 的 Island.Blur 参数（0–3）；Mango Beta7 的 Island 内置默认值为 1.7。"
                      item:[self item:@"色调通透" key:@"Island.Blur" cell:PSSliderCell low:@0 high:@3]];
 
     [self addSectionNamed:nil
