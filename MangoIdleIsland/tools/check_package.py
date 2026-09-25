@@ -18,9 +18,6 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
     magic, cpu, subtype, filetype = struct.unpack_from('<4I', data)
     assert magic == 0xfeedfacf and cpu == 0x100000c and (subtype & 0xffffff) == 2 and filetype == 6
 
-    # Runtime Island scoping belongs to the tweak itself. Keep this assertion
-    # here so CI proves the global-Island logic is filterType-gated without
-    # forcing unrelated runtime strings into the PreferenceBundle.
     for required in [
         b'MSHookMessageEx',
         b'SBSystemApertureContainerView',
@@ -32,7 +29,9 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'go.mangoos/ParametersReloaded',
         b'com.go.mangoosprefs/Reload',
         b'Island.SpecularEnabled',
+        b'Island.SpecularOpacity',
         b'reapplyFilterForParameterReload',
+        b'updateSpecular',
         b'island-glass-count=',
         b'owner=active',
         b'owner=idle',
@@ -42,9 +41,14 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'mode=global-island-native-reapply+idle-fresh-init',
         b'global-Island-glass-logic=enabled',
         b'TintRGBARepair101Done',
-        b'version=1.1.1',
+        b'version=1.1.2-probe',
         b'[SPECULAR]',
         b'forced=',
+        b'[SPECULAR-PROBE]',
+        b'before-updateSpecular',
+        b'after-updateSpecular',
+        b'_specularBoost',
+        b'_specularDark',
     ]:
         assert required in data, required
 
@@ -60,14 +64,12 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
     pmagic, pcpu, psubtype, ptype = struct.unpack_from('<4I', prefs_data)
     assert pmagic == 0xfeedfacf and pcpu == 0x100000c and (psubtype & 0xffffff) == 2 and ptype == 6
 
-    # The preference bundle must expose only real Beta7 parameter keys. Tint
-    # intentionally edits Light/Dark RGBA alpha while preserving each RGB.
     for required in [
         b'MangoIdleIsland.TintAlpha',
         b'Island.Blur',
         b'Island.LightTintColor',
         b'Island.DarkTintColor',
-        b'Island.TintStrength',  # cleared, not used as the UI source of truth
+        b'Island.TintStrength',
         b'Island.SpecularEnabled',
         b'Island.SpecularOpacity',
         b'Island.DispersionEnabled',
@@ -83,8 +85,8 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--ctr
     regular = [m for m in t if m.isfile()]
     assert len(regular) == 1 and pathlib.PurePosixPath(regular[0].name).name == 'control'
     control = t.extractfile(regular[0]).read().decode()
-    assert 'Version: 1.1.1' in control
+    assert 'Version: 1.1.2' in control
     assert 'Architecture: iphoneos-arm64e' in control
     assert 'Depends: mobilesubstrate, firmware (= 16.5)' in control
 
-print('PASS: MangoIdleIsland 1.1.1 arm64e RootHide; SpringBoard-only; Rendering cache reload -> ParametersReloaded; Island active native reapply/fallback; idle fresh-init; adaptive Light/Dark RGB preserved')
+print('PASS: MangoIdleIsland 1.1.2 arm64e RootHide; read-only Active updateSpecular probe included; Island scoping preserved')
