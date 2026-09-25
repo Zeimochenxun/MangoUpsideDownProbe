@@ -50,15 +50,15 @@ jobs:
             echo
             echo '=== FLOAT CONSTANTS NEAR DATA/CSTRING AREA ==='
             python3 - <<'PY'
-import struct
-p='/tmp/MangoOSRendering.dylib'
-d=open(p,'rb').read()
-for off in range(0xf000, min(len(d)-4,0x10300),4):
-    f=struct.unpack_from('<f',d,off)[0]
-    if f==f and -1000.0 < f < 1000.0 and abs(f) not in (0.0,):
-        if abs(f) <= 100.0:
-            print(hex(off), f)
-PY
+          import struct
+          p='/tmp/MangoOSRendering.dylib'
+          d=open(p,'rb').read()
+          for off in range(0xf000, min(len(d)-4,0x10300),4):
+              f=struct.unpack_from('<f',d,off)[0]
+              if f==f and -1000.0 < f < 1000.0 and abs(f) not in (0.0,):
+                  if abs(f) <= 100.0:
+                      print(hex(off), f)
+          PY
           } | tee "$OUT"
 
       - name: Upload report
