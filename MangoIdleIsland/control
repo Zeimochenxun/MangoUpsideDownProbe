@@ -1,8 +1,8 @@
 Package: com.chenxun.mangoidleisland
 Name: MangoIdleIsland
-Version: 1.1.1
+Version: 1.1.2
 Architecture: iphoneos-arm64e
-Description: Global Mango Island glass parameter bridge for idle and active SystemAperture states.
+Description: Global Mango Island glass parameter bridge with read-only Active specular diagnostics.
 Maintainer: Chen Xun
 Author: Chen Xun
 Section: Tweaks
