@@ -42,7 +42,7 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'mode=global-island-native-reapply+idle-fresh-init',
         b'global-Island-glass-logic=enabled',
         b'TintRGBARepair101Done',
-        b'version=1.1.4-probe',
+        b'version=1.1.4-media-guard',
         b'hooks=initializer+updateSpecular',
         b'scope=all-MGLiveBackdropView',
         b'readonly=1',
