@@ -5,10 +5,10 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = MangoSplitGeometryProbe
-MangoSplitGeometryProbe_FILES = Probe.m
-MangoSplitGeometryProbe_CFLAGS = -fobjc-arc -fblocks -Wall -Wextra -Werror -Wno-unused-parameter -Wno-deprecated-declarations
-MangoSplitGeometryProbe_FRAMEWORKS = UIKit Foundation QuartzCore
-MangoSplitGeometryProbe_LIBRARIES = substrate
+TWEAK_NAME = MangoSplitUpsideDownFix
+MangoSplitUpsideDownFix_FILES = Fix.m
+MangoSplitUpsideDownFix_CFLAGS = -fobjc-arc -fblocks -Wall -Wextra -Werror -Wno-unused-parameter -Wno-deprecated-declarations
+MangoSplitUpsideDownFix_FRAMEWORKS = UIKit Foundation QuartzCore
+MangoSplitUpsideDownFix_LIBRARIES = substrate
 
 include $(THEOS_MAKE_PATH)/tweak.mk
