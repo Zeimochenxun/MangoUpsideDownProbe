@@ -5,11 +5,12 @@
 #import <objc/runtime.h>
 #import <dlfcn.h>
 #import <mach-o/loader.h>
+#import <mach-o/dyld.h>
 #import <fcntl.h>
 #import <unistd.h>
 #import <math.h>
 
-static NSString * const kVersion = @"0.1.0-alpha1";
+static NSString * const kVersion = @"0.1.1-alpha2";
 static NSString * const kLogDirectory = @"/var/mobile/Library/Logs/MangoSplitUpsideDownFix";
 static NSString * const kLogPath = @"/var/mobile/Library/Logs/MangoSplitUpsideDownFix/Fix.log";
 static NSString * const kDisablePath = @"/var/mobile/Library/Preferences/MangoSplitUpsideDownFix.disabled";
@@ -79,17 +80,31 @@ static NSString *UUIDForImageBase(const void *base) {
 
 static BOOL VerifyMango(NSString **pathOut, NSString **uuidOut) {
     Class cls = objc_getClass("MangoPillElement");
+    Class scene = objc_getClass("DecoratedAppSceneView");
+    Class floating = objc_getClass("DecoratedFloatingView");
     Method method = cls ? class_getInstanceMethod(cls, sel_registerName("handlePanGesture:")) : Nil;
     if (!method || strcmp(method_getTypeEncoding(method), "v24@0:8@16") != 0) return NO;
-    Dl_info info = {0};
-    if (!dladdr((const void *)method_getImplementation(method), &info) || !info.dli_fname) return NO;
-    NSString *path = [NSString stringWithUTF8String:info.dli_fname];
-    NSString *uuid = UUIDForImageBase(info.dli_fbase).lowercaseString;
+    const char *origin = class_getImageName(cls);
+    const char *sceneOrigin = scene ? class_getImageName(scene) : NULL;
+    const char *floatingOrigin = floating ? class_getImageName(floating) : NULL;
+    if (!origin || !sceneOrigin || !floatingOrigin ||
+        strcmp(origin, sceneOrigin) != 0 || strcmp(origin, floatingOrigin) != 0) return NO;
+    NSString *path = [NSString stringWithUTF8String:origin];
+    if ([path.lastPathComponent caseInsensitiveCompare:@"mango.dylib"] != NSOrderedSame) return NO;
+    NSString *uuid = nil;
+    // A substrate hook changes the method IMP's image. The declaring class's
+    // dyld image is stable even when Mango's methods are wrapped by other tweaks.
+    for (uint32_t i=0; i<_dyld_image_count(); i++) {
+        const char *name = _dyld_get_image_name(i);
+        if (name && strcmp(name, origin) == 0) {
+            uuid = UUIDForImageBase(_dyld_get_image_header(i)).lowercaseString;
+            break;
+        }
+    }
     if (pathOut) *pathOut = path;
     if (uuidOut) *uuidOut = uuid;
-    BOOL correctImage = [path.lastPathComponent caseInsensitiveCompare:@"mango.dylib"] == NSOrderedSame;
     BOOL correctUUID = [uuid isEqualToString:kInstalledMangoUUID] || [uuid isEqualToString:kPackagedMangoUUID];
-    return correctImage && correctUUID;
+    return correctUUID;
 }
 
 static NSInteger MangoOrientation(void) {
