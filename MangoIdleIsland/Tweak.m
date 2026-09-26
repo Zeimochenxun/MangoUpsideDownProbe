@@ -372,7 +372,6 @@ static NSString *Eligibility(UIView *host, CGFloat *activity) {
     UIView *own = objc_getAssociatedObject(host, &BackgroundKey);
     NSUInteger count = 0;
     CGFloat elementOpacity = 0, glassOpacity = 0;
-    BOOL foundGlass = NO;
     while (todo.count && count++ < 256) {
         UIView *v = todo.lastObject; [todo removeLastObject];
         if (v == own) continue;
@@ -380,7 +379,6 @@ static NSString *Eligibility(UIView *host, CGFloat *activity) {
         // Only Island-domain Mango glass is allowed to control the idle/active
         // handoff. Other Mango glass surfaces must not suppress Idle Island.
         if (IsIslandGlass(v)) {
-            foundGlass = YES;
             if (!CGRectIsEmpty(v.bounds)) {
                 CGFloat realOpacity = EffectiveOpacity(v, host);
                 glassOpacity = MAX(glassOpacity, realOpacity);
@@ -393,7 +391,9 @@ static NSString *Eligibility(UIView *host, CGFloat *activity) {
         [todo addObjectsFromArray:v.subviews];
     }
     if (todo.count) return @"scan-limit";
-    *activity = foundGlass ? glassOpacity : elementOpacity;
+    // Activity content can precede its glass. Treat either as activity so
+    // a dormant glass never masks an already visible media element.
+    *activity = MAX(glassOpacity, elementOpacity);
     return *activity > 0.01 ? @"activity" : @"background";
 }
 
@@ -408,7 +408,7 @@ static void Update(UIView *host) {
         BOOL constructor = eligible && GlassConstructorVerified && !GlassConstructionFailed;
         BOOL mango = constructor && (OriginalIslandGlassSeen || MangoGlassSetting());
         BOOL upgrading = eligible && bg && mango && ![objc_getAssociatedObject(bg, &GlassModeKey) boolValue];
-        if (eligible && (!bg || upgrading)) {
+        if ([state isEqualToString:@"background"] && (!bg || upgrading)) {
             UIView *old = bg;
             bg = CreateBackground(mango, host.bounds);
             if (bg) {
@@ -421,7 +421,7 @@ static void Update(UIView *host) {
             }
         }
         if (bg) {
-            if (eligible) {
+            if ([state isEqualToString:@"background"]) {
                 if (bg.superview != host) [host insertSubview:bg atIndex:0];
                 if (!CGRectEqualToRect(bg.frame, host.bounds)) bg.frame = host.bounds;
                 CGFloat radius = host.bounds.size.height / 2.0;
@@ -440,7 +440,10 @@ static void Update(UIView *host) {
                 if (fabs(bg.alpha - backingOpacity) > 0.001) bg.alpha = backingOpacity;
                 if (bg.hidden) bg.hidden = NO;
             } else {
+                // A detached idle backdrop cannot participate in Mango's
+                // live activity rendering or backdrop composition.
                 if (!bg.hidden) bg.hidden = YES;
+                if ([state isEqualToString:@"activity"] && bg.superview) [bg removeFromSuperview];
                 objc_setAssociatedObject(host, &OpaqueSinceKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             }
         }
@@ -536,7 +539,7 @@ __attribute__((constructor)) static void Start(void) {
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=1.1.2-probe background=Mango-glass specular-probe=updateSpecular-readonly touch=unchanged");
+            Log(@"[SESSION] version=1.1.4-media-guard background=Mango-glass activity-detaches-idle touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");
