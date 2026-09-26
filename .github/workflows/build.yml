@@ -53,7 +53,7 @@ jobs:
       - name: Upload package, source and evidence
         uses: actions/upload-artifact@v4
         with:
-          name: MangoSplitGeometryProbe-0.3.1-RootHide
+          name: MangoSplitGeometryProbe-0.3.2-RootHide
           if-no-files-found: error
           path: |
             packages/*.deb
