@@ -1,8 +1,8 @@
-Package: com.chenxun.mangoorientationprobe
-Name: MangoOrientationProbe
-Version: 0.3.0
+Package: com.chenxun.mangosplitgeometryprobe
+Name: MangoSplitGeometryProbe
+Version: 0.3.1
 Architecture: iphoneos-arm64e
-Description: Read-only Mango 1.0-Beta7-1 orientation, split-launcher and scene geometry probe for iOS 16.5 RootHide.
+Description: World-compatible read-only Mango 1.0-Beta7-1 split-launcher and scene geometry probe for iOS 16.5 RootHide.
 Maintainer: Chen Xun
 Author: Chen Xun
 Section: Tweaks
