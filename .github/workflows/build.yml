@@ -53,7 +53,7 @@ jobs:
       - name: Upload package and evidence
         uses: actions/upload-artifact@v4
         with:
-          name: MangoSplitUpsideDownFix-0.1.0-alpha1-RootHide
+          name: MangoSplitUpsideDownFix-0.1.1-alpha2-RootHide
           if-no-files-found: error
           path: |
             packages/*.deb
