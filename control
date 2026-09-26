@@ -1,6 +1,6 @@
 Package: com.chenxun.mangosplitupsidedownfix
 Name: MangoSplitUpsideDownFix
-Version: 0.1.0-alpha1
+Version: 0.1.1-alpha2
 Architecture: iphoneos-arm64e
 Description: Rotates Mango 1.0-Beta7-1 split UI and its input surface in portrait upside-down on iOS 16.5 RootHide.
 Maintainer: Chen Xun
