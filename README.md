@@ -1,6 +1,8 @@
-# MangoSplitUpsideDownFix 0.1.0-alpha1
+# MangoSplitUpsideDownFix 0.1.1-alpha2
 
 这是基于 `Probe 2.log` 的首个设备测试版，面向 iOS 16.5、Dopamine RootHide、Mango 1.0-Beta7-1。
+
+0.1.1 修复了与只读探针并存时的身份识别失败：验证定义 Mango 视图类的原始镜像及 UUID，不再误将探针包装后的方法入口视为 Mango 自身。0.1.0 因此会在日志里写入 `[FIX-ABORT]`，没有执行任何旋转。
 
 日志确认倒竖屏（orientation=2）时，`DecoratedFloatingView` 与 `DecoratedAppSceneView` 仍使用正竖屏的 frame、center 和正向坐标基。此版本只寻找实际包含这些 Mango 分屏视图的独立全屏 `UIWindow`，在倒竖屏时对整个窗口施加 180° 变换；回到其他方向时恢复。这样保留 Mango 在子视图上的 0.8/0.85 缩放动画，并让渲染、触摸测试和手势坐标一起旋转。
 
