@@ -1,6 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <CydiaSubstrate/CydiaSubstrate.h>
+#import <substrate.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>
@@ -13,7 +13,8 @@
 
 static NSString * const kLogDirectory = @"/var/mobile/Library/Logs/MangoUpsideDownWorld";
 static NSString * const kLogPath = @"/var/mobile/Library/Logs/MangoUpsideDownWorld/Probe.log";
-static NSString * const kExpectedMangoUUID = @"67c0d7c2-4487-3fd2-9535-067745ae4b8f";
+// UUID of mango.dylib in com.go.mango 1.0-Beta7-1 supplied on 2026-09-27.
+static NSString * const kExpectedMangoUUID = @"699ea8ae-c032-386e-b62d-f92fbff2a889";
 static dispatch_queue_t gLogQueue;
 static NSString *gSessionID;
 static BOOL gInstalled;
@@ -323,6 +324,47 @@ static void LogTargetWindows(NSString *source, UIView *gestureView) {
     }
 }
 
+// Record actual Mango split geometry without touching transforms or recognizers.
+// The old aperture-oriented probe did not inspect the launcher or split scene.
+static void LogSplitView(UIView *view, NSString *source) {
+    UIWindow *window = view.window;
+    UIScreen *screen = window.screen ?: UIScreen.mainScreen;
+    CGPoint centerFixed = window ? [view.superview convertPoint:view.center
+                                              toCoordinateSpace:screen.fixedCoordinateSpace] : CGPointZero;
+    CGPoint originFixed = window ? [view convertPoint:CGPointZero
+                                    toCoordinateSpace:screen.fixedCoordinateSpace] : CGPointZero;
+    CGPoint xFixed = window ? [view convertPoint:CGPointMake(1, 0)
+                               toCoordinateSpace:screen.fixedCoordinateSpace] : CGPointZero;
+    CGPoint yFixed = window ? [view convertPoint:CGPointMake(0, 1)
+                               toCoordinateSpace:screen.fixedCoordinateSpace] : CGPointZero;
+    Log(@"[SPLIT-VIEW] source=%@ class=%@ ptr=%p window=%@ frame=%@ bounds=%@ center=%@ transform=%@ centerFixed=%@ basisX={%.3f,%.3f} basisY={%.3f,%.3f} hidden=%d alpha=%.3f chain=%@",
+        source, NSStringFromClass(view.class), view, window ? NSStringFromClass(window.class) : @"none",
+        NSStringFromCGRect(view.frame), NSStringFromCGRect(view.bounds),
+        NSStringFromCGPoint(view.center), NSStringFromCGAffineTransform(view.transform),
+        NSStringFromCGPoint(centerFixed), xFixed.x-originFixed.x, xFixed.y-originFixed.y,
+        yFixed.x-originFixed.x, yFixed.y-originFixed.y, view.hidden, view.alpha, ViewChain(view));
+}
+
+static void LogSplitSnapshot(NSString *source) {
+    if (!NSThread.isMainThread) return;
+    Class launcherClass = objc_getClass("DecoratedFloatingView");
+    Class sceneClass = objc_getClass("DecoratedAppSceneView");
+    if (!launcherClass || !sceneClass) return;
+    NSUInteger count = 0;
+    NSMutableArray<UIView *> *queue = [NSMutableArray array];
+    for (UIWindow *window in AllApplicationWindows()) [queue addObject:window];
+    // Bound a live hierarchy walk; do not retain anything after this snapshot.
+    for (NSUInteger i=0; i<queue.count && i<3000; i++) {
+        UIView *view = queue[i];
+        if ([view isKindOfClass:launcherClass] || [view isKindOfClass:sceneClass]) {
+            if (count++ < 32) LogSplitView(view, source);
+        }
+        if (queue.count < 3000) [queue addObjectsFromArray:view.subviews];
+    }
+    Log(@"[SPLIT-SUMMARY] source=%@ found=%lu inspected=%lu orientation=%ld",
+        source, (unsigned long)count, (unsigned long)MIN(queue.count, (NSUInteger)3000), (long)MangoOrientation());
+}
+
 static NSInteger (*OrigMangoOrientation)(id, SEL);
 static NSInteger HookMangoOrientation(id self, SEL _cmd) {
     NSInteger result = OrigMangoOrientation(self, _cmd);
@@ -466,6 +508,11 @@ static void HookLauncherPan(id self, SEL _cmd, UIPanGestureRecognizer *gesture) 
             translation.x, translation.y, NSStringFromCGRect(view.bounds));
     }
     OrigLauncherPan(self, _cmd, gesture);
+    if (state == UIGestureRecognizerStateEnded) {
+        LogSplitSnapshot(@"launcherPanned.ended");
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 400 * NSEC_PER_MSEC),
+                       dispatch_get_main_queue(), ^{ LogSplitSnapshot(@"launcherPanned.after400ms"); });
+    }
 }
 
 static void (*OrigLauncherPanRight)(id, SEL, UIPanGestureRecognizer *);
@@ -481,6 +528,11 @@ static void HookLauncherPanRight(id self, SEL _cmd, UIPanGestureRecognizer *gest
             translation.x, translation.y, NSStringFromCGRect(view.bounds));
     }
     OrigLauncherPanRight(self, _cmd, gesture);
+    if (state == UIGestureRecognizerStateEnded) {
+        LogSplitSnapshot(@"launcherPannedRight.ended");
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 400 * NSEC_PER_MSEC),
+                       dispatch_get_main_queue(), ^{ LogSplitSnapshot(@"launcherPannedRight.after400ms"); });
+    }
 }
 
 static BOOL InstallHook(Class cls, const char *selectorName, BOOL classMethod,
@@ -521,7 +573,7 @@ static void InstallHooksWhenReady(void) {
     }
 
     gInstalled = YES;
-    Log(@"[MANGO-IDENTITY] path=%@ uuid=%@ expectedUUID=%@ sha256-static=4679a2314e3a2f9e18d65503e5c69d67faaae81ab62b27d4d989a29b057f7ed6",
+    Log(@"[MANGO-IDENTITY] path=%@ uuid=%@ expectedUUID=%@ sha256-static=4603e13eaa5b535804ac3f1bc8d82452bb959d214d0fcaa944cef59bc9756369",
         path, uuid, kExpectedMangoUUID);
 
     InstallHook(decorated, "mango_currentInterfaceOrientation", YES, "q16@0:8", (IMP)HookMangoOrientation, (IMP *)&OrigMangoOrientation);
@@ -558,6 +610,9 @@ static void InstallHooksWhenReady(void) {
                                                   usingBlock:^(NSNotification *note) {
         LogOrientation(@"MangoInterfaceOrientationDidChange", gLastLayoutMode);
         LogTargetWindows(@"MangoInterfaceOrientationDidChange", nil);
+        LogSplitSnapshot(@"MangoInterfaceOrientationDidChange");
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 400 * NSEC_PER_MSEC),
+                       dispatch_get_main_queue(), ^{ LogSplitSnapshot(@"orientation.after400ms"); });
     }];
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidChangeStatusBarOrientationNotification
                                                       object:nil queue:[NSOperationQueue mainQueue]
@@ -567,6 +622,7 @@ static void InstallHooksWhenReady(void) {
     }];
     LogOrientation(@"hooks-installed", gLastLayoutMode);
     LogTargetWindows(@"hooks-installed", nil);
+    LogSplitSnapshot(@"hooks-installed");
 }
 
 __attribute__((constructor)) static void MangoOrientationProbeInit(void) {
