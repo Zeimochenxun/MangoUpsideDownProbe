@@ -13,8 +13,10 @@
 
 static NSString * const kLogDirectory = @"/var/mobile/Library/Logs/MangoUpsideDownWorld";
 static NSString * const kLogPath = @"/var/mobile/Library/Logs/MangoUpsideDownWorld/Probe.log";
-// UUID of mango.dylib in com.go.mango 1.0-Beta7-1 supplied on 2026-09-27.
-static NSString * const kExpectedMangoUUID = @"699ea8ae-c032-386e-b62d-f92fbff2a889";
+// The two Mango 1.0-Beta7-1 images confirmed from the supplied deb and the
+// device log. Fail closed for every other build.
+static NSString * const kPackagedMangoUUID = @"699ea8ae-c032-386e-b62d-f92fbff2a889";
+static NSString * const kInstalledMangoUUID = @"67c0d7c2-4487-3fd2-9535-067745ae4b8f";
 static dispatch_queue_t gLogQueue;
 static NSString *gSessionID;
 static BOOL gInstalled;
@@ -142,7 +144,10 @@ static BOOL IMPBelongsToExpectedMango(IMP imp, NSString **pathOut, NSString **uu
     if (pathOut) *pathOut = path;
     if (uuidOut) *uuidOut = uuid;
     BOOL isMango = [path.lastPathComponent caseInsensitiveCompare:@"mango.dylib"] == NSOrderedSame;
-    return isMango && [uuid.lowercaseString isEqualToString:kExpectedMangoUUID];
+    NSString *lower = uuid.lowercaseString;
+    BOOL knownBeta7 = [lower isEqualToString:kPackagedMangoUUID] ||
+                      [lower isEqualToString:kInstalledMangoUUID];
+    return isMango && knownBeta7;
 }
 
 static BOOL VerifyMethod(Class cls, SEL sel, BOOL classMethod, const char *expectedTypes,
@@ -567,14 +572,14 @@ static void InstallHooksWhenReady(void) {
     NSString *path = nil;
     NSString *uuid = nil;
     if (!identity || !IMPBelongsToExpectedMango(method_getImplementation(identity), &path, &uuid)) {
-        Log(@"[PROBE-ABORT] reason=Mango identity mismatch path=%@ uuid=%@ expectedUUID=%@",
-            path ?: @"unknown", uuid ?: @"unknown", kExpectedMangoUUID);
+        Log(@"[PROBE-ABORT] reason=Mango identity mismatch path=%@ uuid=%@ acceptedUUIDs=%@,%@",
+            path ?: @"unknown", uuid ?: @"unknown", kInstalledMangoUUID, kPackagedMangoUUID);
         return;
     }
 
     gInstalled = YES;
-    Log(@"[MANGO-IDENTITY] path=%@ uuid=%@ expectedUUID=%@ sha256-static=4603e13eaa5b535804ac3f1bc8d82452bb959d214d0fcaa944cef59bc9756369",
-        path, uuid, kExpectedMangoUUID);
+    Log(@"[MANGO-IDENTITY] path=%@ uuid=%@ acceptedUUIDs=%@,%@",
+        path, uuid, kInstalledMangoUUID, kPackagedMangoUUID);
 
     InstallHook(decorated, "mango_currentInterfaceOrientation", YES, "q16@0:8", (IMP)HookMangoOrientation, (IMP *)&OrigMangoOrientation);
     InstallHook(pill, "setLayoutMode:reason:", NO, "v32@0:8q16q24", (IMP)HookSetLayoutMode, (IMP *)&OrigSetLayoutMode);
@@ -641,7 +646,7 @@ __attribute__((constructor)) static void MangoSplitGeometryProbeInit(void) {
             [[NSFileManager defaultManager] moveItemAtPath:kLogPath toPath:previous error:nil];
         }
         AppendLine(@"");
-        Log(@"[SESSION] start pid=%d version=0.2.0 behavior=read-only rootWindows=UIRootSceneWindow,FBRootWindow log=%@ mkdirError=%@",
+        Log(@"[SESSION] start pid=%d version=0.3.2 behavior=read-only splitGeometry=1 rootWindows=UIRootSceneWindow,FBRootWindow log=%@ mkdirError=%@",
             getpid(), kLogPath, error ?: @"none");
         dispatch_async(dispatch_get_main_queue(), ^{ InstallHooksWhenReady(); });
     }
