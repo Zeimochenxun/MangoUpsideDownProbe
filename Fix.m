@@ -173,7 +173,10 @@ static void SetWindowTransform(UIWindow *window, CGAffineTransform transform, NS
 }
 
 static void Reconcile(NSString *source) {
-    NSAssert(NSThread.isMainThread, @"main thread required");
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{ Reconcile(source); });
+        return;
+    }
     if (!gReady) return;
     DiscoverMangoWindows();
     NSInteger orientation = MangoOrientation();
