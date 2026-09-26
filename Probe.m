@@ -625,9 +625,9 @@ static void InstallHooksWhenReady(void) {
     LogSplitSnapshot(@"hooks-installed");
 }
 
-__attribute__((constructor)) static void MangoOrientationProbeInit(void) {
+__attribute__((constructor)) static void MangoSplitGeometryProbeInit(void) {
     @autoreleasepool {
-        gLogQueue = dispatch_queue_create("com.chenxun.mangoorientationprobe.log", DISPATCH_QUEUE_SERIAL);
+        gLogQueue = dispatch_queue_create("com.chenxun.mangosplitgeometryprobe.log", DISPATCH_QUEUE_SERIAL);
         gSessionID = NSUUID.UUID.UUIDString;
         NSError *error = nil;
         [[NSFileManager defaultManager] createDirectoryAtPath:kLogDirectory
