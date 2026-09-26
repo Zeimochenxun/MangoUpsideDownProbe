@@ -1,6 +1,6 @@
 Package: com.chenxun.mangosplitgeometryprobe
 Name: MangoSplitGeometryProbe
-Version: 0.3.1
+Version: 0.3.2
 Architecture: iphoneos-arm64e
 Description: World-compatible read-only Mango 1.0-Beta7-1 split-launcher and scene geometry probe for iOS 16.5 RootHide.
 Maintainer: Chen Xun
