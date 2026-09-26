@@ -1,4 +1,4 @@
-name: Build MangoOrientationProbe (RootHide)
+name: Build MangoSplitGeometryProbe (RootHide)
 
 on:
   workflow_dispatch:
@@ -42,7 +42,7 @@ jobs:
           make package FINALPACKAGE=1 2>&1 | tee build.log
           if grep -qi 'incompatible arm64e ABI' build.log; then exit 1; fi
           python3 tools/check_package.py packages/*.deb
-          dylib="$(find .theos -name MangoOrientationProbe.dylib -type f | head -n 1)"
+          dylib="$(find .theos -name MangoSplitGeometryProbe.dylib -type f | head -n 1)"
           test -n "$dylib"
           xcrun lipo -info "$dylib" | tee architecture.txt
           xcrun otool -L "$dylib" | tee dependencies.txt
@@ -53,14 +53,14 @@ jobs:
       - name: Upload package, source and evidence
         uses: actions/upload-artifact@v4
         with:
-          name: MangoOrientationProbe-0.3.0-RootHide
+          name: MangoSplitGeometryProbe-0.3.1-RootHide
           if-no-files-found: error
           path: |
             packages/*.deb
             build-info/*
             Makefile
             control
-            MangoOrientationProbe.plist
+            MangoSplitGeometryProbe.plist
             Probe.m
             README.md
             STATIC_FINDINGS_ZH.md
