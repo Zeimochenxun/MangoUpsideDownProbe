@@ -1,4 +1,4 @@
-# MangoSplitGeometryProbe 0.3.1
+# MangoSplitGeometryProbe 0.3.2
 
 ## Mango 1.0-Beta7-1 分屏几何诊断
 This branch is a **read-only diagnostic build**, scoped to the attached
@@ -8,6 +8,8 @@ This branch is a **read-only diagnostic build**, scoped to the attached
 It does **not** reverse the split interface yet. The earlier 0.2.0 binary
 identity check would reject this Mango build, and applying a blind 180°
 transform to all SpringBoard windows could invert touch and other overlays.
+0.3.2 also accepts the device-confirmed Beta7 image UUID
+`67c0d7c2-4487-3fd2-9535-067745ae4b8f`; every other Mango image still fails closed.
 
 The new `[SPLIT-VIEW]` records describe actual `DecoratedFloatingView`
 (launcher) and `DecoratedAppSceneView` (split scene) geometry in the screen's
