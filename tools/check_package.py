@@ -53,14 +53,14 @@ def check(path):
     control = tar_files(next(v for k,v in members.items() if k.startswith("control.tar")))
     data = tar_files(next(v for k,v in members.items() if k.startswith("data.tar")))
     fields = dict(line.split(": ",1) for line in control["control"].decode().splitlines() if ": " in line)
-    require(fields.get("Package") == "com.chenxun.mangoorientationprobe", "wrong package id")
+    require(fields.get("Package") == "com.chenxun.mangosplitgeometryprobe", "wrong package id")
     require(fields.get("Architecture") == "iphoneos-arm64e", "wrong package architecture")
     require(set(control).issubset({"control","md5sums"}), "unexpected maintainer script")
     by_name = {Path(k).name:v for k,v in data.items()}
-    require(set(by_name) == {"MangoOrientationProbe.dylib","MangoOrientationProbe.plist"}, "unexpected payload")
+    require(set(by_name) == {"MangoSplitGeometryProbe.dylib","MangoSplitGeometryProbe.plist"}, "unexpected payload")
     expected = {"Filter":{"Bundles":["com.apple.springboard"]}}
-    require(plistlib.loads(by_name["MangoOrientationProbe.plist"]) == expected, "wrong injection filter")
-    check_macho(by_name["MangoOrientationProbe.dylib"])
+    require(plistlib.loads(by_name["MangoSplitGeometryProbe.plist"]) == expected, "wrong injection filter")
+    check_macho(by_name["MangoSplitGeometryProbe.dylib"])
     print(f"PASS {path.name}: arm64e RootHide, SpringBoard-only, no package scripts")
 
 for name in sys.argv[1:]: check(Path(name))
