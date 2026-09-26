@@ -1,4 +1,4 @@
-# MangoOrientationProbe 0.3.0
+# MangoSplitGeometryProbe 0.3.1
 
 ## Mango 1.0-Beta7-1 分屏几何诊断
 This branch is a **read-only diagnostic build**, scoped to the attached
@@ -45,7 +45,7 @@ alignment on the device.
 - UpsideDowned
 - 当前能让灵动岛视觉正常的 MangoUpsideDownWorld
 
-建议暂时卸载旧的宽泛调试包 `MangoUpsideDownProbe`，以免日志和 Hook 链混在一起。本包 ID 是 `com.chenxun.mangoorientationprobe`，不会覆盖 Mango 或 MangoUpsideDownWorld。
+建议暂时卸载旧的宽泛调试包 `MangoUpsideDownProbe`，以免日志和 Hook 链混在一起。本兼容包使用全新的 ID `com.chenxun.mangosplitgeometryprobe` 和独立载荷文件名，避免被已安装的 MangoUpsideDownWorld 对旧探针身份的冲突规则匹配。
 
 ## 四方向测试
 
@@ -96,8 +96,8 @@ Probe 不会 Hook 这两个类的未知私有 selector；先从日志确认真�
 若发生 SpringBoard 循环崩溃：
 
 1. 进入 Dopamine/RootHide 的禁用 tweak 或安全模式。
-2. 用包管理器卸载 `com.chenxun.mangoorientationprobe`。
-3. 或通过 SSH 执行 `dpkg -r com.chenxun.mangoorientationprobe`，然后 `sbreload`。
+2. 用包管理器卸载 `com.chenxun.mangosplitgeometryprobe`。
+3. 或通过 SSH 执行 `dpkg -r com.chenxun.mangosplitgeometryprobe`，然后 `sbreload`。
 4. 不要删除或替换 Mango 原始 dylib。
 
 本 Probe 检查目标 Mango Mach-O UUID，只有 UUID 为 `67c0d7c2-4487-3fd2-9535-067745ae4b8f` 且方法类型编码完全匹配时才安装 Mango Hook；否则只记录 `[PROBE-ABORT]` / `[HOOK-REFUSED]`。
