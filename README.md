@@ -1,4 +1,33 @@
-# MangoOrientationProbe 0.2.0
+# MangoOrientationProbe 0.3.0
+
+## Mango 1.0-Beta7-1 分屏几何诊断
+This branch is a **read-only diagnostic build**, scoped to the attached
+`com.go.mango_1.0-Beta7-1_iphoneos-arm64e` binary (Mach-O UUID
+`699ea8ae-c032-386e-b62d-f92fbff2a889`, SHA-256
+`4603e13eaa5b535804ac3f1bc8d82452bb959d214d0fcaa944cef59bc9756369`).
+It does **not** reverse the split interface yet. The earlier 0.2.0 binary
+identity check would reject this Mango build, and applying a blind 180°
+transform to all SpringBoard windows could invert touch and other overlays.
+
+The new `[SPLIT-VIEW]` records describe actual `DecoratedFloatingView`
+(launcher) and `DecoratedAppSceneView` (split scene) geometry in the screen's
+fixed coordinate space. They include the center and two basis vectors, plus
+the view's window and ancestry. `[SPLIT-SUMMARY]` reports whether those
+views were present. The launcher pan hooks take snapshots at gesture end
+and 400 ms later; the orientation notification does the same. All hooks
+continue to pass the original arguments and return values through unchanged.
+
+On the iPhone, capture a normal portrait baseline, an upside-down portrait
+with the split launcher and an active split scene, and both landscape
+orientations. Perform a split activation on each side in each orientation.
+Export `/var/mobile/Library/Logs/MangoUpsideDownWorld/Probe.log` after the
+session. The `[SPLIT-ACTIVATION]`, `[SPLIT-VIEW]`, `[SPLIT-SUMMARY]` and
+`[ROOT-WINDOW-GESTURE]` lines identify which coordinate layer needs a
+correction. A successful package build alone cannot verify visual or touch
+alignment on the device.
+
+## 旧版探针说明
+
 
 这是面向 iOS 16.5、Dopamine RootHide、SpringBoard 的**只读定向 Probe**。它不修改 Mango 的方向值、布局、手势、触摸或视图变换。除记录实际 `mango.dylib` 已确认存在的入口外，0.2.0 还把 `UIRootSceneWindow` 与 `FBRootWindow` 纳入运行时只读分析。
 
