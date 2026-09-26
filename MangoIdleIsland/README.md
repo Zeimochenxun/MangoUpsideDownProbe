@@ -118,3 +118,7 @@ RootHide Theos + iPhoneOS16.5 SDK + Apple Clang：`make package FINALPACKAGE=1`�
 构建约束：`ARCHS=arm64e`、`THEOS_PACKAGE_SCHEME=roothide`、SpringBoard-only。CI 会运行 `tools/check_package.py`、检查 arm64e Mach-O、依赖并上传 `MangoIdleIsland-1.1.0-RootHide` artifact。
 
 静态验证和 CI 成功不等于完成实机验收；Active adaptive tint、各 SystemAperture 状态的实际 refresh、视觉交接仍需目标 iPhone 13 mini 验证。
+
+## 1.1.4 媒体活动保护（实机待验证）
+
+媒体内容视图和 Mango 原有 Island 玻璃任一可见即判断活动已开始。活动期间把本插件的空闲背景隐藏并移出容器；活动结束后才重新挂回，避免空闲玻璃参与音乐 Live Activity 的 backdrop 合成。此版保留设置及 Mango 原有活动玻璃实例，不改音乐业务状态。若播放仍无法进入活动态，先用 `DISABLED` 标记隔离本插件，再提交新的 Status.log；不要把静态推断当成已证实的根因。
