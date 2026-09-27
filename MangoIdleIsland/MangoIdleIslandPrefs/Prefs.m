@@ -10,6 +10,7 @@ static CFStringRef const Domain = CFSTR("com.go.mangoosprefs");
 // publishes go.mangoos/ParametersReloaded to existing live filter instances.
 static CFStringRef const RenderReload = CFSTR("com.go.mangoosprefs/Reload");
 static NSString * const TintUIKey = @"MangoIdleIsland.TintAlpha";
+static NSString * const AdaptationKey = @"MangoIslandAdaptiveColor.Adaptation";
 
 @interface MangoIdlePrefsController : PSListController
 - (id)readValue:(PSSpecifier *)specifier;
@@ -110,6 +111,10 @@ static void PostReload(void) {
                      item:[self item:@"色调强度" key:TintUIKey cell:PSSliderCell low:@0 high:@1]];
 
     [self addSectionNamed:nil
+              description:@"自适应程度：控制岛体颜色跟随实际背景亮度的幅度。0 为固定中性色调，1 为完整自适应；它与色调强度分别控制“跟随多少”和“混入多少”。需要 MangoIslandAdaptiveColor 0.1.4 或更新版本。"
+                     item:[self item:@"自适应程度" key:AdaptationKey cell:PSSliderCell low:@0 high:@1]];
+
+    [self addSectionNamed:nil
               description:@"边缘光：开启或关闭 Island 边缘高光。补丁按 go.mangoos.island 判断实例，静止态与 Mango 活动态共用同一设置；仍受 Mango 原版全局边缘光条件约束。"
                      item:[self item:@"边缘光" key:@"Island.SpecularEnabled" cell:PSSwitchCell low:nil high:nil]];
 
@@ -134,6 +139,7 @@ static id DefaultValueForKey(NSString *key) {
     if ([key isEqualToString:@"Island.SpecularEnabled"]) return @NO;
     if ([key isEqualToString:@"Island.DispersionEnabled"]) return @YES;
     if ([key isEqualToString:@"Global.DispersionStrength"]) return @5;
+    if ([key isEqualToString:AdaptationKey]) return @1.0;
     return nil;
 }
 
@@ -179,3 +185,4 @@ static id DefaultValueForKey(NSString *key) {
 }
 
 @end
+

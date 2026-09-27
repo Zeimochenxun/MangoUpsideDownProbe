@@ -7,6 +7,7 @@
 #import <fcntl.h>
 #import <unistd.h>
 #import <string.h>
+#import <math.h>
 
 // Beta7-1 MangoOSRendering uses CFPreferencesCopyMultiple for group-specific
 // tint configuration and compiles an embedded Metal shader at runtime.
@@ -19,16 +20,47 @@ static NSString * const LogDir = @"/var/mobile/Library/Logs/MangoIslandAdaptiveC
 static CFStringRef const MangoDomain = CFSTR("com.go.mangoosprefs");
 static CFStringRef const LightKey = CFSTR("Island.LightTintColor");
 static CFStringRef const DarkKey = CFSTR("Island.DarkTintColor");
+static CFStringRef const AdaptationKey = CFSTR("MangoIslandAdaptiveColor.Adaptation");
 
-// On failure these are very light near-black / near-white Mango tints. The alpha
-// is a deliberately uncommon Island marker; the shader additionally requires
-// the exact RGB sentinel to prevent tint changes to unrelated glass groups.
-static CFStringRef const LightMarker = CFSTR("#FEFEFD1A");
-static CFStringRef const DarkMarker = CFSTR("#0101021A");
+// Near-white / near-black RGB values identify Island inside Mango's shader.
+// The alpha is copied from the user's original RGBA preference so the existing
+// Tint Strength control remains authoritative.
 
 static CFDictionaryRef (*OriginalCopyMultiple)(CFArrayRef, CFStringRef, CFStringRef, CFStringRef);
 static id<MTLLibrary> (*OriginalNewLibrary)(id, SEL, NSString *, MTLCompileOptions *, NSError **);
 static BOOL ShaderSeen, ShaderPatched;
+
+static NSString *AlphaSuffix(CFDictionaryRef values, CFStringRef key) {
+    if (!values) return @"1A";
+    CFTypeRef raw = CFDictionaryGetValue(values, key);
+    if (!raw || CFGetTypeID(raw) != CFStringGetTypeID()) return @"1A";
+    NSString *color = (__bridge NSString *)raw;
+    if (color.length != 9 || ![color hasPrefix:@"#"]) return @"1A";
+    NSString *hex = [color substringFromIndex:1];
+    NSCharacterSet *invalid = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789ABCDEFabcdef"] invertedSet];
+    if ([hex rangeOfCharacterFromSet:invalid].location != NSNotFound) return @"1A";
+    return [[hex substringFromIndex:6] uppercaseString];
+}
+
+static double AdaptationAmount(CFStringRef app, CFStringRef user, CFStringRef host) {
+    const void *rawKeys[] = { AdaptationKey };
+    CFArrayRef keys = CFArrayCreate(kCFAllocatorDefault, rawKeys, 1, &kCFTypeArrayCallBacks);
+    if (!keys) return 1.0;
+    CFDictionaryRef values = OriginalCopyMultiple(keys, app, user, host);
+    CFRelease(keys);
+    double amount = 1.0;
+    if (values) {
+        CFTypeRef raw = CFDictionaryGetValue(values, AdaptationKey);
+        if (raw && CFGetTypeID(raw) == CFNumberGetTypeID()) {
+            double candidate = 1.0;
+            if (CFNumberGetValue((CFNumberRef)raw, kCFNumberDoubleType, &candidate) && isfinite(candidate)) {
+                amount = fmin(1.0, fmax(0.0, candidate));
+            }
+        }
+        CFRelease(values);
+    }
+    return amount;
+}
 
 static void LogLine(NSString *line) {
     const char *parent = "/var/mobile/Library/Logs";
@@ -58,8 +90,18 @@ static CFDictionaryRef CopyMultiple(CFArrayRef keys, CFStringRef app, CFStringRe
                                              : CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
                                                 &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     if (!edited) return original;
-    if (light) CFDictionarySetValue(edited, LightKey, LightMarker);
-    if (dark) CFDictionarySetValue(edited, DarkKey, DarkMarker);
+    unsigned adaptationLevel = (unsigned)lround(AdaptationAmount(app, user, host) * 14.0);
+    if (light) {
+        // Red 0xF0..0xFE carries 15 adaptation levels while the other two
+        // channels keep this a safe near-white fallback if shader patching fails.
+        NSString *marker = [NSString stringWithFormat:@"#%02XFEFD%@", 0xF0 + adaptationLevel, AlphaSuffix(original, LightKey)];
+        CFDictionarySetValue(edited, LightKey, (__bridge CFStringRef)marker);
+    }
+    if (dark) {
+        // Red 0x01..0x0F carries the same value in the near-black marker.
+        NSString *marker = [NSString stringWithFormat:@"#%02X0102%@", 0x01 + adaptationLevel, AlphaSuffix(original, DarkKey)];
+        CFDictionarySetValue(edited, DarkKey, (__bridge CFStringRef)marker);
+    }
     if (original) CFRelease(original);
     LogLine(@"[ISLAND] tint-marker supplied to Mango group configuration");
     return edited;
@@ -71,24 +113,27 @@ static NSString *const PixelEntry = @"float4 mangoGlassPixel(";
 static NSString *const AdaptiveFunction =
 @"float3 mangoIslandAdaptiveColor(float3 background, float4 tint)\n"
  @"{\n"
- @"    // 0x1A alpha plus either near-white or near-black RGB identifies Island.\n"
- @"    bool markerAlpha = abs(tint.a - (26.0 / 255.0)) < 0.0008;\n"
- @"    bool markerLight = abs(tint.r - (254.0 / 255.0)) < 0.0008 &&\n"
+ @"    // Sentinel RGB identifies Island; alpha carries the user's strength.\n"
+ @"    float redByte = tint.r * 255.0;\n"
+ @"    bool markerLight = redByte >= 239.5 && redByte <= 254.5 &&\n"
  @"                       abs(tint.g - (254.0 / 255.0)) < 0.0008 &&\n"
  @"                       abs(tint.b - (253.0 / 255.0)) < 0.0008;\n"
- @"    bool markerDark = abs(tint.r - (1.0 / 255.0)) < 0.0008 &&\n"
+ @"    bool markerDark = redByte >= 0.5 && redByte <= 15.5 &&\n"
  @"                      abs(tint.g - (1.0 / 255.0)) < 0.0008 &&\n"
  @"                      abs(tint.b - (2.0 / 255.0)) < 0.0008;\n"
- @"    if (markerAlpha && (markerLight || markerDark)) {\n"
+ @"    if (markerLight || markerDark) {\n"
+ @"        float adaptation = markerLight ? clamp((redByte - 240.0) / 14.0, 0.0, 1.0)\n"
+ @"                                       : clamp((redByte - 1.0) / 14.0, 0.0, 1.0);\n"
  @"        float luminance = dot(background, float3(0.2126, 0.7152, 0.0722));\n"
  @"        // A broad response avoids a visible threshold around middle gray.\n"
- @"        float bright = smoothstep(0.06, 0.72, luminance);\n"
- @"        // The desired neutral level rises monotonically with the backdrop:\n"
- @"        // dark scenes get a restrained lift and bright scenes are darkened.\n"
- @"        float neutral = mix(0.14, 0.42, bright);\n"
- @"        // Preserve 62 percent of backdrop color. The compressed remainder\n"
- @"        // damps moving texture/video noise without inverting the luma curve.\n"
- @"        return mix(float3(neutral), background, 0.62);\n"
+ @"        float bright = smoothstep(0.10, 0.85, luminance);\n"
+ @"        // Lift dark backdrops slightly and tint bright backdrops near-black.\n"
+ @"        float adaptiveTarget = mix(0.18, 0.025, bright);\n"
+ @"        float target = mix(0.10, adaptiveTarget, adaptation);\n"
+ @"        // Map the full user slider to a glass-safe 0..42 percent mix.\n"
+ @"        float userStrength = smoothstep(0.0, 1.0, clamp(tint.a, 0.0, 1.0));\n"
+ @"        float strength = 0.42 * userStrength;\n"
+ @"        return mix(background, float3(target), strength);\n"
  @"    }\n"
  @"    return mix(background, tint.rgb, tint.a);\n"
  @"}\n\n";
@@ -142,7 +187,7 @@ __attribute__((constructor)) static void Start(void) {
         if (![process isEqualToString:@"backboardd"] && ![bundle isEqualToString:@"com.apple.backboardd"]) return;
         NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
-        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.3 cohesive-color process=%@ bundle=%@", process ?: @"(nil)", bundle ?: @"(nil)"]);
+        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.4 strength-aware-color process=%@ bundle=%@", process ?: @"(nil)", bundle ?: @"(nil)"]);
 
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
         Class cls = device ? object_getClass(device) : Nil;
@@ -165,7 +210,7 @@ __attribute__((constructor)) static void Start(void) {
         // MangoOSRendering imports this exact CF function. We only alter its
         // Island keys in its own domain, without modifying stored preferences.
         MSHookFunction((void *)CFPreferencesCopyMultiple, (void *)CopyMultiple, (void **)&OriginalCopyMultiple);
-        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.3 MetalClass=%@ shaderSeen=%d patched=%d",
+        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.4 MetalClass=%@ shaderSeen=%d patched=%d",
                  NSStringFromClass(cls), ShaderSeen, ShaderPatched]);
     }
 }

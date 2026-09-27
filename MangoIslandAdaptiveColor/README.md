@@ -1,14 +1,16 @@
-# MangoIslandAdaptiveColor 0.1.3（动画连贯性实验版）
+# MangoIslandAdaptiveColor 0.1.4（强度与自适应修复版）
 
-目标：让 Mango 的 `go.mangoos.island` 玻璃在空闲和活动状态下形成连贯的一体化过渡，并按岛下方**实际背景像素的亮度**稳定改变岛体混色。它配合 MangoIdleIsland 1.1.6，不修改 Mango 原版文件。
+目标：让 Mango 的 `go.mangoos.island` 玻璃在空闲和活动状态下形成连贯的一体化过渡，并按岛下方**实际背景像素的亮度**稳定改变岛体混色。它配合 MangoIdleIsland 1.1.7，不修改 Mango 原版文件。
 
 ## 实现范围
 
 - 仅注入 `com.apple.backboardd`；安装后自动启用，无须手动创建启用文件。
 - Mango 读取 `com.go.mangoosprefs` 的 Island 色调参数时，为 `Island.LightTintColor` 和 `Island.DarkTintColor` 提供临时标记。不会写回或覆盖用户设置。
 - 仅对当前 Beta7-1 中出现的 Metal 源码做精确字符串校验；替换平面和曲面两处 `mix`。未带 Island 标记的其他玻璃仍执行原始混色。
-- 色调输出改成全区间单调曲线：暗背景只做克制提亮，亮背景柔和压暗，中灰区不再出现背景越亮、岛体反而突然变暗的拐点。输出保留 62% 的背景颜色，压缩快速滚动、视频和细纹理带来的亮度扰动。
-- MangoIdleIsland 1.1.6 读取活动层的 presentation layer 透明度，以 60 fps 驱动空闲玻璃与活动玻璃的交叉过渡；空闲玻璃保持在同一 host 底层，不再在活动透明度刚超过 1% 时立即移除和重新插入。
+- 0.1.4 保留用户在 `Island.LightTintColor` / `Island.DarkTintColor` 中设置的 alpha，并将完整 0–1 滑块映射到 0–42% 的安全混色范围；色调强度重新参与最终渲染，最大值仍至少保留 58% 背景。
+- 新增独立的“自适应程度”参数：0 使用固定中性色调，1 使用完整亮度响应，中间值连续插值。参数量化为 15 级并编码在近黑／近白标记的低幅 RGB 变化中；即使 shader 回退，标记仍保持安全的近黑或近白颜色。
+- 自适应色调使用更宽的 10%–85% 亮度响应区间：暗背景获得轻微提亮，亮背景混入近黑色。组合后的最终亮度仍保持单调，减少中灰拐点及动态背景闪烁。
+- MangoIdleIsland 1.1.7 读取活动层的 presentation layer 透明度，以 60 fps 驱动空闲玻璃与活动玻璃的交叉过渡；空闲玻璃保持在同一 host 底层，不再在活动透明度刚超过 1% 时立即移除和重新插入。
 - 如果动态 Metal 编译失败，立即再用原始源码编译；日志记录原因。
 - 延续 0.1.2 的 `backboardd` 进程识别和低 alpha 临时标记；修改后的 shader 编译失败时仍自动回退原始源码。
 

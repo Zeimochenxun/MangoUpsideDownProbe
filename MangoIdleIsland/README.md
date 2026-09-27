@@ -1,4 +1,4 @@
-# MangoIdleIsland 1.1.6
+# MangoIdleIsland 1.1.7
 
 适用环境：iPhone 13 mini、iOS 16.5.0、Dopamine RootHide、arm64e、SpringBoard、Mango 约 1.0-Beta7-1。
 
@@ -92,7 +92,7 @@ Beta7-1 中可见 `lg_updateTint`、`traitCollectionDidChange:`、`userInterface
 
 ## 实机验收
 
-安装 1.1.6、Respring，等待插件初始化后依次测试：
+安装 1.1.7、Respring，等待插件初始化后依次测试：
 
 1. 无活动时调整“色调通透”，Idle Island glass 应变化。
 2. 触发通知或 Live Activity，再调同一项，Active Mango glass 应变化。
@@ -132,4 +132,8 @@ Beta7-1 的 mangoos.dylib 在创建活动 `MGLiveBackdropView`（`Island` / `go.
 空闲玻璃不再在活动透明度刚超过 1% 时立即隐藏和移出层级。过渡期间读取活动内容及活动玻璃 presentation layer 的实际屏幕透明度：活动覆盖度达到 55% 后，底层空闲玻璃才开始柔和退出，并在 98% 时完成交接；活动收起时沿同一路径反向恢复。空闲玻璃始终保持在同一 host 的最底层，透明度为零时也不反复移除和插回，从而减少岛体跳色、边缘高光断开及双层闪现。
 
 `background` / `activity` 状态加入 0.5%～2% 回差，只用于稳定状态记录和生命周期判断；实际视觉交接连续依赖透明度，不会在阈值处硬切。透明度计算不再重复相乘 UIView alpha 与同一 CALayer opacity，也不再用模型值提前截断正在进行的淡出动画。
+
+## 1.1.7 自适应程度
+
+设置页新增 0–1 的“自适应程度”。0 使用固定中性色调，1 完整跟随背景亮度，中间值连续插值。它与“色调强度”分开：自适应程度决定颜色响应背景的幅度，色调强度决定该颜色最终混入玻璃的比例。此选项需要 MangoIslandAdaptiveColor 0.1.4 或更新版本。
 

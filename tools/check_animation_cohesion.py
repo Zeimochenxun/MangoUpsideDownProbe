@@ -12,10 +12,12 @@ def smoothstep(low: float, high: float, value: float) -> float:
     return t * t * (3.0 - 2.0 * t)
 
 
-def adaptive_output(luminance: float) -> float:
-    bright = smoothstep(0.06, 0.72, luminance)
-    neutral = 0.14 + (0.42 - 0.14) * bright
-    return neutral * 0.38 + luminance * 0.62
+def adaptive_output(luminance: float, slider: float, adaptation: float) -> float:
+    bright = smoothstep(0.10, 0.85, luminance)
+    adaptive_target = 0.18 + (0.025 - 0.18) * bright
+    target = 0.10 + (adaptive_target - 0.10) * adaptation
+    strength = 0.42 * smoothstep(0.0, 1.0, slider)
+    return luminance * (1.0 - strength) + target * strength
 
 
 def idle_opacity(activity: float) -> float:
@@ -31,15 +33,22 @@ def assert_monotonic(values: list[float], direction: str) -> None:
 
 
 samples = [index / 1000.0 for index in range(1001)]
-colors = [adaptive_output(value) for value in samples]
 handoff = [idle_opacity(value) for value in samples]
 
-assert_monotonic(colors, "up")
+for adaptation in (0.0, 0.25, 0.5, 0.75, 1.0):
+    for slider in (0.0, 0.25, 0.5, 0.75, 1.0):
+        colors = [adaptive_output(value, slider, adaptation) for value in samples]
+        assert_monotonic(colors, "up")
+        assert max(abs(b - a) for a, b in zip(colors, colors[1:])) < 0.002
+
+assert adaptive_output(0.0, 0.0, 1.0) == 0.0
+assert adaptive_output(1.0, 0.0, 1.0) == 1.0
+assert 0.075 < adaptive_output(0.0, 1.0, 1.0) < 0.076
+assert 0.590 < adaptive_output(1.0, 1.0, 1.0) < 0.591
+assert adaptive_output(0.5, 0.25, 1.0) != adaptive_output(0.5, 0.75, 1.0)
+assert adaptive_output(0.0, 1.0, 0.0) != adaptive_output(0.0, 1.0, 1.0)
 assert_monotonic(handoff, "down")
-assert 0.05 < colors[0] < 0.06
-assert 0.77 < colors[-1] < 0.79
 assert handoff[0] == 1.0 and handoff[-1] == 0.0
-assert max(abs(b - a) for a, b in zip(colors, colors[1:])) < 0.002
 assert max(abs(b - a) for a, b in zip(handoff, handoff[1:])) < 0.004
 
 idle_source = (ROOT / "MangoIdleIsland" / "Tweak.m").read_text(encoding="utf-8")
@@ -48,8 +57,11 @@ assert "presentation ? presentation.opacity : p.alpha" in idle_source
 assert "SmoothStep(0.55, 0.98, activity)" in idle_source
 assert "if (eligible && (!bg || upgrading))" in idle_source
 assert "preferredFramesPerSecond = 60" in idle_source
-assert "smoothstep(0.06, 0.72, luminance)" in color_source
-assert "return mix(float3(neutral), background, 0.62)" in color_source
+assert "AlphaSuffix(original, LightKey)" in color_source
+assert "AlphaSuffix(original, DarkKey)" in color_source
+assert "smoothstep(0.10, 0.85, luminance)" in color_source
+assert "float strength = 0.42 * userStrength" in color_source
+assert "float target = mix(0.10, adaptiveTarget, adaptation)" in color_source
 
-print("PASS: adaptive luma is monotonic; Idle/Active handoff is continuous and monotonic")
+print("PASS: user tint strength is preserved; adaptive luma and Island handoff are monotonic")
 
