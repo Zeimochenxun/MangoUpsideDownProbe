@@ -11,12 +11,11 @@
 // Beta7-1 MangoOSRendering uses CFPreferencesCopyMultiple for group-specific
 // tint configuration and compiles an embedded Metal shader at runtime.
 // This isolated tweak never touches the supplied Mango binaries on disk.
-// Disabled by default. It changes only the pair of Island tint values passed
+// Enabled on installation. It changes only the pair of Island tint values passed
 // to Mango's preference loader, and the two known mix operations in the exact
 // source of Mango's own shader. All other groups keep their original shader.
 
-static NSString * const EnabledPath = @"/var/mobile/Library/Preferences/com.chenxun.mangoislandadaptivecolor.enable";
-static NSString * const LogPath = @"/var/mobile/Library/Logs/MangoIslandAdaptiveColor.log";
+static NSString * const LogDir = @"/var/mobile/Library/Logs/MangoIslandAdaptiveColor";
 static CFStringRef const MangoDomain = CFSTR("com.go.mangoosprefs");
 static CFStringRef const LightKey = CFSTR("Island.LightTintColor");
 static CFStringRef const DarkKey = CFSTR("Island.DarkTintColor");
@@ -29,12 +28,19 @@ static CFStringRef const DarkMarker = CFSTR("#0101025D");
 
 static CFDictionaryRef (*OriginalCopyMultiple)(CFArrayRef, CFStringRef, CFStringRef, CFStringRef);
 static id<MTLLibrary> (*OriginalNewLibrary)(id, SEL, NSString *, MTLCompileOptions *, NSError **);
-static BOOL Enabled, ShaderSeen, ShaderPatched;
+static BOOL ShaderSeen, ShaderPatched;
 
 static void LogLine(NSString *line) {
-    int fd = open(LogPath.fileSystemRepresentation, O_WRONLY|O_CREAT|O_APPEND|O_NOFOLLOW, 0600);
-    if (fd < 0) return;
+    const char *parent = "/var/mobile/Library/Logs";
+    const char *directory = LogDir.fileSystemRepresentation;
     struct stat st;
+    if (mkdir(parent, 0755) && lstat(parent, &st)) return;
+    if (lstat(parent, &st) || !S_ISDIR(st.st_mode)) return;
+    if (mkdir(directory, 0700) && lstat(directory, &st)) return;
+    if (lstat(directory, &st) || !S_ISDIR(st.st_mode) || st.st_uid != getuid()) return;
+    NSString *path = [LogDir stringByAppendingPathComponent:@"Status.log"];
+    int fd = open(path.fileSystemRepresentation, O_WRONLY|O_CREAT|O_APPEND|O_NOFOLLOW, 0600);
+    if (fd < 0) return;
     if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_uid != getuid() || st.st_nlink != 1) { close(fd); return; }
     if (st.st_size > 65536) (void)ftruncate(fd, 0);
     NSData *data = [[NSString stringWithFormat:@"%.3f %@\n", NSDate.date.timeIntervalSince1970, line] dataUsingEncoding:NSUTF8StringEncoding];
@@ -44,7 +50,7 @@ static void LogLine(NSString *line) {
 
 static CFDictionaryRef CopyMultiple(CFArrayRef keys, CFStringRef app, CFStringRef user, CFStringRef host) {
     CFDictionaryRef original = OriginalCopyMultiple(keys, app, user, host);
-    if (!Enabled || !app || !CFEqual(app, MangoDomain)) return original;
+    if (!app || !CFEqual(app, MangoDomain)) return original;
     BOOL light = !keys || CFArrayContainsValue(keys, CFRangeMake(0, CFArrayGetCount(keys)), LightKey);
     BOOL dark = !keys || CFArrayContainsValue(keys, CFRangeMake(0, CFArrayGetCount(keys)), DarkKey);
     if (!light && !dark) return original;
@@ -95,7 +101,7 @@ static NSUInteger Occurrences(NSString *haystack, NSString *needle) {
 }
 
 static id<MTLLibrary> NewLibrary(id self, SEL cmd, NSString *source, MTLCompileOptions *options, NSError **error) {
-    if (!Enabled || ![source isKindOfClass:NSString.class] ||
+    if (![source isKindOfClass:NSString.class] ||
         [source rangeOfString:@"mangoGlassFragment"].location == NSNotFound) {
         return OriginalNewLibrary(self, cmd, source, options, error);
     }
@@ -129,8 +135,7 @@ __attribute__((constructor)) static void Start(void) {
         if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.backboardd"]) return;
         NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
-        Enabled = access(EnabledPath.fileSystemRepresentation, F_OK) == 0;
-        if (!Enabled) { LogLine(@"[SESSION] 0.1.0 disabled; no hooks installed"); return; }
+        LogLine(@"[SESSION] 0.1.1 auto-enabled");
 
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
         Class cls = device ? object_getClass(device) : Nil;
@@ -153,7 +158,7 @@ __attribute__((constructor)) static void Start(void) {
         // MangoOSRendering imports this exact CF function. We only alter its
         // Island keys in its own domain, without modifying stored preferences.
         MSHookFunction((void *)CFPreferencesCopyMultiple, (void *)CopyMultiple, (void **)&OriginalCopyMultiple);
-        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.0 enabled MetalClass=%@ shaderSeen=%d patched=%d",
+        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.1 MetalClass=%@ shaderSeen=%d patched=%d",
                  NSStringFromClass(cls), ShaderSeen, ShaderPatched]);
     }
 }
