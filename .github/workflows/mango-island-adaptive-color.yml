@@ -55,7 +55,7 @@ jobs:
         run: python3 ../tools/check_animation_cohesion.py
       - uses: actions/upload-artifact@v4
         with:
-          name: MangoIslandCohesion-0.1.4-RootHide
+          name: MangoIslandCohesion-0.1.5-RootHide
           if-no-files-found: error
           path: |
             MangoIslandAdaptiveColor/packages/*.deb
@@ -64,4 +64,3 @@ jobs:
             MangoIdleIsland/packages/*.deb
             MangoIdleIsland/packages/SHA256SUMS.txt
             MangoIdleIsland/README.md
-

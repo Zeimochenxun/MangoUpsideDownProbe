@@ -180,14 +180,14 @@ static id<MTLLibrary> NewLibrary(id self, SEL cmd, NSString *source, MTLCompileO
 
 __attribute__((constructor)) static void Start(void) {
     @autoreleasepool {
-        // A launch daemon may have no NSBundle bundle identifier even though
-        // MobileSubstrate correctly matched its com.apple.backboardd filter.
+        // A launch daemon may have no NSBundle bundle identifier.  The
+        // substrate filter therefore matches the executable name directly.
         NSString *process = NSProcessInfo.processInfo.processName;
         NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
         if (![process isEqualToString:@"backboardd"] && ![bundle isEqualToString:@"com.apple.backboardd"]) return;
         NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
-        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.4 strength-aware-color process=%@ bundle=%@", process ?: @"(nil)", bundle ?: @"(nil)"]);
+        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.5 executable-filter process=%@ bundle=%@", process ?: @"(nil)", bundle ?: @"(nil)"]);
 
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
         Class cls = device ? object_getClass(device) : Nil;
@@ -210,8 +210,7 @@ __attribute__((constructor)) static void Start(void) {
         // MangoOSRendering imports this exact CF function. We only alter its
         // Island keys in its own domain, without modifying stored preferences.
         MSHookFunction((void *)CFPreferencesCopyMultiple, (void *)CopyMultiple, (void **)&OriginalCopyMultiple);
-        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.4 MetalClass=%@ shaderSeen=%d patched=%d",
+        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.5 MetalClass=%@ shaderSeen=%d patched=%d",
                  NSStringFromClass(cls), ShaderSeen, ShaderPatched]);
     }
 }
-

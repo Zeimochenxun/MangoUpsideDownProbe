@@ -1,18 +1,18 @@
-# MangoIslandAdaptiveColor 0.1.4（强度与自适应修复版）
+# MangoIslandAdaptiveColor 0.1.5（注入过滤修复版）
 
-目标：让 Mango 的 `go.mangoos.island` 玻璃在空闲和活动状态下形成连贯的一体化过渡，并按岛下方**实际背景像素的亮度**稳定改变岛体混色。它配合 MangoIdleIsland 1.1.7，不修改 Mango 原版文件。
+目标：让 Mango 的 `go.mangoos.island` 玻璃在空闲和活动状态下形成连贯的一体化过渡，并按岛下方**实际背景像素的亮度**稳定改变岛体混色。它配合 MangoIdleIsland 1.1.8，不修改 Mango 原版文件。
 
 ## 实现范围
 
-- 仅注入 `com.apple.backboardd`；安装后自动启用，无须手动创建启用文件。
+- 注入过滤直接匹配可执行文件 `backboardd`。0.1.4 及以前只匹配 `com.apple.backboardd` bundle ID；目标守护进程没有可供注入器匹配的 bundle ID 时，插件会在构造函数运行前被排除，因此既没有效果也没有日志。
 - Mango 读取 `com.go.mangoosprefs` 的 Island 色调参数时，为 `Island.LightTintColor` 和 `Island.DarkTintColor` 提供临时标记。不会写回或覆盖用户设置。
 - 仅对当前 Beta7-1 中出现的 Metal 源码做精确字符串校验；替换平面和曲面两处 `mix`。未带 Island 标记的其他玻璃仍执行原始混色。
-- 0.1.4 保留用户在 `Island.LightTintColor` / `Island.DarkTintColor` 中设置的 alpha，并将完整 0–1 滑块映射到 0–42% 的安全混色范围；色调强度重新参与最终渲染，最大值仍至少保留 58% 背景。
+- 保留用户在 `Island.LightTintColor` / `Island.DarkTintColor` 中设置的 alpha，并将完整 0–1 滑块映射到 0–42% 的安全混色范围；色调强度重新参与最终渲染，最大值仍至少保留 58% 背景。
 - 新增独立的“自适应程度”参数：0 使用固定中性色调，1 使用完整亮度响应，中间值连续插值。参数量化为 15 级并编码在近黑／近白标记的低幅 RGB 变化中；即使 shader 回退，标记仍保持安全的近黑或近白颜色。
 - 自适应色调使用更宽的 10%–85% 亮度响应区间：暗背景获得轻微提亮，亮背景混入近黑色。组合后的最终亮度仍保持单调，减少中灰拐点及动态背景闪烁。
-- MangoIdleIsland 1.1.7 读取活动层的 presentation layer 透明度，以 60 fps 驱动空闲玻璃与活动玻璃的交叉过渡；空闲玻璃保持在同一 host 底层，不再在活动透明度刚超过 1% 时立即移除和重新插入。
+- MangoIdleIsland 1.1.8 读取活动层的 presentation layer 透明度，以 60 fps 驱动空闲玻璃与活动玻璃的交叉过渡；空闲玻璃保持在同一 host 底层，不再在活动透明度刚超过 1% 时立即移除和重新插入。
 - 如果动态 Metal 编译失败，立即再用原始源码编译；日志记录原因。
-- 延续 0.1.2 的 `backboardd` 进程识别和低 alpha 临时标记；修改后的 shader 编译失败时仍自动回退原始源码。
+- 构造函数继续同时核对 `backboardd` 进程名和 bundle ID；修改后的 shader 编译失败时仍自动回退原始源码。
 
 这是未经真机验证的实验包。Mango 更新、偏好解析方式改变或初始化顺序不同都可能使它无效。`[SHADER]` 成功只能证明改过的源码完成编译，实际观感仍须用真机分别看空闲、音乐、通知等状态。
 
@@ -25,4 +25,3 @@
 ## 构建
 
 RootHide Theos、iOS 16.5 SDK：在此目录运行 `make package FINALPACKAGE=1`。CI 通过 `mango-island-adaptive-color.yml` 构建 `iphoneos-arm64e` 包。由于这里只能静态验证，还需要真机比较暗／亮背景下的空闲态、音乐活动态和通知活动态。
-

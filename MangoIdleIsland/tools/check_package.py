@@ -12,7 +12,7 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
 
     p = next(m for m in regular if m.name.endswith('/MangoIdleIsland.plist'))
     b = next(m for m in regular if m.name.endswith('/MangoIdleIsland.dylib'))
-    assert plistlib.loads(t.extractfile(p).read()) == {'Filter': {'Bundles': ['com.apple.springboard']}}
+    assert plistlib.loads(t.extractfile(p).read()) == {'Filter': {'Executables': ['SpringBoard']}}
 
     data = t.extractfile(b).read()
     magic, cpu, subtype, filetype = struct.unpack_from('<4I', data)
@@ -42,7 +42,7 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'mode=global-island-native-reapply+idle-fresh-init',
         b'global-Island-glass-logic=enabled',
         b'TintRGBARepair101Done',
-        b'version=1.1.7-adaptation-control',
+        b'version=1.1.8-executable-filter',
         b'hooks=initializer+updateSpecular',
         b'scope=all-MGLiveBackdropView',
         b'readonly=1',
@@ -78,6 +78,7 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
 
     for required in [
         b'MangoIdleIsland.TintAlpha',
+        b'MangoIslandAdaptiveColor.Adaptation',
         b'Island.Blur',
         b'Island.LightTintColor',
         b'Island.DarkTintColor',
@@ -97,9 +98,8 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--ctr
     regular = [m for m in t if m.isfile()]
     assert len(regular) == 1 and pathlib.PurePosixPath(regular[0].name).name == 'control'
     control = t.extractfile(regular[0]).read().decode()
-    assert 'Version: 1.1.7' in control
+    assert 'Version: 1.1.8' in control
     assert 'Architecture: iphoneos-arm64e' in control
     assert 'Depends: mobilesubstrate, firmware (= 16.5)' in control
 
-print('PASS: MangoIdleIsland 1.1.7 arm64e RootHide; adaptation control, presentation-layer handoff and Island glass lifecycle checks included')
-
+print('PASS: MangoIdleIsland 1.1.8 arm64e RootHide; executable filter, adaptation control and presentation-layer handoff checks included')

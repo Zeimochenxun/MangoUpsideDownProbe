@@ -1,4 +1,4 @@
-# MangoIdleIsland 1.1.7
+# MangoIdleIsland 1.1.8
 
 适用环境：iPhone 13 mini、iOS 16.5.0、Dopamine RootHide、arm64e、SpringBoard、Mango 约 1.0-Beta7-1。
 
@@ -92,7 +92,7 @@ Beta7-1 中可见 `lg_updateTint`、`traitCollectionDidChange:`、`userInterface
 
 ## 实机验收
 
-安装 1.1.7、Respring，等待插件初始化后依次测试：
+安装 1.1.8、Respring，等待插件初始化后依次测试：
 
 1. 无活动时调整“色调通透”，Idle Island glass 应变化。
 2. 触发通知或 Live Activity，再调同一项，Active Mango glass 应变化。
@@ -135,5 +135,8 @@ Beta7-1 的 mangoos.dylib 在创建活动 `MGLiveBackdropView`（`Island` / `go.
 
 ## 1.1.7 自适应程度
 
-设置页新增 0–1 的“自适应程度”。0 使用固定中性色调，1 完整跟随背景亮度，中间值连续插值。它与“色调强度”分开：自适应程度决定颜色响应背景的幅度，色调强度决定该颜色最终混入玻璃的比例。此选项需要 MangoIslandAdaptiveColor 0.1.4 或更新版本。
+设置页新增 0–1 的“自适应程度”。0 使用固定中性色调，1 完整跟随背景亮度，中间值连续插值。它与“色调强度”分开：自适应程度决定颜色响应背景的幅度，色调强度决定该颜色最终混入玻璃的比例。此选项需要 MangoIslandAdaptiveColor 0.1.5 或更新版本。
 
+## 1.1.8 注入过滤修复
+
+注入配置改为直接匹配 `SpringBoard` 可执行文件，构造函数也同时接受进程名与 bundle ID。这样即使 RootHide 环境没有向注入器提供稳定的 bundle 标识，运行时代码和状态日志仍能启动。MangoIslandAdaptiveColor 0.1.5 对 `backboardd` 做了同样修复。

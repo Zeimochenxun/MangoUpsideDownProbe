@@ -576,12 +576,15 @@ static void Scan(void) {
 
 __attribute__((constructor)) static void Start(void) {
     @autoreleasepool {
-        if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"]) return;
+        NSString *process = NSProcessInfo.processInfo.processName;
+        NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
+        if (![process isEqualToString:@"SpringBoard"] && ![bundle isEqualToString:@"com.apple.springboard"]) return;
         NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=1.1.7-adaptation-control background=Mango-glass activity=presentation-crossfade touch=unchanged");
+            Log([NSString stringWithFormat:@"[SESSION] version=1.1.8-executable-filter process=%@ bundle=%@ background=Mango-glass activity=presentation-crossfade touch=unchanged",
+                 process ?: @"(nil)", bundle ?: @"(nil)"]);
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");
@@ -654,4 +657,3 @@ __attribute__((constructor)) static void Start(void) {
         });
     }
 }
-

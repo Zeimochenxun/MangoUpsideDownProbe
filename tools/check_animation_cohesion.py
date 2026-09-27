@@ -53,6 +53,8 @@ assert max(abs(b - a) for a, b in zip(handoff, handoff[1:])) < 0.004
 
 idle_source = (ROOT / "MangoIdleIsland" / "Tweak.m").read_text(encoding="utf-8")
 color_source = (ROOT / "MangoIslandAdaptiveColor" / "Tweak.m").read_text(encoding="utf-8")
+idle_filter = (ROOT / "MangoIdleIsland" / "MangoIdleIsland.plist").read_text(encoding="utf-8")
+color_filter = (ROOT / "MangoIslandAdaptiveColor" / "MangoIslandAdaptiveColor.plist").read_text(encoding="utf-8")
 assert "presentation ? presentation.opacity : p.alpha" in idle_source
 assert "SmoothStep(0.55, 0.98, activity)" in idle_source
 assert "if (eligible && (!bg || upgrading))" in idle_source
@@ -62,6 +64,7 @@ assert "AlphaSuffix(original, DarkKey)" in color_source
 assert "smoothstep(0.10, 0.85, luminance)" in color_source
 assert "float strength = 0.42 * userStrength" in color_source
 assert "float target = mix(0.10, adaptiveTarget, adaptation)" in color_source
+assert "<key>Executables</key>" in idle_filter and "SpringBoard" in idle_filter
+assert "Executables" in color_filter and "backboardd" in color_filter
 
 print("PASS: user tint strength is preserved; adaptive luma and Island handoff are monotonic")
-

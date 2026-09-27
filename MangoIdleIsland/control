@@ -1,10 +1,9 @@
 Package: com.chenxun.mangoidleisland
 Name: MangoIdleIsland
-Version: 1.1.7
+Version: 1.1.8
 Architecture: iphoneos-arm64e
 Description: Cohesive presentation-driven Idle and Active Island glass handoff with Mango parameter bridge.
 Maintainer: Chen Xun
 Author: Chen Xun
 Section: Tweaks
 Depends: mobilesubstrate, firmware (= 16.5)
-
