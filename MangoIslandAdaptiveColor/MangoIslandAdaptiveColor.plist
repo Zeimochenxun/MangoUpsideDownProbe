@@ -1,1 +1,1 @@
-{ Filter = { Executables = ( "backboardd" ); }; }
+{ Filter = { Executables = ( "SpringBoard" ); }; }
