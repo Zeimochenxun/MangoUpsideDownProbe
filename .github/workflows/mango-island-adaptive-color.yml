@@ -1,0 +1,49 @@
+name: Build MangoIslandAdaptiveColor RootHide
+on:
+  workflow_dispatch:
+  push:
+    branches: [mango-island-adaptive-color]
+    paths: ['MangoIslandAdaptiveColor/**', '.github/workflows/mango-island-adaptive-color.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: MangoIslandAdaptiveColor
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        uses: dhinakg/procursus-action@main
+        with:
+          packages: ldid make
+      - name: Install RootHide Theos
+        run: git clone --recursive https://github.com/roothide/theos.git "$HOME/theos"
+      - name: Install SDK
+        run: |
+          set -eu
+          curl --fail --location --retry 3 https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz --output "$RUNNER_TEMP/sdk.tar.xz"
+          echo "5e0fd3f01266cce4ce012d4a99b38eb56578fca40d09edc81cd83dee958202fb  $RUNNER_TEMP/sdk.tar.xz" | shasum -a 256 -c -
+          mkdir -p "$HOME/theos/sdks"
+          tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$HOME/theos/sdks"
+      - name: Build package
+        shell: bash
+        run: |
+          set -euo pipefail
+          export THEOS="$HOME/theos"
+          make package FINALPACKAGE=1 2>&1 | tee "$RUNNER_TEMP/build.log"
+          dylib="$(find .theos -name MangoIslandAdaptiveColor.dylib -type f | head -n 1)"
+          xcrun lipo -info "$dylib"
+          xcrun otool -L "$dylib"
+          dpkg-deb -I packages/*.deb
+          shasum -a 256 packages/*.deb > packages/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MangoIslandAdaptiveColor-0.1.0-RootHide
+          if-no-files-found: error
+          path: |
+            MangoIslandAdaptiveColor/packages/*.deb
+            MangoIslandAdaptiveColor/packages/SHA256SUMS.txt
+            MangoIslandAdaptiveColor/README.md
