@@ -1,9 +1,10 @@
 Package: com.chenxun.mangoislandadaptivecolor
 Name: MangoIslandAdaptiveColor
-Version: 0.1.2
+Version: 0.1.3
 Architecture: iphoneos-arm64e
-Description: Auto-enabled Island-scoped adaptive backdrop tint experiment for Mango beta7 on iOS 16.5.
+Description: Cohesive Island animation handoff and stable adaptive backdrop tint for Mango beta7 on iOS 16.5.
 Maintainer: Chen Xun
 Author: Chen Xun
 Section: Tweaks
-Depends: mobilesubstrate, firmware (= 16.5), com.chenxun.mangoidleisland (>= 1.1.5)
+Depends: mobilesubstrate, firmware (= 16.5), com.chenxun.mangoidleisland (>= 1.1.6)
+

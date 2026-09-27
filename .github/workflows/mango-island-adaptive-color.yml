@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [mango-island-adaptive-color]
-    paths: ['MangoIslandAdaptiveColor/**', '.github/workflows/mango-island-adaptive-color.yml']
+    paths: ['MangoIslandAdaptiveColor/**', 'MangoIdleIsland/**', 'tools/check_animation_cohesion.py', '.github/workflows/mango-island-adaptive-color.yml']
 permissions:
   contents: read
 jobs:
@@ -39,11 +39,29 @@ jobs:
           xcrun otool -L "$dylib"
           dpkg-deb -I packages/*.deb
           shasum -a 256 packages/*.deb > packages/SHA256SUMS.txt
+      - name: Build cohesive Idle Island dependency
+        shell: bash
+        working-directory: MangoIdleIsland
+        run: |
+          set -euo pipefail
+          export THEOS="$HOME/theos"
+          make package FINALPACKAGE=1 2>&1 | tee "$RUNNER_TEMP/idle-build.log"
+          python3 tools/check_package.py packages/*.deb
+          dylib="$(find .theos -name MangoIdleIsland.dylib -type f | head -n 1)"
+          xcrun lipo -info "$dylib"
+          xcrun otool -L "$dylib"
+          shasum -a 256 packages/*.deb > packages/SHA256SUMS.txt
+      - name: Validate animation and color curves
+        run: python3 ../tools/check_animation_cohesion.py
       - uses: actions/upload-artifact@v4
         with:
-          name: MangoIslandAdaptiveColor-0.1.2-RootHide
+          name: MangoIslandCohesion-0.1.3-RootHide
           if-no-files-found: error
           path: |
             MangoIslandAdaptiveColor/packages/*.deb
             MangoIslandAdaptiveColor/packages/SHA256SUMS.txt
             MangoIslandAdaptiveColor/README.md
+            MangoIdleIsland/packages/*.deb
+            MangoIdleIsland/packages/SHA256SUMS.txt
+            MangoIdleIsland/README.md
+

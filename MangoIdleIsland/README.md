@@ -1,4 +1,4 @@
-# MangoIdleIsland 1.1.0
+# MangoIdleIsland 1.1.6
 
 适用环境：iPhone 13 mini、iOS 16.5.0、Dopamine RootHide、arm64e、SpringBoard、Mango 约 1.0-Beta7-1。
 
@@ -87,12 +87,12 @@ Beta7-1 中可见 `lg_updateTint`、`traitCollectionDidChange:`、`userInterface
 - 不触碰 orientation、触摸、手势或 hit testing。
 - 不使用 `MSHookFunction`。
 - 500 ms fallback scan 保留，只扫描 SystemAperture 相关窗口且每棵树最多 256 节点。
-- DisplayLink 仍只在状态过渡后短时以 30 fps 运行约 1 秒，随后暂停。
+- DisplayLink 只在状态过渡后短时以 60 fps 运行约 1 秒，随后暂停。
 - 参数 refresh 为事件驱动；快速重复通知通过 generation 合并，避免反复重建 Idle glass。
 
 ## 实机验收
 
-安装 1.1.0、Respring，等待插件初始化后依次测试：
+安装 1.1.6、Respring，等待插件初始化后依次测试：
 
 1. 无活动时调整“色调通透”，Idle Island glass 应变化。
 2. 触发通知或 Live Activity，再调同一项，Active Mango glass 应变化。
@@ -115,7 +115,7 @@ Beta7-1 中可见 `lg_updateTint`、`traitCollectionDidChange:`、`userInterface
 
 RootHide Theos + iPhoneOS16.5 SDK + Apple Clang：`make package FINALPACKAGE=1`。
 
-构建约束：`ARCHS=arm64e`、`THEOS_PACKAGE_SCHEME=roothide`、SpringBoard-only。CI 会运行 `tools/check_package.py`、检查 arm64e Mach-O、依赖并上传 `MangoIdleIsland-1.1.0-RootHide` artifact。
+构建约束：`ARCHS=arm64e`、`THEOS_PACKAGE_SCHEME=roothide`、SpringBoard-only。CI 会运行 `tools/check_package.py`、检查 arm64e Mach-O 与依赖，并把安装包连同自适应色调包一起上传。
 
 静态验证和 CI 成功不等于完成实机验收；Active adaptive tint、各 SystemAperture 状态的实际 refresh、视觉交接仍需目标 iPhone 13 mini 验证。
 
@@ -126,3 +126,10 @@ RootHide Theos + iPhoneOS16.5 SDK + Apple Clang：`make package FINALPACKAGE=1`�
 ## 1.1.5 活动态边缘光验证版
 
 Beta7-1 的 mangoos.dylib 在创建活动 `MGLiveBackdropView`（`Island` / `go.mangoos.island`）后明确传入 `kCFBooleanFalse`。本版在活动玻璃已挂入灵动岛、边缘光开关为 YES 时检查该玻璃实际覆盖值；仅在其仍非 YES 时调用已确认存在且签名匹配的原方法设为 YES，避免每帧重设。Mango 可能在 mango.dylib 与 mangoos.dylib 各有同名类，本版按对象实际 class 与加载模块识别。其余材质域不受此项修正。日志 `[EDGE-ACTIVE]` 用来区分是否发现并更正活动玻璃。此为实机待验证的修复假设；如果仍不亮，不再叠加颜色/层级补偿，应根据活动玻璃光层状态定位。
+
+## 1.1.6 连贯交接版
+
+空闲玻璃不再在活动透明度刚超过 1% 时立即隐藏和移出层级。过渡期间读取活动内容及活动玻璃 presentation layer 的实际屏幕透明度：活动覆盖度达到 55% 后，底层空闲玻璃才开始柔和退出，并在 98% 时完成交接；活动收起时沿同一路径反向恢复。空闲玻璃始终保持在同一 host 的最底层，透明度为零时也不反复移除和插回，从而减少岛体跳色、边缘高光断开及双层闪现。
+
+`background` / `activity` 状态加入 0.5%～2% 回差，只用于稳定状态记录和生命周期判断；实际视觉交接连续依赖透明度，不会在阈值处硬切。透明度计算不再重复相乘 UIView alpha 与同一 CALayer opacity，也不再用模型值提前截断正在进行的淡出动画。
+

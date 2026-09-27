@@ -39,7 +39,7 @@ static dispatch_source_t Timer;
 static CADisplayLink *DisplayLink;
 static CFTimeInterval LastTransition;
 static uint64_t ParameterReloadGeneration;
-static char BackgroundKey, StateKey, LastElementHostKey, GlassModeKey, OpaqueSinceKey, LastParameterReapplyKey, EdgeAttemptKey, EdgeSeenKey;
+static char BackgroundKey, StateKey, LastElementHostKey, GlassModeKey, LastParameterReapplyKey, EdgeAttemptKey, EdgeSeenKey;
 
 static NSString * const MangoDomain = @"com.go.mangoosprefs";
 static NSString * const IslandFilterType = @"go.mangoos.island";
@@ -238,7 +238,6 @@ static void ParametersChanged(CFTimeInterval eventTime, uint64_t generation) {
         UIView *bg = objc_getAssociatedObject(host, &BackgroundKey);
         if (bg) {
             objc_setAssociatedObject(host, &BackgroundKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            objc_setAssociatedObject(host, &OpaqueSinceKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             [bg removeFromSuperview];
             rebuilt++;
             Log([NSString stringWithFormat:@"[GLASS-REFRESH] owner=idle ptr=%p method=fresh-init result=rebuilt", (void *)bg]);
@@ -383,10 +382,21 @@ static CGFloat EffectiveOpacity(UIView *v, UIView *host) {
     CGFloat opacity = 1;
     for (UIView *p = v; p && p != host; p = p.superview) {
         if (p.hidden || p.layer.hidden) return 0;
-        CALayer *layer = p.layer.presentationLayer ?: p.layer;
-        opacity *= MIN(p.alpha, layer.opacity);
+        // UIView alpha is backed by CALayer opacity. Multiplying both counts the
+        // same fade twice, while MIN(model, presentation) makes a fade-out jump
+        // to zero as soon as the model value changes. Follow the presentation
+        // layer while an animation is active so the idle glass tracks the pixels
+        // that are actually on screen.
+        CALayer *presentation = p.layer.presentationLayer;
+        opacity *= presentation ? presentation.opacity : p.alpha;
     }
     return MAX(0, MIN(1, opacity));
+}
+
+static CGFloat SmoothStep(CGFloat low, CGFloat high, CGFloat value) {
+    if (high <= low) return value >= high ? 1 : 0;
+    CGFloat t = MAX(0, MIN(1, (value - low) / (high - low)));
+    return t * t * (3 - 2 * t);
 }
 
 static NSString *Eligibility(UIView *host, CGFloat *activity) {
@@ -424,7 +434,12 @@ static NSString *Eligibility(UIView *host, CGFloat *activity) {
     // Activity content can precede its glass. Treat either as activity so
     // a dormant glass never masks an already visible media element.
     *activity = MAX(glassOpacity, elementOpacity);
-    return *activity > 0.01 ? @"activity" : @"background";
+    // Use hysteresis for the semantic state so tiny alpha noise around the old
+    // 0.01 boundary cannot alternate idle/active every frame. Visual handoff is
+    // continuous below and does not depend on this label.
+    NSString *previous = objc_getAssociatedObject(host, &StateKey);
+    CGFloat threshold = [previous isEqualToString:@"activity"] ? 0.005 : 0.02;
+    return *activity > threshold ? @"activity" : @"background";
 }
 
 static void Update(UIView *host) {
@@ -438,7 +453,11 @@ static void Update(UIView *host) {
         BOOL constructor = eligible && GlassConstructorVerified && !GlassConstructionFailed;
         BOOL mango = constructor && (OriginalIslandGlassSeen || MangoGlassSetting());
         BOOL upgrading = eligible && bg && mango && ![objc_getAssociatedObject(bg, &GlassModeKey) boolValue];
-        if ([state isEqualToString:@"background"] && (!bg || upgrading)) {
+        // Prepare the idle glass even when an activity is already visible. It is
+        // inserted and assigned its crossfade opacity in this same update, so a
+        // preference reload or late plugin start cannot leave the outgoing half
+        // of the next transition without a backing body.
+        if (eligible && (!bg || upgrading)) {
             UIView *old = bg;
             bg = CreateBackground(mango, host.bounds);
             if (bg) {
@@ -451,30 +470,23 @@ static void Update(UIView *host) {
             }
         }
         if (bg) {
-            if ([state isEqualToString:@"background"]) {
+            if (eligible) {
+                // Keep one continuous glass body through the handoff. The idle
+                // layer stays underneath early activity content, then follows
+                // the active layer's presentation opacity out over the final
+                // part of the fade. It remains attached at alpha zero, avoiding
+                // detach/reinsert flashes.
                 if (bg.superview != host) [host insertSubview:bg atIndex:0];
                 if (!CGRectEqualToRect(bg.frame, host.bounds)) bg.frame = host.bounds;
                 CGFloat radius = host.bounds.size.height / 2.0;
                 if (bg.layer.cornerRadius != radius) bg.layer.cornerRadius = radius;
-                CFTimeInterval now = CACurrentMediaTime();
-                NSNumber *since = objc_getAssociatedObject(host, &OpaqueSinceKey);
-                if (activity < 0.98) {
-                    since = nil;
-                    objc_setAssociatedObject(host, &OpaqueSinceKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                } else if (!since) {
-                    since = @(now);
-                    objc_setAssociatedObject(host, &OpaqueSinceKey, since, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                }
-                CGFloat coverage = activity >= 0.98 && now - since.doubleValue < 0.06 ? 0 : activity;
-                CGFloat backingOpacity = MAX(0, MIN(1, 1 - coverage));
+                CGFloat activeCoverage = SmoothStep(0.55, 0.98, activity);
+                CGFloat backingOpacity = 1 - activeCoverage;
                 if (fabs(bg.alpha - backingOpacity) > 0.001) bg.alpha = backingOpacity;
                 if (bg.hidden) bg.hidden = NO;
             } else {
-                // A detached idle backdrop cannot participate in Mango's
-                // live activity rendering or backdrop composition.
                 if (!bg.hidden) bg.hidden = YES;
-                if ([state isEqualToString:@"activity"] && bg.superview) [bg removeFromSuperview];
-                objc_setAssociatedObject(host, &OpaqueSinceKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                if (bg.superview) [bg removeFromSuperview];
             }
         }
         NSString *old = objc_getAssociatedObject(host, &StateKey);
@@ -569,7 +581,7 @@ __attribute__((constructor)) static void Start(void) {
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=1.1.5-active-edge background=Mango-glass activity-detaches-idle touch=unchanged");
+            Log(@"[SESSION] version=1.1.6-cohesive-handoff background=Mango-glass activity=presentation-crossfade touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");
@@ -634,11 +646,12 @@ __attribute__((constructor)) static void Start(void) {
             static MangoIdleFrameObserver *observer;
             observer = [MangoIdleFrameObserver new];
             DisplayLink = [CADisplayLink displayLinkWithTarget:observer selector:@selector(tick:)];
-            DisplayLink.preferredFramesPerSecond = 30;
+            DisplayLink.preferredFramesPerSecond = 60;
             [DisplayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
             DisplayLink.paused = YES;
 
-            Log(@"[READY] hooks=layout+content-hidden+element-move+element-alpha+glass-hidden+island-reapply transition-refresh=30fps/1s fallback-scan=500ms global-Island-glass-logic=enabled");
+            Log(@"[READY] hooks=layout+content-hidden+element-move+element-alpha+glass-hidden+island-reapply transition-refresh=60fps/1s presentation-crossfade=enabled fallback-scan=500ms global-Island-glass-logic=enabled");
         });
     }
 }
+
