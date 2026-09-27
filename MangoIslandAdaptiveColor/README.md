@@ -1,10 +1,11 @@
-# MangoIslandAdaptiveColor 0.1.6（渲染进程修复版）
+# MangoIslandAdaptiveColor 0.1.7（稳健标记解码版）
 
 目标：让 Mango 的 `go.mangoos.island` 玻璃在空闲和活动状态下形成连贯的一体化过渡，并按岛下方**实际背景像素的亮度**稳定改变岛体混色。它配合 MangoIdleIsland 1.1.8，不修改 Mango 原版文件。
 
 ## 实现范围
 
 - 注入过滤直接匹配可执行文件 `SpringBoard`。实机 `Status.log` 与 `GlassProbe.log` 已确认 `MGLiveBackdropView` 和 `mangoos.dylib` 位于 SpringBoard；0.1.5 虽修正了过滤方式，但仍注入错误的 `backboardd`，因此无法接触真正的偏好读取与 Metal shader 编译。
+- 0.1.6 的 Island 标记要求近黑／近白颜色分量几乎逐位相等；UIColor 到 Metal uniform 之间一旦发生 alpha 预乘或 sRGB 线性化，标记就会失配并退回 Mango 原生 Light/Dark 混色。0.1.7 同时比较原值、反预乘值、线性值和反预乘线性值，仍用偏移的 G/B 签名排除普通纯黑与纯白。
 - Mango 读取 `com.go.mangoosprefs` 的 Island 色调参数时，为 `Island.LightTintColor` 和 `Island.DarkTintColor` 提供临时标记。不会写回或覆盖用户设置。
 - 仅对当前 Beta7-1 中出现的 Metal 源码做精确字符串校验；替换平面和曲面两处 `mix`。未带 Island 标记的其他玻璃仍执行原始混色。
 - 保留用户在 `Island.LightTintColor` / `Island.DarkTintColor` 中设置的 alpha，并将完整 0–1 滑块映射到 0–42% 的安全混色范围；色调强度重新参与最终渲染，最大值仍至少保留 58% 背景。
@@ -18,7 +19,7 @@
 
 ## 安装和恢复
 
-安装 `.deb` 并重启用户空间后自动生效。插件在 `SpringBoard` 执行构造函数并写日志时自动建立 `/var/mobile/Library/Logs/MangoIslandAdaptiveColor/` 文件夹和其中的 `Status.log`。查看 `[SESSION] 0.1.6 springboard-renderer`、`[SHADER] ... compiled` 与 `[ISLAND] ... marker`；若文件夹仍不存在，说明注入或日志写入路径仍需单独排查，不能据此断言颜色改动已经生效。首次测试前保留 SSH 或 Dopamine 关闭 tweak 注入的入口。
+安装 `.deb` 并重启用户空间后自动生效。插件在 `SpringBoard` 执行构造函数并写日志时自动建立 `/var/mobile/Library/Logs/MangoIslandAdaptiveColor/` 文件夹和其中的 `Status.log`。查看 `[SESSION] 0.1.7 robust-marker`、`[SHADER] ... marker-decoder=raw+unpremultiplied+linear` 与 `[ISLAND] ... marker`；若文件夹仍不存在，说明注入或日志写入路径仍需单独排查，不能据此断言颜色改动已经生效。首次测试前保留 SSH 或 Dopamine 关闭 tweak 注入的入口。
 
 如果显示异常或 SpringBoard 反复重启，重启设备后在 Dopamine 关闭 tweak 注入，再用 Sileo 卸载 `com.chenxun.mangoislandadaptivecolor`，然后正常越狱。原版 Mango 以及原有偏好未被修改。0.1.0 的 `.enable` 文件在本版无效，不影响运行。
 

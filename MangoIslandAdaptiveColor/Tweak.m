@@ -113,17 +113,40 @@ static NSString *const PixelEntry = @"float4 mangoGlassPixel(";
 static NSString *const AdaptiveFunction =
 @"float3 mangoIslandAdaptiveColor(float3 background, float4 tint)\n"
  @"{\n"
- @"    // Sentinel RGB identifies Island; alpha carries the user's strength.\n"
- @"    float redByte = tint.r * 255.0;\n"
- @"    bool markerLight = redByte >= 239.5 && redByte <= 254.5 &&\n"
- @"                       abs(tint.g - (254.0 / 255.0)) < 0.0008 &&\n"
- @"                       abs(tint.b - (253.0 / 255.0)) < 0.0008;\n"
- @"    bool markerDark = redByte >= 0.5 && redByte <= 15.5 &&\n"
- @"                      abs(tint.g - (1.0 / 255.0)) < 0.0008 &&\n"
- @"                      abs(tint.b - (2.0 / 255.0)) < 0.0008;\n"
+ @"    // UIColor may deliver uniforms unchanged, alpha-premultiplied, linear,\n"
+ @"    // or premultiplied-linear. Compare all four normalizations so the\n"
+ @"    // Island marker survives that transport while ordinary black/white\n"
+ @"    // tints remain outside the deliberately offset G/B signature.\n"
+ @"    float safeAlpha = max(tint.a, 0.001);\n"
+ @"    float3 raw = tint.rgb;\n"
+ @"    float3 divided = clamp(tint.rgb / safeAlpha, 0.0, 1.0);\n"
+ @"    float3 rawGamma = float3(gammaEncode(raw.r), gammaEncode(raw.g), gammaEncode(raw.b));\n"
+ @"    float3 dividedGamma = float3(gammaEncode(divided.r), gammaEncode(divided.g), gammaEncode(divided.b));\n"
+ @"    float3 lightTarget = float3(0.0, 254.0 / 255.0, 253.0 / 255.0);\n"
+ @"    float3 darkTarget = float3(0.0, 1.0 / 255.0, 2.0 / 255.0);\n"
+ @"    float3 lightValue = raw;\n"
+ @"    float3 darkValue = raw;\n"
+ @"    float lightDistance = distance(raw.gb, lightTarget.gb);\n"
+ @"    float darkDistance = distance(raw.gb, darkTarget.gb);\n"
+ @"    float d = distance(divided.gb, lightTarget.gb);\n"
+ @"    if (d < lightDistance) { lightDistance = d; lightValue = divided; }\n"
+ @"    d = distance(divided.gb, darkTarget.gb);\n"
+ @"    if (d < darkDistance) { darkDistance = d; darkValue = divided; }\n"
+ @"    d = distance(rawGamma.gb, lightTarget.gb);\n"
+ @"    if (d < lightDistance) { lightDistance = d; lightValue = rawGamma; }\n"
+ @"    d = distance(rawGamma.gb, darkTarget.gb);\n"
+ @"    if (d < darkDistance) { darkDistance = d; darkValue = rawGamma; }\n"
+ @"    d = distance(dividedGamma.gb, lightTarget.gb);\n"
+ @"    if (d < lightDistance) { lightDistance = d; lightValue = dividedGamma; }\n"
+ @"    d = distance(dividedGamma.gb, darkTarget.gb);\n"
+ @"    if (d < darkDistance) { darkDistance = d; darkValue = dividedGamma; }\n"
+ @"    float lightRedByte = lightValue.r * 255.0;\n"
+ @"    float darkRedByte = darkValue.r * 255.0;\n"
+ @"    bool markerLight = lightDistance < 0.006 && lightRedByte >= 239.5 && lightRedByte <= 254.5;\n"
+ @"    bool markerDark = darkDistance < 0.006 && darkRedByte >= 0.5 && darkRedByte <= 15.5;\n"
  @"    if (markerLight || markerDark) {\n"
- @"        float adaptation = markerLight ? clamp((redByte - 240.0) / 14.0, 0.0, 1.0)\n"
- @"                                       : clamp((redByte - 1.0) / 14.0, 0.0, 1.0);\n"
+ @"        float adaptation = markerLight ? clamp((lightRedByte - 240.0) / 14.0, 0.0, 1.0)\n"
+ @"                                       : clamp((darkRedByte - 1.0) / 14.0, 0.0, 1.0);\n"
  @"        float luminance = dot(background, float3(0.2126, 0.7152, 0.0722));\n"
  @"        // A broad response avoids a visible threshold around middle gray.\n"
  @"        float bright = smoothstep(0.10, 0.85, luminance);\n"
@@ -171,7 +194,7 @@ static id<MTLLibrary> NewLibrary(id self, SEL cmd, NSString *source, MTLCompileO
     id<MTLLibrary> result = OriginalNewLibrary(self, cmd, edited, options, &attemptError);
     if (result) {
         ShaderPatched = YES;
-        LogLine(@"[SHADER] Island adaptive mix compiled; other groups retain original mix");
+        LogLine(@"[SHADER] Island adaptive mix compiled marker-decoder=raw+unpremultiplied+linear");
         return result;
     }
     LogLine([NSString stringWithFormat:@"[SHADER] modified source failed (%@); retrying original", attemptError.localizedDescription ?: @"unknown"]);
@@ -187,7 +210,7 @@ __attribute__((constructor)) static void Start(void) {
         if (![process isEqualToString:@"SpringBoard"] && ![bundle isEqualToString:@"com.apple.springboard"]) return;
         NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
-        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.6 springboard-renderer process=%@ bundle=%@", process ?: @"(nil)", bundle ?: @"(nil)"]);
+        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.7 robust-marker process=%@ bundle=%@", process ?: @"(nil)", bundle ?: @"(nil)"]);
 
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
         Class cls = device ? object_getClass(device) : Nil;
@@ -210,7 +233,7 @@ __attribute__((constructor)) static void Start(void) {
         // MangoOSRendering imports this exact CF function. We only alter its
         // Island keys in its own domain, without modifying stored preferences.
         MSHookFunction((void *)CFPreferencesCopyMultiple, (void *)CopyMultiple, (void **)&OriginalCopyMultiple);
-        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.6 MetalClass=%@ shaderSeen=%d patched=%d",
+        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.7 MetalClass=%@ shaderSeen=%d patched=%d",
                  NSStringFromClass(cls), ShaderSeen, ShaderPatched]);
     }
 }

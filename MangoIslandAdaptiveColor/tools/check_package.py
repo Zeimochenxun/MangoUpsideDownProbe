@@ -29,7 +29,7 @@ require(magic == 0xFEEDFACF, "expected a 64-bit Mach-O")
 require(cpu == 0x0100000C and subtype & 0xFFFFFF == 2, "expected arm64e")
 require(filetype == 6, "expected a dylib")
 for marker in (
-    b"0.1.6 springboard-renderer",
+    b"0.1.7 robust-marker",
     b"MangoIslandAdaptiveColor.Adaptation",
     b"Island.LightTintColor",
     b"Island.DarkTintColor",
@@ -40,8 +40,8 @@ for marker in (
 
 control = subprocess.check_output(["dpkg-deb", "--field", path]).decode()
 require("Package: com.chenxun.mangoislandadaptivecolor" in control, "wrong package ID")
-require("Version: 0.1.6" in control, "wrong package version")
+require("Version: 0.1.7" in control, "wrong package version")
 require("Architecture: iphoneos-arm64e" in control, "wrong package architecture")
 require("com.chenxun.mangoidleisland (>= 1.1.8)" in control, "missing cohesive Idle dependency")
 
-print("PASS: MangoIslandAdaptiveColor 0.1.6 arm64e RootHide; SpringBoard filter and shader markers verified")
+print("PASS: MangoIslandAdaptiveColor 0.1.7 arm64e RootHide; robust marker decoder and SpringBoard shader hook verified")

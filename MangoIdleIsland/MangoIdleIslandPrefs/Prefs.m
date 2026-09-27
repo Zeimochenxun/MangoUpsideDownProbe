@@ -111,7 +111,7 @@ static void PostReload(void) {
                      item:[self item:@"色调强度" key:TintUIKey cell:PSSliderCell low:@0 high:@1]];
 
     [self addSectionNamed:nil
-              description:@"自适应程度：控制岛体颜色跟随实际背景亮度的幅度。0 为固定中性色调，1 为完整自适应；它与色调强度分别控制“跟随多少”和“混入多少”。需要 MangoIslandAdaptiveColor 0.1.6 或更新版本。"
+              description:@"自适应程度：控制岛体颜色跟随实际背景亮度的幅度。0 为固定中性色调，1 为完整自适应；它与色调强度分别控制“跟随多少”和“混入多少”。需要 MangoIslandAdaptiveColor 0.1.7 或更新版本。"
                      item:[self item:@"自适应程度" key:AdaptationKey cell:PSSliderCell low:@0 high:@1]];
 
     [self addSectionNamed:nil
