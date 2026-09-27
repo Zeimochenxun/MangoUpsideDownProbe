@@ -16,6 +16,7 @@
 - (instancetype)initWithFrame:(CGRect)frame groupName:(NSString *)name filterType:(NSString *)filter;
 - (void)setLgSpecularEnabledOverride:(id)value;
 - (NSString *)lgFilterType;
+- (id)lgSpecularEnabledOverride;
 - (void)reapplyFilterForParameterReload;
 - (void)updateSpecular;
 @end
@@ -38,7 +39,7 @@ static dispatch_source_t Timer;
 static CADisplayLink *DisplayLink;
 static CFTimeInterval LastTransition;
 static uint64_t ParameterReloadGeneration;
-static char BackgroundKey, StateKey, LastElementHostKey, GlassModeKey, OpaqueSinceKey, LastParameterReapplyKey;
+static char BackgroundKey, StateKey, LastElementHostKey, GlassModeKey, OpaqueSinceKey, LastParameterReapplyKey, EdgeAttemptKey, EdgeSeenKey;
 
 static NSString * const MangoDomain = @"com.go.mangoosprefs";
 static NSString * const IslandFilterType = @"go.mangoos.island";
@@ -57,9 +58,37 @@ static BOOL IslandEdgeOptIn(void) {
 }
 
 static BOOL IsIslandGlass(id object) {
-    if (!GlassConstructorVerified || !GlassClass || ![object isKindOfClass:GlassClass]) return NO;
-    if (!ClassMethodSignature(GlassClass, @selector(lgFilterType), "@", 2, NULL)) return NO;
+    // Mango Beta7 contains this class in both mango.dylib and mangoos.dylib.
+    // Check the actual object's class and image, rather than assuming the
+    // NSClassFromString winner is also the class of the active glass.
+    Class cls = object ? object_getClass(object) : Nil;
+    if (!cls || ![NSStringFromClass(cls) isEqualToString:@"MGLiveBackdropView"]) return NO;
+    const char *image = class_getImageName(cls);
+    NSString *module = image ? [[NSString stringWithUTF8String:image] lastPathComponent] : nil;
+    if (![module isEqualToString:@"mango.dylib"] && ![module isEqualToString:@"mangoos.dylib"]) return NO;
+    if (!ClassMethodSignature(cls, @selector(lgFilterType), "@", 2, NULL)) return NO;
     return [[object lgFilterType] isEqualToString:IslandFilterType];
+}
+
+static void EnsureActiveEdge(UIView *glass) {
+    if (Disabled || !glass.window || CGRectIsEmpty(glass.bounds) || !IslandEdgeOptIn()) return;
+    Class cls = object_getClass(glass);
+    if (!ClassMethodSignature(cls, @selector(lgSpecularEnabledOverride), "@", 2, NULL) ||
+        !ClassMethodSignature(cls, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) return;
+    id value = [glass lgSpecularEnabledOverride];
+    if (!objc_getAssociatedObject(glass, &EdgeSeenKey)) {
+        objc_setAssociatedObject(glass, &EdgeSeenKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        Log([NSString stringWithFormat:@"[EDGE-ACTIVE] observed class=%p module=%s override=%@ size=%.1fx%.1f",
+             (void *)cls, class_getImageName(cls) ?: "?", value ?: @"nil", glass.bounds.size.width, glass.bounds.size.height]);
+    }
+    if ([value respondsToSelector:@selector(boolValue)] && [value boolValue]) return;
+    CFTimeInterval now = CACurrentMediaTime();
+    NSNumber *last = objc_getAssociatedObject(glass, &EdgeAttemptKey);
+    if (last && now - last.doubleValue < 1.0) return;
+    objc_setAssociatedObject(glass, &EdgeAttemptKey, @(now), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [glass setLgSpecularEnabledOverride:(__bridge id)kCFBooleanTrue];
+    Log([NSString stringWithFormat:@"[EDGE-ACTIVE] corrected class=%p before=%@ after=%@",
+         (void *)cls, value ?: @"nil", [glass lgSpecularEnabledOverride] ?: @"nil"]);
 }
 
 static void SpecularOverride(id self, SEL cmd, id value) {
@@ -379,6 +408,7 @@ static NSString *Eligibility(UIView *host, CGFloat *activity) {
         // Only Island-domain Mango glass is allowed to control the idle/active
         // handoff. Other Mango glass surfaces must not suppress Idle Island.
         if (IsIslandGlass(v)) {
+            EnsureActiveEdge(v);
             if (!CGRectIsEmpty(v.bounds)) {
                 CGFloat realOpacity = EffectiveOpacity(v, host);
                 glassOpacity = MAX(glassOpacity, realOpacity);
@@ -539,7 +569,7 @@ __attribute__((constructor)) static void Start(void) {
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=1.1.4-media-guard background=Mango-glass activity-detaches-idle touch=unchanged");
+            Log(@"[SESSION] version=1.1.5-active-edge background=Mango-glass activity-detaches-idle touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");
