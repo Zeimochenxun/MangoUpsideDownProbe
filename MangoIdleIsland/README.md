@@ -122,3 +122,7 @@ RootHide Theos + iPhoneOS16.5 SDK + Apple Clang：`make package FINALPACKAGE=1`�
 ## 1.1.4 媒体活动保护（实机待验证）
 
 媒体内容视图和 Mango 原有 Island 玻璃任一可见即判断活动已开始。活动期间把本插件的空闲背景隐藏并移出容器；活动结束后才重新挂回，避免空闲玻璃参与音乐 Live Activity 的 backdrop 合成。此版保留设置及 Mango 原有活动玻璃实例，不改音乐业务状态。若播放仍无法进入活动态，先用 `DISABLED` 标记隔离本插件，再提交新的 Status.log；不要把静态推断当成已证实的根因。
+
+## 1.1.5 活动态边缘光验证版
+
+Beta7-1 的 mangoos.dylib 在创建活动 `MGLiveBackdropView`（`Island` / `go.mangoos.island`）后明确传入 `kCFBooleanFalse`。本版在活动玻璃已挂入灵动岛、边缘光开关为 YES 时检查该玻璃实际覆盖值；仅在其仍非 YES 时调用已确认存在且签名匹配的原方法设为 YES，避免每帧重设。Mango 可能在 mango.dylib 与 mangoos.dylib 各有同名类，本版按对象实际 class 与加载模块识别。其余材质域不受此项修正。日志 `[EDGE-ACTIVE]` 用来区分是否发现并更正活动玻璃。此为实机待验证的修复假设；如果仍不亮，不再叠加颜色/层级补偿，应根据活动玻璃光层状态定位。
