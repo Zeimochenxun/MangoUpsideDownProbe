@@ -5,6 +5,6 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = MangoAdaptiveContrastProbe
 MangoAdaptiveContrastProbe_FILES = Probe.m
-MangoAdaptiveContrastProbe_CFLAGS = -fobjc-arc -fblocks -Wall -Wextra -Werror
+MangoAdaptiveContrastProbe_CFLAGS = -fobjc-arc -fblocks -Wall -Wextra -Werror -Wno-deprecated-declarations
 MangoAdaptiveContrastProbe_FRAMEWORKS = Foundation UIKit QuartzCore
 include $(THEOS_MAKE_PATH)/tweak.mk
