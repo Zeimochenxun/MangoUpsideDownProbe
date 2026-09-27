@@ -41,7 +41,7 @@ jobs:
           shasum -a 256 packages/*.deb > packages/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: MangoIslandAdaptiveColor-0.1.0-RootHide
+          name: MangoIslandAdaptiveColor-0.1.1-RootHide
           if-no-files-found: error
           path: |
             MangoIslandAdaptiveColor/packages/*.deb
