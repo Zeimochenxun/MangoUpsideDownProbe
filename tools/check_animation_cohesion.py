@@ -14,11 +14,12 @@ def smoothstep(low: float, high: float, value: float) -> float:
 
 
 def adaptive_output(luminance: float, slider: float, adaptation: float) -> float:
-    bright = smoothstep(0.10, 0.85, luminance)
-    adaptive_target = 0.18 + (0.025 - 0.18) * bright
-    target = 0.10 + (adaptive_target - 0.10) * adaptation
-    strength = 0.42 * smoothstep(0.0, 1.0, slider)
-    return luminance * (1.0 - strength) + target * strength
+    response = smoothstep(0.08, 0.85, luminance)
+    adaptive_luminance = 0.128 + (0.5905 - 0.128) * response
+    fixed_luminance = luminance * 0.71 + 0.10 * 0.29
+    desired = fixed_luminance + (adaptive_luminance - fixed_luminance) * adaptation
+    strength = smoothstep(0.0, 1.0, slider)
+    return luminance + (desired - luminance) * strength
 
 
 def linearize(value: float) -> float:
@@ -70,7 +71,7 @@ for adaptation in (0.0, 0.25, 0.5, 0.75, 1.0):
 
 assert adaptive_output(0.0, 0.0, 1.0) == 0.0
 assert adaptive_output(1.0, 0.0, 1.0) == 1.0
-assert 0.075 < adaptive_output(0.0, 1.0, 1.0) < 0.076
+assert 0.127 < adaptive_output(0.0, 1.0, 1.0) < 0.129
 assert 0.590 < adaptive_output(1.0, 1.0, 1.0) < 0.591
 assert adaptive_output(0.5, 0.25, 1.0) != adaptive_output(0.5, 0.75, 1.0)
 assert adaptive_output(0.0, 1.0, 0.0) != adaptive_output(0.0, 1.0, 1.0)
@@ -106,11 +107,11 @@ assert "if (eligible && (!bg || upgrading))" in idle_source
 assert "preferredFramesPerSecond = 60" in idle_source
 assert "AlphaSuffix(original, LightKey)" in color_source
 assert "AlphaSuffix(original, DarkKey)" in color_source
-assert "smoothstep(0.10, 0.85, luminance)" in color_source
-assert "float strength = 0.42 * userStrength" in color_source
-assert "float target = mix(0.10, adaptiveTarget, adaptation)" in color_source
+assert "smoothstep(0.08, 0.85, luminance)" in color_source
+assert "float adaptiveLuminance = mix(0.128, 0.5905, response)" in color_source
+assert "return mix(background, desired, userStrength)" in color_source
 assert "marker-decoder=raw+unpremultiplied+linear" in color_source
 assert "<key>Executables</key>" in idle_filter and "SpringBoard" in idle_filter
-assert "Executables" in color_filter and "SpringBoard" in color_filter
+assert "Executables" in color_filter and "SpringBoard" in color_filter and "backboardd" in color_filter
 
 print("PASS: robust Island marker decoding, adaptive luma and presentation-driven handoff")

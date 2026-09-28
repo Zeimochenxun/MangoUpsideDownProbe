@@ -148,15 +148,16 @@ static NSString *const AdaptiveFunction =
  @"        float adaptation = markerLight ? clamp((lightRedByte - 240.0) / 14.0, 0.0, 1.0)\n"
  @"                                       : clamp((darkRedByte - 1.0) / 14.0, 0.0, 1.0);\n"
  @"        float luminance = dot(background, float3(0.2126, 0.7152, 0.0722));\n"
- @"        // A broad response avoids a visible threshold around middle gray.\n"
- @"        float bright = smoothstep(0.10, 0.85, luminance);\n"
- @"        // Lift dark backdrops slightly and tint bright backdrops near-black.\n"
- @"        float adaptiveTarget = mix(0.18, 0.025, bright);\n"
- @"        float target = mix(0.10, adaptiveTarget, adaptation);\n"
- @"        // Map the full user slider to a glass-safe 0..42 percent mix.\n"
+ @"        // Match 0.1.2's measured black/white endpoints while making the\n"
+ @"        // response monotonic across the full range to avoid gray flashes.\n"
+ @"        float response = smoothstep(0.08, 0.85, luminance);\n"
+ @"        float adaptiveLuminance = mix(0.128, 0.5905, response);\n"
+ @"        float3 adaptiveRGB = clamp(background + (adaptiveLuminance - luminance), 0.0, 1.0);\n"
+ @"        float3 fixedRGB = mix(background, float3(0.10), 0.29);\n"
+ @"        float3 desired = mix(fixedRGB, adaptiveRGB, adaptation);\n"
+ @"        // Tint Strength scales the complete response from unchanged to full.\n"
  @"        float userStrength = smoothstep(0.0, 1.0, clamp(tint.a, 0.0, 1.0));\n"
- @"        float strength = 0.42 * userStrength;\n"
- @"        return mix(background, float3(target), strength);\n"
+ @"        return mix(background, desired, userStrength);\n"
  @"    }\n"
  @"    return mix(background, tint.rgb, tint.a);\n"
  @"}\n\n";
@@ -203,14 +204,15 @@ static id<MTLLibrary> NewLibrary(id self, SEL cmd, NSString *source, MTLCompileO
 
 __attribute__((constructor)) static void Start(void) {
     @autoreleasepool {
-        // The live Island glass, Mango preference reader and runtime-compiled
-        // Metal shader all live in SpringBoard on the target build.
         NSString *process = NSProcessInfo.processInfo.processName;
         NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
-        if (![process isEqualToString:@"SpringBoard"] && ![bundle isEqualToString:@"com.apple.springboard"]) return;
+        BOOL springboard = [process isEqualToString:@"SpringBoard"] || [bundle isEqualToString:@"com.apple.springboard"];
+        BOOL renderer = [process isEqualToString:@"backboardd"] || [bundle isEqualToString:@"com.apple.backboardd"];
+        if (!springboard && !renderer) return;
         NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
-        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.7 robust-marker process=%@ bundle=%@", process ?: @"(nil)", bundle ?: @"(nil)"]);
+        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.8 dual-process role=%@ process=%@ bundle=%@",
+                 renderer ? @"renderer" : @"view", process ?: @"(nil)", bundle ?: @"(nil)"]);
 
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
         Class cls = device ? object_getClass(device) : Nil;
@@ -233,7 +235,7 @@ __attribute__((constructor)) static void Start(void) {
         // MangoOSRendering imports this exact CF function. We only alter its
         // Island keys in its own domain, without modifying stored preferences.
         MSHookFunction((void *)CFPreferencesCopyMultiple, (void *)CopyMultiple, (void **)&OriginalCopyMultiple);
-        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.7 MetalClass=%@ shaderSeen=%d patched=%d",
+        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.8 MetalClass=%@ shaderSeen=%d patched=%d",
                  NSStringFromClass(cls), ShaderSeen, ShaderPatched]);
     }
 }

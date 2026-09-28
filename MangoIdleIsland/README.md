@@ -135,8 +135,8 @@ Beta7-1 的 mangoos.dylib 在创建活动 `MGLiveBackdropView`（`Island` / `go.
 
 ## 1.1.7 自适应程度
 
-设置页新增 0–1 的“自适应程度”。0 使用固定中性色调，1 完整跟随背景亮度，中间值连续插值。它与“色调强度”分开：自适应程度决定颜色响应背景的幅度，色调强度决定该颜色最终混入玻璃的比例。此选项需要 MangoIslandAdaptiveColor 0.1.7 或更新版本。
+设置页新增 0–1 的“自适应程度”。0 使用固定中性色调，1 完整跟随背景亮度，中间值连续插值。它与“色调强度”分开：自适应程度决定颜色响应背景的幅度，色调强度决定该颜色最终混入玻璃的比例。此选项需要 MangoIslandAdaptiveColor 0.1.8 或更新版本。
 
 ## 1.1.8 注入过滤修复
 
-注入配置改为直接匹配 `SpringBoard` 可执行文件，构造函数也同时接受进程名与 bundle ID。这样即使 RootHide 环境没有向注入器提供稳定的 bundle 标识，运行时代码和状态日志仍能启动。MangoIslandAdaptiveColor 0.1.6 根据实机日志也迁移到 `SpringBoard`，与 Mango 的实际渲染进程一致。
+注入配置改为直接匹配 `SpringBoard` 可执行文件，构造函数也同时接受进程名与 bundle ID。MangoIslandAdaptiveColor 0.1.8 则同时覆盖 SpringBoard 视图侧和 backboardd 中的 MangoOSRendering shader。

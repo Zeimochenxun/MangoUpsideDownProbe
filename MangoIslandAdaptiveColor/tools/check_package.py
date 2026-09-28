@@ -20,8 +20,8 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(["dpkg-deb", "--fsy
     plist_member = next(member for member in files if member.name.endswith("/MangoIslandAdaptiveColor.plist"))
     dylib_member = next(member for member in files if member.name.endswith("/MangoIslandAdaptiveColor.dylib"))
     require(plistlib.loads(archive.extractfile(plist_member).read()) ==
-            {"Filter": {"Executables": ["SpringBoard"]}},
-            "adaptive color must inject into the SpringBoard renderer")
+            {"Filter": {"Executables": ["SpringBoard", "backboardd"]}},
+            "adaptive color must cover the SpringBoard view and backboardd renderer")
     dylib = archive.extractfile(dylib_member).read()
 
 magic, cpu, subtype, filetype = struct.unpack_from("<4I", dylib)
@@ -29,7 +29,7 @@ require(magic == 0xFEEDFACF, "expected a 64-bit Mach-O")
 require(cpu == 0x0100000C and subtype & 0xFFFFFF == 2, "expected arm64e")
 require(filetype == 6, "expected a dylib")
 for marker in (
-    b"0.1.7 robust-marker",
+    b"0.1.8 dual-process",
     b"MangoIslandAdaptiveColor.Adaptation",
     b"Island.LightTintColor",
     b"Island.DarkTintColor",
@@ -40,8 +40,8 @@ for marker in (
 
 control = subprocess.check_output(["dpkg-deb", "--field", path]).decode()
 require("Package: com.chenxun.mangoislandadaptivecolor" in control, "wrong package ID")
-require("Version: 0.1.7" in control, "wrong package version")
+require("Version: 0.1.8" in control, "wrong package version")
 require("Architecture: iphoneos-arm64e" in control, "wrong package architecture")
 require("com.chenxun.mangoidleisland (>= 1.1.8)" in control, "missing cohesive Idle dependency")
 
-print("PASS: MangoIslandAdaptiveColor 0.1.7 arm64e RootHide; robust marker decoder and SpringBoard shader hook verified")
+print("PASS: MangoIslandAdaptiveColor 0.1.8 arm64e RootHide; SpringBoard view and backboardd renderer verified")
