@@ -1,8 +1,8 @@
 Package: com.chenxun.mangoidleisland
 Name: MangoIdleIsland
-Version: 1.1.7
+Version: 1.1.8
 Architecture: iphoneos-arm64e
-Description: Global Mango Island glass parameter bridge with duplicate preview-glass suppression, idle geometry synchronization, activity handoff, active Island edge override guard, and Island glass diagnostics.
+Description: Global Mango Island glass parameter bridge with idle no-autoresize geometry pinning, duplicate preview-glass suppression, activity handoff, active Island edge override guard, and Island glass diagnostics.
 Maintainer: Chen Xun
 Author: Chen Xun
 Section: Tweaks
