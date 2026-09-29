@@ -2,6 +2,7 @@
 #import <objc/runtime.h>
 #import <CydiaSubstrate/CydiaSubstrate.h>
 #import <mach-o/loader.h>
+#import <mach/vm_prot.h>
 #import <dlfcn.h>
 #import <ptrauth.h>
 #import <pthread.h>
@@ -60,6 +61,7 @@ static _Atomic(uint64_t) gBusyDrops;
 static CFTypeRef (*gCopyAnswer)(CFStringRef, CFDictionaryRef);
 static bool (*gBoolAnswer)(CFStringRef);
 static BOOL gMGInstalled[2];
+static BOOL gCodeCaptured;
 static const CFStringRef kMGKeys[] = {CFSTR("DeviceClass"), CFSTR("DeviceClassNumber"), CFSTR("PearlIDCapability"), CFSTR("DeviceSupportsLandscapeFaceID"), CFSTR("+3Uf0Pm5F8Xy7Onyvko0vA"), CFSTR("mtrAoWJ3gsq+I90ZnQ0vQw"), CFSTR("8olRm6C1xqr7AJGpLRnpSw"), CFSTR("eP/CPXY0Q1CoIqAWn/J97g")};
 static const char *kMGNames[] = {"DeviceClass", "DeviceClassNumber", "PearlIDCapability", "DeviceSupportsLandscapeFaceID", "+3Uf0Pm5F8Xy7Onyvko0vA", "mtrAoWJ3gsq+I90ZnQ0vQw", "8olRm6C1xqr7AJGpLRnpSw", "eP/CPXY0Q1CoIqAWn/J97g"};
 #endif
@@ -233,6 +235,49 @@ static BOOL OpenLogs(void) {
     CreateControl("Disable.txt", "0\n", gid);
     return YES;
 }
+#if !LAB_SPRINGBOARD
+static void CaptureBKDMCode(void) {
+    if (gCodeCaptured || gDir < 0) return;
+    Class cls = objc_lookUpClass("BiometricKitXPCServerPearl");
+    Method method = cls ? class_getInstanceMethod(cls, sel_registerName("deviceOrientation")) : NULL;
+    Dl_info info = {0};
+    const void *imp = method ? ptrauth_strip((void *)method_getImplementation(method), ptrauth_key_function_pointer) : NULL;
+    if (!imp || !dladdr(imp, &info) || !info.dli_fname || strcmp(info.dli_fname, kBKDM)) return;
+    const struct mach_header_64 *h = info.dli_fbase;
+    NSString *uuid = UUID(h);
+    if (![uuid isEqualToString:@"503938ad-b29d-3894-b44c-c2be6ffcef56"]) return;
+    // The on-disk dylib may be inside the shared cache. Copy only mapped __TEXT
+    // containing the observed return offsets, after validating segment bounds.
+    const uint32_t start = 0x4000;
+    const uint8_t *p = (const uint8_t *)(h + 1), *end = p + h->sizeofcmds;
+    uint32_t length = 0;
+    for (uint32_t i = 0; i < h->ncmds && (size_t)(end - p) >= sizeof(struct load_command); i++) {
+        const struct load_command *c = (const void *)p;
+        if (c->cmdsize < sizeof(*c) || c->cmdsize > (size_t)(end - p)) return;
+        if (c->cmd == LC_SEGMENT_64 && c->cmdsize >= sizeof(struct segment_command_64)) {
+            const struct segment_command_64 *seg = (const void *)c;
+            if (!strncmp(seg->segname, "__TEXT", sizeof(seg->segname)) && seg->fileoff == 0 && seg->vmsize >= 0x6000 && (seg->initprot & VM_PROT_READ)) length = (uint32_t)(seg->vmsize < 0x10000 ? seg->vmsize : 0x10000) - start;
+        }
+        p += c->cmdsize;
+    }
+    if (!length) { Log(@"[CODE-SKIP] reason=text-bounds-or-read-permission"); gCodeCaptured = YES; return; }
+    int fd = openat(gDir, "BKDM-code-from-4000.bin", O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0640);
+    if (!RegularFile(fd) || ftruncate(fd, 0)) { if (fd >= 0) close(fd); Log(@"[CODE-SKIP] reason=unsafe-output"); gCodeCaptured = YES; return; }
+    struct passwd *mobile = getpwnam("mobile");
+    gid_t gid = mobile ? mobile->pw_gid : getegid();
+    if (fchown(fd, geteuid(), gid) || fchmod(fd, 0640)) { close(fd); Log(@"[CODE-SKIP] reason=output-permissions"); gCodeCaptured = YES; return; }
+    const uint8_t *source = (const uint8_t *)h + start;
+    size_t remain = length;
+    while (remain) {
+        ssize_t n = write(fd, source, remain);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) { close(fd); Log(@"[CODE-SKIP] reason=short-write"); gCodeCaptured = YES; return; }
+        source += n; remain -= (size_t)n;
+    }
+    close(fd); gCodeCaptured = YES;
+    Log(@"[CODE-DUMP] file=BKDM-code-from-4000.bin image=%s uuid=%@ baseRelativeStart=0x4000 length=0x%x source=mapped-__TEXT read-only=YES", info.dli_fname, uuid, length);
+}
+#endif
 static NSString *ReadControl(const char *name) {
     int fd = openat(gDir, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
     if (!RegularFile(fd)) { if (fd >= 0) close(fd); return nil; }
@@ -292,6 +337,9 @@ static void Tick(void) {
     }
     if (gStopped) return;
     if (gTicks < 120) {
+#if !LAB_SPRINGBOARD
+        CaptureBKDMCode();
+#endif
         InstallHooks();
 #if !LAB_SPRINGBOARD
         InstallMG();
@@ -330,7 +378,7 @@ __attribute__((constructor)) static void Initialize(void) {
             @autoreleasepool {
                 if (!OpenLogs()) { if (gFD >= 0) close(gFD); if (gDir >= 0) close(gDir); gFD = gDir = -1; return; }
                 gSession = NSUUID.UUID.UUIDString; gStarted = Now();
-                Log(@"[SESSION] version=0.1.1-alpha2 process=%s pid=%d build=20F66 model=iPhone14,4 mode=observe-only maxBytes=2097152 maxSamplesPerMethodPerSecond=4", LAB_PROCESS, getpid());
+                Log(@"[SESSION] version=0.1.2-alpha3 process=%s pid=%d build=20F66 model=iPhone14,4 mode=observe-only maxBytes=2097152 maxSamplesPerMethodPerSecond=4", LAB_PROCESS, getpid());
                 Log(@"[NOTICE] raw-enum=unknown analytics-is-not-proof-of-control-path phase=manual no-identities-or-auth-results-recorded");
                 gTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, gQueue);
                 dispatch_source_set_timer(gTimer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_SEC / 10);
