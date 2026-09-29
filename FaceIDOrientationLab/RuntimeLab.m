@@ -250,17 +250,22 @@ static void CaptureBKDMCode(void) {
     // containing the observed return offsets, after validating segment bounds.
     const uint32_t start = 0x4000;
     const uint8_t *p = (const uint8_t *)(h + 1), *end = p + h->sizeofcmds;
-    uint32_t length = 0;
+    uint32_t length = 0, textProt = 0;
+    uint64_t textSize = 0, textFileoff = 0;
     for (uint32_t i = 0; i < h->ncmds && (size_t)(end - p) >= sizeof(struct load_command); i++) {
         const struct load_command *c = (const void *)p;
         if (c->cmdsize < sizeof(*c) || c->cmdsize > (size_t)(end - p)) return;
         if (c->cmd == LC_SEGMENT_64 && c->cmdsize >= sizeof(struct segment_command_64)) {
             const struct segment_command_64 *seg = (const void *)c;
-            if (!strncmp(seg->segname, "__TEXT", sizeof(seg->segname)) && seg->fileoff == 0 && seg->vmsize >= 0x6000 && (seg->initprot & VM_PROT_READ)) length = (uint32_t)(seg->vmsize < 0x10000 ? seg->vmsize : 0x10000) - start;
+            if (!strncmp(seg->segname, "__TEXT", sizeof(seg->segname))) {
+                textSize = seg->vmsize; textFileoff = seg->fileoff; textProt = (uint32_t)seg->initprot;
+                if (seg->vmsize >= 0x6000 && (seg->initprot & VM_PROT_READ))
+                    length = (uint32_t)(seg->vmsize < 0x10000 ? seg->vmsize : 0x10000) - start;
+            }
         }
         p += c->cmdsize;
     }
-    if (!length) { Log(@"[CODE-SKIP] reason=text-bounds-or-read-permission"); gCodeCaptured = YES; return; }
+    if (!length) { Log(@"[CODE-SKIP] reason=text-bounds-or-read-permission textSize=0x%llx textFileoff=0x%llx textProt=0x%x", (unsigned long long)textSize, (unsigned long long)textFileoff, textProt); gCodeCaptured = YES; return; }
     int fd = openat(gDir, "BKDM-code-from-4000.bin", O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0640);
     if (!RegularFile(fd) || ftruncate(fd, 0)) { if (fd >= 0) close(fd); Log(@"[CODE-SKIP] reason=unsafe-output"); gCodeCaptured = YES; return; }
     struct passwd *mobile = getpwnam("mobile");
@@ -378,7 +383,7 @@ __attribute__((constructor)) static void Initialize(void) {
             @autoreleasepool {
                 if (!OpenLogs()) { if (gFD >= 0) close(gFD); if (gDir >= 0) close(gDir); gFD = gDir = -1; return; }
                 gSession = NSUUID.UUID.UUIDString; gStarted = Now();
-                Log(@"[SESSION] version=0.1.2-alpha3 process=%s pid=%d build=20F66 model=iPhone14,4 mode=observe-only maxBytes=2097152 maxSamplesPerMethodPerSecond=4", LAB_PROCESS, getpid());
+                Log(@"[SESSION] version=0.1.3-alpha4 process=%s pid=%d build=20F66 model=iPhone14,4 mode=observe-only maxBytes=2097152 maxSamplesPerMethodPerSecond=4", LAB_PROCESS, getpid());
                 Log(@"[NOTICE] raw-enum=unknown analytics-is-not-proof-of-control-path phase=manual no-identities-or-auth-results-recorded");
                 gTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, gQueue);
                 dispatch_source_set_timer(gTimer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_SEC / 10);

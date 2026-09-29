@@ -1,12 +1,12 @@
-# FaceID Orientation Lab 0.1.2-alpha3
+# FaceID Orientation Lab 0.1.3-alpha4
 
-第三个原生可安装诊断版，可替换 0.1.0-alpha1 和 0.1.1-alpha2。只适用于 iPhone 13 mini / iPhone14,4、iOS 16.5 build 20F66、Dopamine RootHide。
+第四个原生可安装诊断版，可替换 0.1.0-alpha1 至 0.1.2-alpha3。修正共享缓存镜像的非零文件偏移校验。只适用于 iPhone 13 mini / iPhone14,4、iOS 16.5 build 20F66、Dopamine RootHide。
 
 **这是定位用插件，安装后不会使倒置 Face ID 自动恢复。没有启用 iPad 伪装、方向改写或认证结果修改。**
 
 ## 安装与测试
 
-1. 保存并安装 `com.chenxun.faceidorientationlab_0.1.2~alpha3_iphoneos-arm64e.deb`。包管理器可按 Conflicts 提示移除旧 `FaceIDOrientationProbe`；两者不能同时挂接同一组接口。保留当前 Mango / UpsideDowned 及视觉补丁，测试期间不要更新它们。
+1. 保存并安装 `com.chenxun.faceidorientationlab_0.1.3~alpha4_iphoneos-arm64e.deb`。包管理器可按 Conflicts 提示移除旧 `FaceIDOrientationProbe`；两者不能同时挂接同一组接口。保留当前 Mango / UpsideDowned 及视觉补丁，测试期间不要更新它们。
 2. 在 Dopamine 中执行“重启用户空间”，然后先用密码解锁一次。单纯 Respring 不保证 biometrickitd 加载。
 3. 等约 15 秒。认证进程目录还会出现 `BKDM-code-from-4000.bin`；这份文件只保存经镜像 UUID 校验的已加载可执行代码片段（基址偏移 `0x4000`，最多 48 KiB）。从 Filza 导出它和同目录的 Probe.log 即可，不需要重复刷脸。若日志是 `[CODE-SKIP]`，文件不会生成。Filza 中会自动出现以下两个目录，各自有 `Probe.log`、`Phase.txt`、`Disable.txt`，不需手动创建。
 

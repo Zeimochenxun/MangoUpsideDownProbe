@@ -68,7 +68,7 @@ jobs:
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: FaceIDOrientationLab-0.1.2-alpha3-RootHide
+          name: FaceIDOrientationLab-0.1.3-alpha4-RootHide
           if-no-files-found: error
           path: |
             FaceIDOrientationLab/packages/*.deb
