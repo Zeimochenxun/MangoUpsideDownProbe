@@ -281,6 +281,32 @@ static void CaptureBKDMCode(void) {
     }
     close(fd); gCodeCaptured = YES;
     Log(@"[CODE-DUMP] file=BKDM-code-from-4000.bin image=%s uuid=%@ baseRelativeStart=0x4000 length=0x%x source=mapped-__TEXT read-only=YES", info.dli_fname, uuid, length);
+    // The two BL instructions at 0x5780 and 0x5820 target 0x980e0 and
+    // 0x9a5c0 in this exact UUID. Capture their bodies separately and only
+    // when the same readable __TEXT segment contains the entire range.
+    const uint32_t targetStart = 0x97000, targetLength = 0x5000;
+    if (textSize < (uint64_t)targetStart + targetLength || !(textProt & VM_PROT_READ)) {
+        Log(@"[TARGET-SKIP] reason=target-bounds textSize=0x%llx textFileoff=0x%llx textProt=0x%x", (unsigned long long)textSize, (unsigned long long)textFileoff, textProt);
+        return;
+    }
+    int targetFD = openat(gDir, "BKDM-targets-97000-9c000.bin", O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0640);
+    if (!RegularFile(targetFD) || ftruncate(targetFD, 0)) {
+        if (targetFD >= 0) close(targetFD);
+        Log(@"[TARGET-SKIP] reason=unsafe-output"); return;
+    }
+    if (fchown(targetFD, geteuid(), gid) || fchmod(targetFD, 0640)) {
+        close(targetFD); Log(@"[TARGET-SKIP] reason=output-permissions"); return;
+    }
+    const uint8_t *target = (const uint8_t *)h + targetStart;
+    size_t targetRemain = targetLength;
+    while (targetRemain) {
+        ssize_t n = write(targetFD, target, targetRemain);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) { close(targetFD); Log(@"[TARGET-SKIP] reason=short-write"); return; }
+        target += n; targetRemain -= (size_t)n;
+    }
+    close(targetFD);
+    Log(@"[TARGET-DUMP] file=BKDM-targets-97000-9c000.bin image=%s uuid=%@ baseRelativeStart=0x97000 length=0x5000 source=mapped-__TEXT read-only=YES", info.dli_fname, uuid);
 }
 #endif
 static NSString *ReadControl(const char *name) {
@@ -383,7 +409,7 @@ __attribute__((constructor)) static void Initialize(void) {
             @autoreleasepool {
                 if (!OpenLogs()) { if (gFD >= 0) close(gFD); if (gDir >= 0) close(gDir); gFD = gDir = -1; return; }
                 gSession = NSUUID.UUID.UUIDString; gStarted = Now();
-                Log(@"[SESSION] version=0.1.3-alpha4 process=%s pid=%d build=20F66 model=iPhone14,4 mode=observe-only maxBytes=2097152 maxSamplesPerMethodPerSecond=4", LAB_PROCESS, getpid());
+                Log(@"[SESSION] version=0.1.4-alpha5 process=%s pid=%d build=20F66 model=iPhone14,4 mode=observe-only maxBytes=2097152 maxSamplesPerMethodPerSecond=4", LAB_PROCESS, getpid());
                 Log(@"[NOTICE] raw-enum=unknown analytics-is-not-proof-of-control-path phase=manual no-identities-or-auth-results-recorded");
                 gTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, gQueue);
                 dispatch_source_set_timer(gTimer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_SEC / 10);
