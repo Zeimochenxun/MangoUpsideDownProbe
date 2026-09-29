@@ -1,23 +1,42 @@
-# MangoIslandAdaptiveColor 0.1.1 (实验版)
+# MangoIslandAdaptiveColor 0.1.2.2
 
-目标：让 Mango 的 `go.mangoos.island` 玻璃在空闲和活动状态下，按岛下方**实际背景像素的亮度**改变岛体的混色。它保留 MangoIdleIsland 1.1.5 已验证的边缘光与空闲态切换，不修改 Mango 原版文件。
+以真机基本可用的 0.1.2 为视觉基线，把 Mango `go.mangoos.island` 的背景自适应混色拆成可调参数，并彻底移除 0.1.2.1 的 Settings 预览 / 自定义 Cell。
 
-## 实现范围
+## 默认值 = 0.1.2
 
-- 仅注入 `com.apple.backboardd`；安装后自动启用，无须手动创建启用文件。
-- Mango 读取 `com.go.mangoosprefs` 的 Island 色调参数时，为 `Island.LightTintColor` 和 `Island.DarkTintColor` 提供临时标记。不会写回或覆盖用户设置。
-- 仅对当前 Beta7-1 中出现的 Metal 源码做精确字符串校验；替换平面和曲面两处 `mix`。未带 Island 标记的其他玻璃仍执行原始混色。
-- 暗背景给岛体少量亮色、亮背景增加暗色混合；保留 Mango 活动内容的白字可读性。无需取屏幕截图；像素由 Mango 原有渲染输入提供。
-- 如果动态 Metal 编译失败，立即再用原始源码编译；日志记录原因。
+- 总自适应强度：1.00
+- 响应起点：0.08
+- 响应终点：0.42
+- 暗背景目标亮度：0.80
+- 亮背景目标亮度：0.025
+- 暗区混合强度：0.16
+- 亮区混合强度：0.42
 
-这是未经真机验证的实验包。Mango 更新、偏好解析方式改变或初始化顺序不同都可能使它无效。`[SHADER]` 成功只能证明改过的源码完成编译，实际观感仍须用真机分别看空闲、音乐、通知等状态。
+以上默认组合在 shader 中仍等价于：
 
-## 安装和恢复
+```text
+bright = smoothstep(0.08, 0.42, luminance)
+target = mix(0.80, 0.025, bright)
+opacity = mix(0.16, 0.42, bright)
+out = mix(background, target, opacity)
+```
 
-安装 `.deb` 并重启用户空间后自动生效。插件在首次写日志时自动建立 `/var/mobile/Library/Logs/MangoIslandAdaptiveColor/` 文件夹和其中的 `Status.log`。查看 `[SHADER] ... compiled` 与 `[ISLAND] ... marker`。首次测试前保留 SSH 或 Dopamine 关闭 tweak 注入的入口。
+默认参数还会重新编码为 0.1.2 原始 Island markers：`#FEFEFD1A` / `#0101021A`。
 
-如果显示异常、触摸异常或 backboardd 反复重启，重启设备后在 Dopamine 关闭 tweak 注入，再用 Sileo 卸载 `com.chenxun.mangoislandadaptivecolor`，然后正常越狱。原版 Mango、MangoIdleIsland 1.1.5 以及原有偏好未被修改。0.1.0 的 `.enable` 文件在本版无效，不影响运行。
+## 可调项目
+
+设置页仅使用系统原生 Preferences 控件，不再包含 `MIAAdaptivePreviewView`、`MIAAdaptivePreviewCell` 或 `cellClass`。
+
+可调参数：总强度、亮度响应起点/终点、暗/亮背景目标亮度、暗/亮端混合强度。每个参数在实时 marker transport 中量化为 8 个稳定档位；滑块写入后通过 `com.go.mangoosprefs/Reload` 合并刷新，不需要每次重新编译 Metal shader。
+
+## 实现边界
+
+- 仅注入 `com.apple.backboardd`。
+- 不修改 Mango 原始二进制文件。
+- 仍只替换 Beta7-1 已验证的两处 Metal tint mix；其他 Mango 玻璃沿用原始路径。
+- Island 参数由两个临时 tint marker 传输，不写回 `Island.LightTintColor` / `Island.DarkTintColor`。
+- Metal 修改失败时回退原始 shader。
 
 ## 构建
 
-RootHide Theos、iOS 16.5 SDK：在此目录运行 `make package FINALPACKAGE=1`。CI 通过 `mango-island-adaptive-color.yml` 构建 `iphoneos-arm64e` 包。由于这里只能静态验证，还需要真机比较暗／亮背景下的空闲态、音乐活动态和通知活动态。
+RootHide Theos + iOS 16.5 SDK：`make package FINALPACKAGE=1`。CI 同时检查 arm64e tweak、PreferenceBundle、PreferenceLoader 入口、0.1.2.2 版本、参数键，并强制确认最终设置 Bundle 不含旧预览类字符串。
