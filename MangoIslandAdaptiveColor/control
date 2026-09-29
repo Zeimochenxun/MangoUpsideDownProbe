@@ -1,8 +1,8 @@
 Package: com.chenxun.mangoislandadaptivecolor
 Name: MangoIslandAdaptiveColor
-Version: 0.1.2.1
+Version: 0.1.2.2
 Architecture: iphoneos-arm64e
-Description: 0.1.2-faithful Island adaptive backdrop tint with adjustable adaptation strength and live Settings preview.
+Description: Highly configurable 0.1.2-faithful Island adaptive backdrop tint with stock Preferences controls and no custom preview cell.
 Maintainer: Chen Xun
 Author: Chen Xun
 Section: Tweaks
