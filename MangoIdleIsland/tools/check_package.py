@@ -46,7 +46,6 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'duplicate-preview-suppression=1',
         b'idle-size-guard=1',
         b'view-autoresize=off',
-        b'layer-autoresize=off',
         b'implicit-animation=off',
         b'[IDLE-GEOMETRY]',
         b'[IDLE-LAYER]',
@@ -110,4 +109,4 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--ctr
     assert 'Architecture: iphoneos-arm64e' in control
     assert 'Depends: mobilesubstrate, firmware (= 16.5)' in control
 
-print('PASS: MangoIdleIsland 1.1.8 arm64e RootHide; idle no-autoresize + geometry guard + preview handoff + diagnostics included')
+print('PASS: MangoIdleIsland 1.1.8 arm64e RootHide; UIView no-autoresize + geometry guard + preview handoff + diagnostics included')
