@@ -1,8 +1,8 @@
-name: Build MangoIslandAdaptiveColor RootHide
+name: Build MangoIslandAdaptiveColor 0.1.2.1 RootHide
 on:
   workflow_dispatch:
   push:
-    branches: [mango-island-adaptive-color]
+    branches: [mango-island-adaptive-color-012-slider-preview]
     paths: ['MangoIslandAdaptiveColor/**', '.github/workflows/mango-island-adaptive-color.yml']
 permissions:
   contents: read
@@ -28,20 +28,28 @@ jobs:
           echo "5e0fd3f01266cce4ce012d4a99b38eb56578fca40d09edc81cd83dee958202fb  $RUNNER_TEMP/sdk.tar.xz" | shasum -a 256 -c -
           mkdir -p "$HOME/theos/sdks"
           tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$HOME/theos/sdks"
-      - name: Build package
+      - name: Build and inspect package
         shell: bash
         run: |
           set -euo pipefail
           export THEOS="$HOME/theos"
           make package FINALPACKAGE=1 2>&1 | tee "$RUNNER_TEMP/build.log"
           dylib="$(find .theos -name MangoIslandAdaptiveColor.dylib -type f | head -n 1)"
+          prefs="$(find .theos -name MangoIslandAdaptiveColorPrefs -type f | head -n 1)"
+          test -n "$dylib" && test -n "$prefs"
           xcrun lipo -info "$dylib"
+          xcrun lipo -info "$prefs"
           xcrun otool -L "$dylib"
           dpkg-deb -I packages/*.deb
+          dpkg-deb -c packages/*.deb | tee "$RUNNER_TEMP/package-files.txt"
+          grep -q 'MangoIslandAdaptiveColorPrefs.bundle' "$RUNNER_TEMP/package-files.txt"
+          grep -q 'PreferenceLoader/Preferences/MangoIslandAdaptiveColorPrefs.plist' "$RUNNER_TEMP/package-files.txt"
+          strings "$dylib" | grep -q 'MangoIslandAdaptiveColor.Adaptation'
+          strings "$dylib" | grep -q 'smoothstep(0.08, 0.42, luminance)'
           shasum -a 256 packages/*.deb > packages/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: MangoIslandAdaptiveColor-0.1.1-RootHide
+          name: MangoIslandAdaptiveColor-0.1.2.1-RootHide
           if-no-files-found: error
           path: |
             MangoIslandAdaptiveColor/packages/*.deb
