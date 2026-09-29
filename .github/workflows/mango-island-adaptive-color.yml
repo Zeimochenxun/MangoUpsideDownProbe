@@ -1,4 +1,4 @@
-name: Build MangoIslandAdaptiveColor 0.1.3.1 RootHide
+name: Build MangoIslandAdaptiveColor 0.1.3.2 RootHide
 on:
   workflow_dispatch:
   push:
@@ -15,12 +15,12 @@ jobs:
         working-directory: MangoIslandAdaptiveColor
     steps:
       - uses: actions/checkout@v4
-      - name: Apply 0.1.3.1 stability patch
+      - name: Apply 0.1.3.2 unified sampling patch
         shell: bash
         run: |
           set -euo pipefail
           python3 tools/apply_stability_fix.py
-      - name: Verify stability patch and Island-only guards
+      - name: Verify unified sampling patch and Island-only guards
         shell: bash
         run: |
           set -euo pipefail
@@ -29,8 +29,10 @@ jobs:
           grep -q 'return LightMarkerForPacked(packed);' TweakSafe.m
           grep -q 'float3 referenceBackground' TweakSafe.m
           grep -q 'float3 miaReference = src.sample(s, captureUV).rgb' TweakSafe.m
-          grep -q 'mangoIslandAdaptiveColor(flat.rgb, flat.rgb, u.tintColor)' TweakSafe.m
-          grep -q '0.1.3.1 stable-reference' TweakSafe.m
+          grep -q 'FlatBlockOld' TweakSafe.m
+          grep -q '!miaIsIslandMarker(u.tintColor) || bezel < 0.5' TweakSafe.m
+          grep -q 'Island marker: no early return' TweakSafe.m
+          grep -q '0.1.3.2 unified-sampling' TweakSafe.m
           grep -q 'MarkerAlphaForPacked' TweakSafe.m
           grep -q 'miaMarkerAlpha' TweakSafe.m
           grep -q '恢复默认参数' MangoIslandAdaptiveColorPrefs/PrefsSafe.m
@@ -60,12 +62,12 @@ jobs:
           xcrun lipo -info "$prefs"
           xcrun otool -L "$dylib"
           dpkg-deb -I packages/*.deb | tee "$RUNNER_TEMP/control.txt"
-          grep -q 'Version: 0.1.3.1' "$RUNNER_TEMP/control.txt"
+          grep -q 'Version: 0.1.3.2' "$RUNNER_TEMP/control.txt"
           dpkg-deb -c packages/*.deb | tee "$RUNNER_TEMP/package-files.txt"
           grep -q 'MangoIslandAdaptiveColorPrefs.bundle' "$RUNNER_TEMP/package-files.txt"
           grep -q 'PreferenceLoader/Preferences/MangoIslandAdaptiveColorPrefs.plist' "$RUNNER_TEMP/package-files.txt"
-          echo '[check] stable renderer signature'
-          strings "$dylib" | grep -F -q '0.1.3.1 stable-reference Island glass compiled'
+          echo '[check] unified renderer signature'
+          strings "$dylib" | grep -F -q '0.1.3.2 unified-sampling Island glass compiled'
           echo '[check] island-only marker'
           strings "$dylib" | grep -F -q '[ISLAND-ONLY]'
           echo '[check] configurable key'
@@ -83,7 +85,7 @@ jobs:
           shasum -a 256 packages/*.deb > packages/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: MangoIslandAdaptiveColor-0.1.3.1-RootHide
+          name: MangoIslandAdaptiveColor-0.1.3.2-RootHide
           if-no-files-found: error
           path: |
             MangoIslandAdaptiveColor/packages/*.deb
