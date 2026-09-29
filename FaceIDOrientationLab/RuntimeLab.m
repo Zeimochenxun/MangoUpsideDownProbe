@@ -25,7 +25,7 @@
 #define LAB_PROCESS "biometrickitd"
 #define LAB_LOGDIR "/var/mobile/Library/Logs/FaceIDOrientationLab-Bio"
 #endif
-#define EVENT_KINDS 7
+#define EVENT_KINDS 9
 
 // Only verified scalar methods. Never message private objects from the probe.
 static const char *kClasses[] = {"BiometricKitXPCServerPearl", "BKFaceDetectStateInfo", "BKFaceDetectStateInfo", "PearlCoreAnalytics", "UIDevice", "SBTraitsSceneParticipantDelegate", "UIDevice"};
@@ -56,6 +56,13 @@ static unsigned gUsed;
 static uint64_t gCounts[EVENT_KINDS], gLimited[EVENT_KINDS], gSeconds[EVENT_KINDS];
 static unsigned gPerSecond[EVENT_KINDS];
 static _Atomic(uint64_t) gBusyDrops;
+#if !LAB_SPRINGBOARD
+static CFTypeRef (*gCopyAnswer)(CFStringRef, CFDictionaryRef);
+static bool (*gBoolAnswer)(CFStringRef);
+static BOOL gMGInstalled[2];
+static const CFStringRef kMGKeys[] = {CFSTR("DeviceClass"), CFSTR("DeviceClassNumber"), CFSTR("PearlIDCapability"), CFSTR("DeviceSupportsLandscapeFaceID"), CFSTR("+3Uf0Pm5F8Xy7Onyvko0vA"), CFSTR("mtrAoWJ3gsq+I90ZnQ0vQw"), CFSTR("8olRm6C1xqr7AJGpLRnpSw"), CFSTR("eP/CPXY0Q1CoIqAWn/J97g")};
+static const char *kMGNames[] = {"DeviceClass", "DeviceClassNumber", "PearlIDCapability", "DeviceSupportsLandscapeFaceID", "+3Uf0Pm5F8Xy7Onyvko0vA", "mtrAoWJ3gsq+I90ZnQ0vQw", "8olRm6C1xqr7AJGpLRnpSw", "eP/CPXY0Q1CoIqAWn/J97g"};
+#endif
 
 static uint64_t Now(void) {
     struct timespec t;
@@ -102,6 +109,22 @@ static int64_t OrientationMode(id self, SEL cmd) {
     int64_t result = ((int64_t (*)(id, SEL))gOriginal[5])(self, cmd);
     Observe(5, (uint64_t)result, (uintptr_t)__builtin_return_address(0)); return result;
 }
+#if !LAB_SPRINGBOARD
+// Only an allow-listed key is recorded. Answers and authentication objects are untouched.
+static void ObserveMG(unsigned method, CFStringRef key, uintptr_t caller) {
+    if (!atomic_load_explicit(&gEnabled, memory_order_acquire) || !key || CFGetTypeID(key) != CFStringGetTypeID()) return;
+    for (unsigned i = 0; i < sizeof(kMGKeys) / sizeof(kMGKeys[0]); i++)
+        if (CFEqual(key, kMGKeys[i])) { Observe(method, i, caller); break; }
+}
+static CFTypeRef CopyAnswer(CFStringRef key, CFDictionaryRef options) {
+    CFTypeRef result = gCopyAnswer(key, options);
+    ObserveMG(7, key, (uintptr_t)__builtin_return_address(0)); return result;
+}
+static bool BoolAnswer(CFStringRef key) {
+    bool result = gBoolAnswer(key);
+    ObserveMG(8, key, (uintptr_t)__builtin_return_address(0)); return result;
+}
+#endif
 
 static void Log(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
 static void Log(NSString *format, ...) {
@@ -163,6 +186,23 @@ static void InstallHooks(void) {
         Log(@"[HOOK] class=%s selector=%s types=%s image=%s uuid=%@ preserve-existing-chain=YES", kClasses[i], kSelectors[i], types, info.dli_fname, actualUUID);
     }
 }
+#if !LAB_SPRINGBOARD
+static void InstallMG(void) {
+    const char *symbols[] = {"MGCopyAnswer", "MGGetBoolAnswer"};
+    void *replacements[] = {(void *)CopyAnswer, (void *)BoolAnswer};
+    void **originals[] = {(void **)&gCopyAnswer, (void **)&gBoolAnswer};
+    for (unsigned i = 0; i < 2; i++) {
+        if (gMGInstalled[i]) continue;
+        void *address = dlsym(RTLD_DEFAULT, symbols[i]);
+        Dl_info info = {0};
+        if (!address || !dladdr(ptrauth_strip(address, ptrauth_key_function_pointer), &info) || !info.dli_fname || !strstr(info.dli_fname, "libMobileGestalt.dylib")) continue;
+        MSHookFunction(address, replacements[i], originals[i]);
+        if (!*originals[i]) { Log(@"[MG-SKIP] symbol=%s reason=no-original-trampoline", symbols[i]); continue; }
+        gMGInstalled[i] = YES;
+        Log(@"[MG-HOOK] symbol=%s image=%s uuid=%@ observe-keys-only=YES", symbols[i], info.dli_fname, UUID(info.dli_fbase) ?: @"unknown");
+    }
+}
+#endif
 static BOOL RegularFile(int fd) {
     struct stat st;
     return fd >= 0 && !fstat(fd, &st) && S_ISREG(st.st_mode) && st.st_nlink == 1 && st.st_uid == geteuid();
@@ -235,20 +275,34 @@ static void Tick(void) {
         Dl_info callerInfo = {0};
         const void *caller = (const void *)ptrauth_strip((void *)e.caller, ptrauth_key_function_pointer);
         BOOL haveCaller = caller && dladdr(caller, &callerInfo);
+        const char *name = e.method < 7 ? kSelectors[e.method] : (e.method == 7 ? "MGCopyAnswer" : "MGGetBoolAnswer");
+        const char *cls = e.method < 7 ? kClasses[e.method] : "MobileGestalt";
         if (haveCaller) Log(@"[CALLER] mono_ns=%llu class=%s selector=%s image=%s uuid=%@ returnOffset=0x%llx",
-            (unsigned long long)e.ns, kClasses[e.method], kSelectors[e.method], callerInfo.dli_fname ?: "unknown",
+            (unsigned long long)e.ns, cls, name, callerInfo.dli_fname ?: "unknown",
             UUID(callerInfo.dli_fbase) ?: @"unknown", (unsigned long long)((uintptr_t)caller - (uintptr_t)callerInfo.dli_fbase));
+#if !LAB_SPRINGBOARD
+        if (e.method >= 7) {
+            if (e.value < sizeof(kMGNames) / sizeof(kMGNames[0])) Log(@"[MG-QUERY] mono_ns=%llu phase=%s symbol=%s key=%s answer=not-read", (unsigned long long)e.ns, kPhases[e.phase], name, kMGNames[e.value]);
+            continue;
+        }
+#endif
         Log(@"[ORIENTATION] mono_ns=%llu phase=%s source=manual class=%s selector=%s raw=%llu observation=%s",
             (unsigned long long)e.ns, kPhases[e.phase], kClasses[e.method], kSelectors[e.method], (unsigned long long)e.value,
             (e.method == 1 || e.method == 3) ? "argument" : (e.method == 6 ? "public-UIDevice-sample-not-auth-input" : "return"));
     }
     if (gStopped) return;
-    if (gTicks < 120) InstallHooks();
+    if (gTicks < 120) {
+        InstallHooks();
+#if !LAB_SPRINGBOARD
+        InstallMG();
+#endif
+    }
     if (gTicks % 15 == 0) {
-        Log(@"[COUNTS] phase=%s device=%llu setter=%llu getter=%llu analytics=%llu idiom=%llu mode=%llu publicOrientation=%llu limited=%llu busyDropped=%llu hooks=%d%d%d%d%d%d",
+        Log(@"[COUNTS] phase=%s device=%llu setter=%llu getter=%llu analytics=%llu idiom=%llu mode=%llu publicOrientation=%llu mgCopy=%llu mgBool=%llu limited=%llu busyDropped=%llu hooks=%d%d%d%d%d%d",
             kPhases[next], (unsigned long long)counts[0], (unsigned long long)counts[1], (unsigned long long)counts[2], (unsigned long long)counts[3],
             (unsigned long long)counts[4], (unsigned long long)counts[5], (unsigned long long)counts[6],
-            (unsigned long long)(limited[0]+limited[1]+limited[2]+limited[3]+limited[4]+limited[5]+limited[6]), (unsigned long long)atomic_load(&gBusyDrops), gInstalled[0], gInstalled[1], gInstalled[2], gInstalled[3], gInstalled[4], gInstalled[5]);
+            (unsigned long long)counts[7], (unsigned long long)counts[8],
+            (unsigned long long)(limited[0]+limited[1]+limited[2]+limited[3]+limited[4]+limited[5]+limited[6]+limited[7]+limited[8]), (unsigned long long)atomic_load(&gBusyDrops), gInstalled[0], gInstalled[1], gInstalled[2], gInstalled[3], gInstalled[4], gInstalled[5]);
     }
     if (gTicks == 120) Log(@"[DISCOVERY-END] absent-or-rejected-methods-remain-unhooked");
     if (!gStopped) atomic_store(&gEnabled, true);
@@ -276,7 +330,7 @@ __attribute__((constructor)) static void Initialize(void) {
             @autoreleasepool {
                 if (!OpenLogs()) { if (gFD >= 0) close(gFD); if (gDir >= 0) close(gDir); gFD = gDir = -1; return; }
                 gSession = NSUUID.UUID.UUIDString; gStarted = Now();
-                Log(@"[SESSION] version=0.1.0-alpha1 process=%s pid=%d build=20F66 model=iPhone14,4 mode=observe-only maxBytes=2097152 maxSamplesPerMethodPerSecond=4", LAB_PROCESS, getpid());
+                Log(@"[SESSION] version=0.1.1-alpha2 process=%s pid=%d build=20F66 model=iPhone14,4 mode=observe-only maxBytes=2097152 maxSamplesPerMethodPerSecond=4", LAB_PROCESS, getpid());
                 Log(@"[NOTICE] raw-enum=unknown analytics-is-not-proof-of-control-path phase=manual no-identities-or-auth-results-recorded");
                 gTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, gQueue);
                 dispatch_source_set_timer(gTimer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_SEC / 10);

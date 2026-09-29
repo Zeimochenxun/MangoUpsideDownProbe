@@ -33,7 +33,7 @@ with tarfile.open(fileobj=io.BytesIO(control),mode='r:') as t:
     regular=[m for m in t if m.isfile()]
     assert len(regular)==1 and pathlib.PurePosixPath(regular[0].name).name=='control'
     s=t.extractfile(regular[0]).read().decode()
-    for x in ['Package: com.chenxun.faceidorientationlab','Version: 0.1.0~alpha1',
+    for x in ['Package: com.chenxun.faceidorientationlab','Version: 0.1.1~alpha2',
               'Architecture: iphoneos-arm64e','Conflicts: com.chenxun.faceidorientationprobe']:
         assert x in s,x
 print('PASS: exact filters, four payload files, signed arm64e dylibs, RootHide substrate paths, no install scripts')

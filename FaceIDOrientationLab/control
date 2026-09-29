@@ -1,6 +1,6 @@
 Package: com.chenxun.faceidorientationlab
 Name: FaceID Orientation Lab
-Version: 0.1.0~alpha1
+Version: 0.1.1~alpha2
 Architecture: iphoneos-arm64e
 Description: Native observe-only Face ID orientation and iPad-idiom caller lab for iPhone 13 mini iOS 16.5 RootHide. Does not unlock or change authentication.
 Maintainer: Chen Xun

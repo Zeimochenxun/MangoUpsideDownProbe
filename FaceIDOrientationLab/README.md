@@ -1,12 +1,12 @@
-# FaceID Orientation Lab 0.1.0-alpha1
+# FaceID Orientation Lab 0.1.1-alpha2
 
-首个原生可安装诊断版。只适用于 iPhone 13 mini / iPhone14,4、iOS 16.5 build 20F66、Dopamine RootHide。
+第二个原生可安装诊断版，可替换 0.1.0-alpha1。只适用于 iPhone 13 mini / iPhone14,4、iOS 16.5 build 20F66、Dopamine RootHide。
 
 **这是定位用插件，安装后不会使倒置 Face ID 自动恢复。没有启用 iPad 伪装、方向改写或认证结果修改。**
 
 ## 安装与测试
 
-1. 保存并安装 `com.chenxun.faceidorientationlab_0.1.0~alpha1_iphoneos-arm64e.deb`。包管理器可按 Conflicts 提示移除旧 `FaceIDOrientationProbe`；两者不能同时挂接同一组接口。保留当前 Mango / UpsideDowned 及视觉补丁，测试期间不要更新它们。
+1. 保存并安装 `com.chenxun.faceidorientationlab_0.1.1~alpha2_iphoneos-arm64e.deb`。包管理器可按 Conflicts 提示移除旧 `FaceIDOrientationProbe`；两者不能同时挂接同一组接口。保留当前 Mango / UpsideDowned 及视觉补丁，测试期间不要更新它们。
 2. 在 Dopamine 中执行“重启用户空间”，然后先用密码解锁一次。单纯 Respring 不保证 biometrickitd 加载。
 3. 等约 15 秒。Filza 中会自动出现以下两个目录，各自有 `Probe.log`、`Phase.txt`、`Disable.txt`，不需手动创建。
 
@@ -26,6 +26,8 @@
 
 - SpringBoard：`UIDevice.userInterfaceIdiom` 与 `SBTraitsSceneParticipantDelegate._orientationMode` 的原始返回值及直接 caller；不替换返回值。保留已经存在的 hook 链，记录当前 IMP 镜像。
 - biometrickitd：沿用之前四个严格校验签名和镜像 UUID 的方向观察入口。
+- biometrickitd：若进程已经加载 `libMobileGestalt.dylib` 且导出 `MGCopyAnswer` / `MGGetBoolAnswer`，额外观察八个列明的设备类型和能力键查询；记录查询键及直接调用者，不读取查询答案，也不改变返回值。`MG-HOOK` 表示挂接成功，`MG-QUERY` 表示测试期间实际查询。没有查询记录可能是启动前已经缓存，不能据此排除该能力判断。
+- UpsideDowned 只在 `_orientationMode` 运行期间临时返回 iPad idiom。0.1.0 记录到的 `UIDevice.userInterfaceIdiom=0` 都来自其调用原方法的内层；本版仍不会把该内层值误称为交给系统的最终值。日志无法证明 Face ID 使用这一 UI idiom。
 - `[CALLER]`：镜像、UUID、相对返回地址偏移。不是文件偏移，不是已确认的认证 gate。只记录直接调用者，不采集完整调用栈。
 - 不记录人脸图像、面容模板、身份对象、密码或认证令牌；统计接口不作为匹配成功证据。
 

@@ -16,11 +16,12 @@ prefix = r'''
 #include <stdatomic.h>
 #include <pthread.h>
 #include <string.h>
+#define LAB_SPRINGBOARD 1
 typedef void *id;
 typedef void *SEL;
 typedef void (*IMP)(void);
 static IMP gOriginal[6];
-#define EVENT_KINDS 7
+#define EVENT_KINDS 9
 static uint64_t gStarted;
 static _Atomic(bool) gEnabled;
 static pthread_mutex_t gLock = PTHREAD_MUTEX_INITIALIZER;
