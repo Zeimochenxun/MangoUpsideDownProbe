@@ -3,7 +3,7 @@ ARCHS = arm64e
 THEOS_PACKAGE_SCHEME = roothide
 include $(THEOS)/makefiles/common.mk
 BUNDLE_NAME = MangoIslandAdaptiveColorPrefs
-MangoIslandAdaptiveColorPrefs_FILES = Prefs.m
+MangoIslandAdaptiveColorPrefs_FILES = PrefsSafe.m
 MangoIslandAdaptiveColorPrefs_FRAMEWORKS = UIKit Foundation
 MangoIslandAdaptiveColorPrefs_PRIVATE_FRAMEWORKS = Preferences
 MangoIslandAdaptiveColorPrefs_INSTALL_PATH = /Library/PreferenceBundles
