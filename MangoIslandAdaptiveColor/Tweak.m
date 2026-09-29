@@ -7,24 +7,18 @@
 #import <fcntl.h>
 #import <unistd.h>
 #import <string.h>
+#import <math.h>
 
-// Beta7-1 MangoOSRendering uses CFPreferencesCopyMultiple for group-specific
-// tint configuration and compiles an embedded Metal shader at runtime.
-// This isolated tweak never touches the supplied Mango binaries on disk.
-// Enabled on installation. It changes only the pair of Island tint values passed
-// to Mango's preference loader, and the two known mix operations in the exact
-// source of Mango's own shader. All other groups keep their original shader.
+// Exact 0.1.2 renderer baseline, with one deliberately isolated extension:
+// a 0..1 adaptation scalar. At 1.0, the marker bytes and shader math are the
+// original 0.1.2 values. The scalar only blends between the untouched sampled
+// backdrop and 0.1.2's adaptive result; it does not alter the response curve.
 
 static NSString * const LogDir = @"/var/mobile/Library/Logs/MangoIslandAdaptiveColor";
 static CFStringRef const MangoDomain = CFSTR("com.go.mangoosprefs");
 static CFStringRef const LightKey = CFSTR("Island.LightTintColor");
 static CFStringRef const DarkKey = CFSTR("Island.DarkTintColor");
-
-// On failure these are very light near-black / near-white Mango tints. The alpha
-// is a deliberately uncommon Island marker; the shader additionally requires
-// the exact RGB sentinel to prevent tint changes to unrelated glass groups.
-static CFStringRef const LightMarker = CFSTR("#FEFEFD1A");
-static CFStringRef const DarkMarker = CFSTR("#0101021A");
+static CFStringRef const AdaptationKey = CFSTR("MangoIslandAdaptiveColor.Adaptation");
 
 static CFDictionaryRef (*OriginalCopyMultiple)(CFArrayRef, CFStringRef, CFStringRef, CFStringRef);
 static id<MTLLibrary> (*OriginalNewLibrary)(id, SEL, NSString *, MTLCompileOptions *, NSError **);
@@ -48,20 +42,52 @@ static void LogLine(NSString *line) {
     close(fd);
 }
 
+static double AdaptationAmount(CFStringRef app, CFStringRef user, CFStringRef host) {
+    const void *rawKeys[] = { AdaptationKey };
+    CFArrayRef query = CFArrayCreate(kCFAllocatorDefault, rawKeys, 1, &kCFTypeArrayCallBacks);
+    if (!query) return 1.0;
+    CFDictionaryRef values = OriginalCopyMultiple(query, app, user, host);
+    CFRelease(query);
+
+    double amount = 1.0;
+    if (values) {
+        CFTypeRef raw = CFDictionaryGetValue(values, AdaptationKey);
+        if (raw && CFGetTypeID(raw) == CFNumberGetTypeID()) {
+            double candidate = 1.0;
+            if (CFNumberGetValue((CFNumberRef)raw, kCFNumberDoubleType, &candidate) && isfinite(candidate)) {
+                amount = fmin(1.0, fmax(0.0, candidate));
+            }
+        }
+        CFRelease(values);
+    }
+    return amount;
+}
+
 static CFDictionaryRef CopyMultiple(CFArrayRef keys, CFStringRef app, CFStringRef user, CFStringRef host) {
     CFDictionaryRef original = OriginalCopyMultiple(keys, app, user, host);
     if (!app || !CFEqual(app, MangoDomain)) return original;
+
     BOOL light = !keys || CFArrayContainsValue(keys, CFRangeMake(0, CFArrayGetCount(keys)), LightKey);
     BOOL dark = !keys || CFArrayContainsValue(keys, CFRangeMake(0, CFArrayGetCount(keys)), DarkKey);
     if (!light && !dark) return original;
+
     CFMutableDictionaryRef edited = original ? CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, original)
                                              : CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
                                                 &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     if (!edited) return original;
-    if (light) CFDictionarySetValue(edited, LightKey, LightMarker);
-    if (dark) CFDictionarySetValue(edited, DarkKey, DarkMarker);
+
+    // Fourteen encoded steps keep the marker visibly near-white/near-black if
+    // the shader patch ever fails. The 100% bytes are EXACTLY 0.1.2:
+    // Light #FEFEFD1A, Dark #0101021A.
+    double amount = AdaptationAmount(app, user, host);
+    unsigned level = (unsigned)lround(amount * 14.0);
+    NSString *lightMarker = [NSString stringWithFormat:@"#%02XFEFD1A", 0xF0 + level];
+    NSString *darkMarker = [NSString stringWithFormat:@"#%02X01021A", 0x0F - level];
+    if (light) CFDictionarySetValue(edited, LightKey, (CFStringRef)lightMarker);
+    if (dark) CFDictionarySetValue(edited, DarkKey, (CFStringRef)darkMarker);
     if (original) CFRelease(original);
-    LogLine(@"[ISLAND] tint-marker supplied to Mango group configuration");
+
+    LogLine([NSString stringWithFormat:@"[ISLAND] 0.1.2 marker supplied adaptation=%.3f level=%u", amount, level]);
     return edited;
 }
 
@@ -71,22 +97,26 @@ static NSString *const PixelEntry = @"float4 mangoGlassPixel(";
 static NSString *const AdaptiveFunction =
 @"float3 mangoIslandAdaptiveColor(float3 background, float4 tint)\n"
  @"{\n"
- @"    // 0x1A alpha plus either near-white or near-black RGB identifies Island.\n"
+ @"    // 0x1A alpha plus encoded near-white/near-black RGB identifies Island.\n"
+ @"    float redByte = tint.r * 255.0;\n"
  @"    bool markerAlpha = abs(tint.a - (26.0 / 255.0)) < 0.0008;\n"
- @"    bool markerLight = abs(tint.r - (254.0 / 255.0)) < 0.0008 &&\n"
+ @"    bool markerLight = redByte >= 239.5 && redByte <= 254.5 &&\n"
  @"                       abs(tint.g - (254.0 / 255.0)) < 0.0008 &&\n"
  @"                       abs(tint.b - (253.0 / 255.0)) < 0.0008;\n"
- @"    bool markerDark = abs(tint.r - (1.0 / 255.0)) < 0.0008 &&\n"
+ @"    bool markerDark = redByte >= 0.5 && redByte <= 15.5 &&\n"
  @"                      abs(tint.g - (1.0 / 255.0)) < 0.0008 &&\n"
  @"                      abs(tint.b - (2.0 / 255.0)) < 0.0008;\n"
  @"    if (markerAlpha && (markerLight || markerDark)) {\n"
+ @"        float adaptation = markerLight ? clamp((redByte - 240.0) / 14.0, 0.0, 1.0)\n"
+ @"                                       : clamp((15.0 - redByte) / 14.0, 0.0, 1.0);\n"
+ @"        // Everything below through 'adaptive' is the exact 0.1.2 formula.\n"
  @"        float luminance = dot(background, float3(0.2126, 0.7152, 0.0722));\n"
  @"        float bright = smoothstep(0.08, 0.42, luminance);\n"
- @"        // Keep the body dark enough for Mango's own white active content.\n"
  @"        float3 target = mix(float3(0.80), float3(0.025), bright);\n"
- @"        // Keep at least 58 percent of the sampled backdrop visible.\n"
  @"        float opacity = mix(0.16, 0.42, bright);\n"
- @"        return mix(background, target, opacity);\n"
+ @"        float3 adaptive = mix(background, target, opacity);\n"
+ @"        if (adaptation > 0.9999) return adaptive;\n"
+ @"        return mix(background, adaptive, adaptation);\n"
  @"    }\n"
  @"    return mix(background, tint.rgb, tint.a);\n"
  @"}\n\n";
@@ -107,13 +137,13 @@ static id<MTLLibrary> NewLibrary(id self, SEL cmd, NSString *source, MTLCompileO
         return OriginalNewLibrary(self, cmd, source, options, error);
     }
     ShaderSeen = YES;
-    // Never perform an approximate rewrite when Mango updates the shader.
     if (Occurrences(source, PixelEntry) != 1 || Occurrences(source, FlatOld) != 1 ||
         Occurrences(source, CurvedOld) != 1 ||
         [source rangeOfString:@"struct Uniforms"].location == NSNotFound) {
         LogLine(@"[SHADER] Mango source differs; original used");
         return OriginalNewLibrary(self, cmd, source, options, error);
     }
+
     NSString *edited = [source stringByReplacingOccurrencesOfString:FlatOld
                                                            withString:@"flat.rgb = mangoIslandAdaptiveColor(flat.rgb, u.tintColor);"];
     edited = [edited stringByReplacingOccurrencesOfString:CurvedOld
@@ -124,7 +154,7 @@ static id<MTLLibrary> NewLibrary(id self, SEL cmd, NSString *source, MTLCompileO
     id<MTLLibrary> result = OriginalNewLibrary(self, cmd, edited, options, &attemptError);
     if (result) {
         ShaderPatched = YES;
-        LogLine(@"[SHADER] Island adaptive mix compiled; other groups retain original mix");
+        LogLine(@"[SHADER] 0.1.2 adaptive mix + scalar compiled; other groups retain original mix");
         return result;
     }
     LogLine([NSString stringWithFormat:@"[SHADER] modified source failed (%@); retrying original", attemptError.localizedDescription ?: @"unknown"]);
@@ -133,14 +163,12 @@ static id<MTLLibrary> NewLibrary(id self, SEL cmd, NSString *source, MTLCompileO
 
 __attribute__((constructor)) static void Start(void) {
     @autoreleasepool {
-        // A launch daemon may have no NSBundle bundle identifier even though
-        // MobileSubstrate correctly matched its com.apple.backboardd filter.
         NSString *process = NSProcessInfo.processInfo.processName;
         NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
         if (![process isEqualToString:@"backboardd"] && ![bundle isEqualToString:@"com.apple.backboardd"]) return;
         NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
-        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.2 process=%@ bundle=%@", process ?: @"(nil)", bundle ?: @"(nil)"]);
+        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.2.1 baseline=0.1.2 slider=enabled process=%@ bundle=%@", process ?: @"(nil)", bundle ?: @"(nil)"]);
 
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
         Class cls = device ? object_getClass(device) : Nil;
@@ -158,12 +186,9 @@ __attribute__((constructor)) static void Start(void) {
             return;
         }
 
-        // Install source hook before Mango's custom filter compiles its shader.
         MSHookMessageEx(cls, selector, (IMP)NewLibrary, (IMP *)&OriginalNewLibrary);
-        // MangoOSRendering imports this exact CF function. We only alter its
-        // Island keys in its own domain, without modifying stored preferences.
         MSHookFunction((void *)CFPreferencesCopyMultiple, (void *)CopyMultiple, (void **)&OriginalCopyMultiple);
-        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.2 MetalClass=%@ shaderSeen=%d patched=%d",
+        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.2.1 MetalClass=%@ shaderSeen=%d patched=%d",
                  NSStringFromClass(cls), ShaderSeen, ShaderPatched]);
     }
 }
