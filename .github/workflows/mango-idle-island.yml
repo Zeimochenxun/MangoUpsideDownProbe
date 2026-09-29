@@ -15,22 +15,22 @@ jobs:
         working-directory: MangoIdleIsland
     steps:
       - uses: actions/checkout@v4
-      - name: Apply 1.1.8 idle geometry, preview handoff, and no-autoresize patches
+      - name: Apply clean 1.1.9 stable-idle handoff state machine
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/apply_idle_geometry_sync.py
-          python3 tools/apply_preview_handoff_fix.py
-          python3 tools/apply_idle_autoresize_fix.py
-          grep -q 'version=1.1.8-no-autoresize' Tweak.m
-          grep -q 'IdleGlassFrameForHost' Tweak.m
-          grep -q 'performWithoutAnimation' Tweak.m
-          grep -q '\[IDLE-GEOMETRY\]' Tweak.m
-          grep -q '\[IDLE-LAYER\]' Tweak.m
+          python3 tools/apply_stable_idle_handoff.py
+          grep -q 'version=1.1.9-stable-idle-handoff' Tweak.m
+          grep -q 'StableIdleGeometry' Tweak.m
+          grep -q 'stable-idle-only=1' Tweak.m
+          grep -q 'inverse-native-opacity=1' Tweak.m
+          grep -q 'return stableIdleGeometry ? @"background" : @"transition"' Tweak.m
+          grep -q 'activity < 0.995' Tweak.m
           grep -q 'UIViewAutoresizingNone' Tweak.m
-          grep -q '\[PREVIEW-HANDOFF\] suppress' Tweak.m
-          grep -q 'PreviewSuppressedKey' Tweak.m
-          grep -q 'previewGlassOnly' Tweak.m
+          ! grep -q 'StableIdleBoundsKey' Tweak.m
+          ! grep -q '\[IDLE-GEOMETRY\]' Tweak.m
+          ! grep -q '\[PREVIEW-HANDOFF\]' Tweak.m
+          ! grep -q 'version=1.1.8-no-autoresize' Tweak.m
       - name: Install tools
         uses: dhinakg/procursus-action@main
         with:
@@ -60,7 +60,7 @@ jobs:
           shasum -a 256 packages/*.deb > build-info/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: MangoIdleIsland-1.1.8-RootHide
+          name: MangoIdleIsland-1.1.9-RootHide
           if-no-files-found: error
           path: |
             MangoIdleIsland/packages/*.deb
