@@ -76,18 +76,24 @@ static CFDictionaryRef CopyMultiple(CFArrayRef keys, CFStringRef app, CFStringRe
                                                 &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     if (!edited) return original;
 
-    // Fourteen encoded steps keep the marker visibly near-white/near-black if
-    // the shader patch ever fails. The 100% bytes are EXACTLY 0.1.2:
+    // Encode 225 levels in the two near-white / near-black channels. Even at
+    // the weakest setting, fallback colors remain safely near the original
+    // sentinels if shader patching fails. At 100%, the bytes are EXACT 0.1.2:
     // Light #FEFEFD1A, Dark #0101021A.
     double amount = AdaptationAmount(app, user, host);
-    unsigned level = (unsigned)lround(amount * 14.0);
-    NSString *lightMarker = [NSString stringWithFormat:@"#%02XFEFD1A", 0xF0 + level];
-    NSString *darkMarker = [NSString stringWithFormat:@"#%02X01021A", 0x0F - level];
+    unsigned level = (unsigned)lround(amount * 224.0);
+    unsigned lightR = 0xF0 + level / 15;
+    unsigned lightG = 0xF0 + level % 15;
+    unsigned inverse = 224 - level;
+    unsigned darkR = 0x01 + inverse / 15;
+    unsigned darkG = 0x01 + inverse % 15;
+    NSString *lightMarker = [NSString stringWithFormat:@"#%02X%02XFD1A", lightR, lightG];
+    NSString *darkMarker = [NSString stringWithFormat:@"#%02X%02X021A", darkR, darkG];
     if (light) CFDictionarySetValue(edited, LightKey, (CFStringRef)lightMarker);
     if (dark) CFDictionarySetValue(edited, DarkKey, (CFStringRef)darkMarker);
     if (original) CFRelease(original);
 
-    LogLine([NSString stringWithFormat:@"[ISLAND] 0.1.2 marker supplied adaptation=%.3f level=%u", amount, level]);
+    LogLine([NSString stringWithFormat:@"[ISLAND] 0.1.2 marker supplied adaptation=%.3f level=%u/224", amount, level]);
     return edited;
 }
 
@@ -99,16 +105,23 @@ static NSString *const AdaptiveFunction =
  @"{\n"
  @"    // 0x1A alpha plus encoded near-white/near-black RGB identifies Island.\n"
  @"    float redByte = tint.r * 255.0;\n"
+ @"    float greenByte = tint.g * 255.0;\n"
  @"    bool markerAlpha = abs(tint.a - (26.0 / 255.0)) < 0.0008;\n"
  @"    bool markerLight = redByte >= 239.5 && redByte <= 254.5 &&\n"
- @"                       abs(tint.g - (254.0 / 255.0)) < 0.0008 &&\n"
+ @"                       greenByte >= 239.5 && greenByte <= 254.5 &&\n"
  @"                       abs(tint.b - (253.0 / 255.0)) < 0.0008;\n"
  @"    bool markerDark = redByte >= 0.5 && redByte <= 15.5 &&\n"
- @"                      abs(tint.g - (1.0 / 255.0)) < 0.0008 &&\n"
+ @"                      greenByte >= 0.5 && greenByte <= 15.5 &&\n"
  @"                      abs(tint.b - (2.0 / 255.0)) < 0.0008;\n"
  @"    if (markerAlpha && (markerLight || markerDark)) {\n"
- @"        float adaptation = markerLight ? clamp((redByte - 240.0) / 14.0, 0.0, 1.0)\n"
- @"                                       : clamp((15.0 - redByte) / 14.0, 0.0, 1.0);\n"
+ @"        float encoded = 0.0;\n"
+ @"        if (markerLight) {\n"
+ @"            encoded = (redByte - 240.0) * 15.0 + (greenByte - 240.0);\n"
+ @"        } else {\n"
+ @"            float inverse = (redByte - 1.0) * 15.0 + (greenByte - 1.0);\n"
+ @"            encoded = 224.0 - inverse;\n"
+ @"        }\n"
+ @"        float adaptation = clamp(encoded / 224.0, 0.0, 1.0);\n"
  @"        // Everything below through 'adaptive' is the exact 0.1.2 formula.\n"
  @"        float luminance = dot(background, float3(0.2126, 0.7152, 0.0722));\n"
  @"        float bright = smoothstep(0.08, 0.42, luminance);\n"
@@ -154,7 +167,7 @@ static id<MTLLibrary> NewLibrary(id self, SEL cmd, NSString *source, MTLCompileO
     id<MTLLibrary> result = OriginalNewLibrary(self, cmd, edited, options, &attemptError);
     if (result) {
         ShaderPatched = YES;
-        LogLine(@"[SHADER] 0.1.2 adaptive mix + scalar compiled; other groups retain original mix");
+        LogLine(@"[SHADER] 0.1.2 adaptive mix + 225-level scalar compiled; other groups retain original mix");
         return result;
     }
     LogLine([NSString stringWithFormat:@"[SHADER] modified source failed (%@); retrying original", attemptError.localizedDescription ?: @"unknown"]);
@@ -168,7 +181,7 @@ __attribute__((constructor)) static void Start(void) {
         if (![process isEqualToString:@"backboardd"] && ![bundle isEqualToString:@"com.apple.backboardd"]) return;
         NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
-        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.2.1 baseline=0.1.2 slider=enabled process=%@ bundle=%@", process ?: @"(nil)", bundle ?: @"(nil)"]);
+        LogLine([NSString stringWithFormat:@"[SESSION] 0.1.2.1 baseline=0.1.2 slider=225-level process=%@ bundle=%@", process ?: @"(nil)", bundle ?: @"(nil)"]);
 
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
         Class cls = device ? object_getClass(device) : Nil;
