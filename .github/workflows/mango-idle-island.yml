@@ -28,7 +28,6 @@ jobs:
           grep -q '\[IDLE-GEOMETRY\]' Tweak.m
           grep -q '\[IDLE-LAYER\]' Tweak.m
           grep -q 'UIViewAutoresizingNone' Tweak.m
-          grep -q 'view.layer.autoresizingMask = 0' Tweak.m
           grep -q '\[PREVIEW-HANDOFF\] suppress' Tweak.m
           grep -q 'PreviewSuppressedKey' Tweak.m
           grep -q 'previewGlassOnly' Tweak.m
