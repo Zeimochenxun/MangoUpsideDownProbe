@@ -9,3 +9,5 @@ MangoIslandAdaptiveColor_CFLAGS = -fno-objc-arc -Wall -Wextra -Werror
 MangoIslandAdaptiveColor_FRAMEWORKS = Foundation Metal
 MangoIslandAdaptiveColor_LIBRARIES = substrate
 include $(THEOS_MAKE_PATH)/tweak.mk
+SUBPROJECTS += MangoIslandAdaptiveColorPrefs
+include $(THEOS_MAKE_PATH)/aggregate.mk
