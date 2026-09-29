@@ -42,15 +42,11 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'mode=global-island-native-reapply+idle-fresh-init',
         b'global-Island-glass-logic=enabled',
         b'TintRGBARepair101Done',
-        b'version=1.1.8-no-autoresize',
-        b'duplicate-preview-suppression=1',
-        b'idle-size-guard=1',
-        b'view-autoresize=off',
-        b'implicit-animation=off',
-        b'[IDLE-GEOMETRY]',
-        b'[IDLE-LAYER]',
-        b'[PREVIEW-HANDOFF] suppress',
-        b'[PREVIEW-HANDOFF] restore',
+        b'version=1.1.9-stable-idle-handoff',
+        b'stable-idle-only=1',
+        b'inverse-native-opacity=1',
+        b'transition',
+        b'activity=%.3f',
         b'hooks=initializer+updateSpecular',
         b'scope=all-MGLiveBackdropView',
         b'readonly=1',
@@ -76,6 +72,13 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'MSHookFunction',
         b'locationInView:',
         b'translationInView:',
+        b'version=1.1.8-no-autoresize',
+        b'[IDLE-GEOMETRY]',
+        b'[IDLE-LAYER]',
+        b'[PREVIEW-HANDOFF] suppress',
+        b'[PREVIEW-HANDOFF] restore',
+        b'duplicate-preview-suppression=1',
+        b'idle-size-guard=1',
     ]:
         assert forbidden not in data, forbidden
 
@@ -105,8 +108,8 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--ctr
     regular = [m for m in t if m.isfile()]
     assert len(regular) == 1 and pathlib.PurePosixPath(regular[0].name).name == 'control'
     control = t.extractfile(regular[0]).read().decode()
-    assert 'Version: 1.1.8' in control
+    assert 'Version: 1.1.9' in control
     assert 'Architecture: iphoneos-arm64e' in control
     assert 'Depends: mobilesubstrate, firmware (= 16.5)' in control
 
-print('PASS: MangoIdleIsland 1.1.8 arm64e RootHide; UIView no-autoresize + geometry guard + preview handoff + diagnostics included')
+print('PASS: MangoIdleIsland 1.1.9 arm64e RootHide; clean stable-idle-only handoff state machine + diagnostics included')
