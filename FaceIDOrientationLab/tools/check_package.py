@@ -16,7 +16,7 @@ with tarfile.open(fileobj=io.BytesIO(payload),mode='r:') as t:
         magic,cpu,subtype,kind,ncmds,size=struct.unpack_from('<6I',b)
         assert (magic,cpu,subtype&0xffffff,kind)==(0xfeedfacf,0x100000c,2,6)
         assert all(x in b for x in (b'20F66',b'iPhone14,4',b'MSHookMessageEx',b'observe-only'))
-        if name=='FaceIDLabBio': assert b'BKDM-code-from-4000.bin' in b and b'BKDM-targets-97000-9c000.bin' in b
+        if name=='FaceIDLabBio': assert b'BKDM-code-from-4000.bin' in b and b'BKDM-device-method.bin' in b and b'BKDM-analytics-method.bin' in b
         commands=[];offset=32;dependencies=[]
         for _ in range(ncmds):
             cmd,n=struct.unpack_from('<2I',b,offset);assert n>=8 and offset+n<=32+size

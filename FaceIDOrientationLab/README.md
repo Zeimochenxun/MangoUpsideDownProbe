@@ -1,6 +1,6 @@
 # FaceID Orientation Lab 0.1.4-alpha5
 
-第五个原生可安装诊断版，可替换之前版本。追加读取两个已观察调用所指向的函数附近的代码。只适用于 iPhone 13 mini / iPhone14,4、iOS 16.5 build 20F66、Dopamine RootHide。
+第五个原生可安装诊断版，可替换之前版本。追加读取两个 Objective-C 方法实际实现附近的代码，并记录各自的基址相对偏移。只适用于 iPhone 13 mini / iPhone14,4、iOS 16.5 build 20F66、Dopamine RootHide。
 
 **这是定位用插件，安装后不会使倒置 Face ID 自动恢复。没有启用 iPad 伪装、方向改写或认证结果修改。**
 
@@ -8,7 +8,7 @@
 
 1. 保存并安装 `com.chenxun.faceidorientationlab_0.1.4~alpha5_iphoneos-arm64e.deb`。包管理器可按 Conflicts 提示移除旧 `FaceIDOrientationProbe`；两者不能同时挂接同一组接口。保留当前 Mango / UpsideDowned 及视觉补丁，测试期间不要更新它们。
 2. 在 Dopamine 中执行“重启用户空间”，然后先用密码解锁一次。单纯 Respring 不保证 biometrickitd 加载。
-3. 等约 15 秒。认证进程目录还会出现 `BKDM-code-from-4000.bin`；这份文件只保存经镜像 UUID 校验的已加载可执行代码片段（基址偏移 `0x4000`，最多 48 KiB）。本版若 `[TARGET-DUMP]` 出现，还会生成 `BKDM-targets-97000-9c000.bin`，从 Filza 导出该目标文件和同目录的 Probe.log 即可，不需要重复刷脸。若日志是 `[CODE-SKIP]`，文件不会生成。Filza 中会自动出现以下两个目录，各自有 `Probe.log`、`Phase.txt`、`Disable.txt`，不需手动创建。
+3. 等约 15 秒。认证进程目录还会出现 `BKDM-code-from-4000.bin`；这份文件只保存经镜像 UUID 校验的已加载可执行代码片段（基址偏移 `0x4000`，最多 48 KiB）。本版若 `[METHOD-DUMP]` 出现，还会生成 `BKDM-device-method.bin`、`BKDM-analytics-method.bin`，从 Filza 导出这些文件和同目录的 Probe.log 即可，不需要重复刷脸。若日志是 `[CODE-SKIP]`，文件不会生成。Filza 中会自动出现以下两个目录，各自有 `Probe.log`、`Phase.txt`、`Disable.txt`，不需手动创建。
 
 ```text
 /var/mobile/Library/Logs/FaceIDOrientationLab-SB/

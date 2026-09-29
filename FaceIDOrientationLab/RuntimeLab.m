@@ -281,32 +281,46 @@ static void CaptureBKDMCode(void) {
     }
     close(fd); gCodeCaptured = YES;
     Log(@"[CODE-DUMP] file=BKDM-code-from-4000.bin image=%s uuid=%@ baseRelativeStart=0x4000 length=0x%x source=mapped-__TEXT read-only=YES", info.dli_fname, uuid, length);
-    // The two BL instructions at 0x5780 and 0x5820 target 0x980e0 and
-    // 0x9a5c0 in this exact UUID. Capture their bodies separately and only
-    // when the same readable __TEXT segment contains the entire range.
-    const uint32_t targetStart = 0x97000, targetLength = 0x5000;
-    if (textSize < (uint64_t)targetStart + targetLength || !(textProt & VM_PROT_READ)) {
-        Log(@"[TARGET-SKIP] reason=target-bounds textSize=0x%llx textFileoff=0x%llx textProt=0x%x", (unsigned long long)textSize, (unsigned long long)textFileoff, textProt);
-        return;
+    // Disassemble the Objective-C implementation, not a BL destination that
+    // may be a message-send stub. Resolve both IMPs before installing hooks.
+    const char *classes[] = {"BiometricKitXPCServerPearl", "PearlCoreAnalytics"};
+    const char *selectors[] = {"deviceOrientation", "sendMatchEventAnalytics:orientation:identities:"};
+    const char *filenames[] = {"BKDM-device-method.bin", "BKDM-analytics-method.bin"};
+    for (unsigned i = 0; i < 2; i++) {
+        Class owner = objc_lookUpClass(classes[i]);
+        Method current = owner ? class_getInstanceMethod(owner, sel_registerName(selectors[i])) : NULL;
+        Dl_info located = {0};
+        const void *body = current ? ptrauth_strip((void *)method_getImplementation(current), ptrauth_key_function_pointer) : NULL;
+        if (!body || !dladdr(body, &located) || located.dli_fbase != h || !located.dli_fname || strcmp(located.dli_fname, kBKDM)) {
+            Log(@"[METHOD-SKIP] selector=%s reason=missing-or-different-image", selectors[i]); continue;
+        }
+        uintptr_t address = (uintptr_t)body, base = (uintptr_t)h;
+        if (address < base || (uint64_t)(address - base) >= textSize || !(textProt & VM_PROT_READ)) {
+            Log(@"[METHOD-SKIP] selector=%s reason=outside-readable-text implOffset=0x%llx textSize=0x%llx", selectors[i], (unsigned long long)(address - base), (unsigned long long)textSize); continue;
+        }
+        uint64_t implOffset = address - base, methodStart = implOffset & ~0xfffULL;
+        uint64_t bytes = textSize - methodStart < 0x4000 ? textSize - methodStart : 0x4000;
+        if (bytes < 0x1000) { Log(@"[METHOD-SKIP] selector=%s reason=short-range", selectors[i]); continue; }
+        int bodyFD = openat(gDir, filenames[i], O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0640);
+        if (!RegularFile(bodyFD) || ftruncate(bodyFD, 0)) {
+            if (bodyFD >= 0) close(bodyFD);
+            Log(@"[METHOD-SKIP] selector=%s reason=unsafe-output", selectors[i]); continue;
+        }
+        if (fchown(bodyFD, geteuid(), gid) || fchmod(bodyFD, 0640)) {
+            close(bodyFD); Log(@"[METHOD-SKIP] selector=%s reason=output-permissions", selectors[i]); continue;
+        }
+        const uint8_t *cursor = (const uint8_t *)h + methodStart;
+        size_t pending = (size_t)bytes;
+        while (pending) {
+            ssize_t n = write(bodyFD, cursor, pending);
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0) break;
+            cursor += n; pending -= (size_t)n;
+        }
+        close(bodyFD);
+        if (pending) { Log(@"[METHOD-SKIP] selector=%s reason=short-write", selectors[i]); continue; }
+        Log(@"[METHOD-DUMP] file=%s selector=%s uuid=%@ implOffset=0x%llx baseRelativeStart=0x%llx length=0x%llx source=mapped-__TEXT", filenames[i], selectors[i], uuid, (unsigned long long)implOffset, (unsigned long long)methodStart, (unsigned long long)bytes);
     }
-    int targetFD = openat(gDir, "BKDM-targets-97000-9c000.bin", O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0640);
-    if (!RegularFile(targetFD) || ftruncate(targetFD, 0)) {
-        if (targetFD >= 0) close(targetFD);
-        Log(@"[TARGET-SKIP] reason=unsafe-output"); return;
-    }
-    if (fchown(targetFD, geteuid(), gid) || fchmod(targetFD, 0640)) {
-        close(targetFD); Log(@"[TARGET-SKIP] reason=output-permissions"); return;
-    }
-    const uint8_t *target = (const uint8_t *)h + targetStart;
-    size_t targetRemain = targetLength;
-    while (targetRemain) {
-        ssize_t n = write(targetFD, target, targetRemain);
-        if (n < 0 && errno == EINTR) continue;
-        if (n <= 0) { close(targetFD); Log(@"[TARGET-SKIP] reason=short-write"); return; }
-        target += n; targetRemain -= (size_t)n;
-    }
-    close(targetFD);
-    Log(@"[TARGET-DUMP] file=BKDM-targets-97000-9c000.bin image=%s uuid=%@ baseRelativeStart=0x97000 length=0x5000 source=mapped-__TEXT read-only=YES", info.dli_fname, uuid);
 }
 #endif
 static NSString *ReadControl(const char *name) {
