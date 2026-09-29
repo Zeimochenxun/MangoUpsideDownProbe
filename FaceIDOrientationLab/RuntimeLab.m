@@ -209,6 +209,75 @@ static BOOL RegularFile(int fd) {
     struct stat st;
     return fd >= 0 && !fstat(fd, &st) && S_ISREG(st.st_mode) && st.st_nlink == 1 && st.st_uid == geteuid();
 }
+#if !LAB_SPRINGBOARD
+static void AppendIndexLine(NSMutableData *output, NSString *line) {
+    if (output.length >= 1536 * 1024) return;
+    NSData *data = [[line stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding];
+    if (data && output.length + data.length <= 1536 * 1024) [output appendData:data];
+}
+static void DumpRuntimeIndex(gid_t gid) {
+    int total = objc_getClassList(NULL, 0);
+    if (total <= 0 || total > 65536) { Log(@"[INDEX-SKIP] reason=invalid-class-count count=%d", total); return; }
+    Class *classes = calloc((size_t)total, sizeof(Class));
+    if (!classes) { Log(@"[INDEX-SKIP] reason=allocation-failed"); return; }
+    int found = objc_getClassList(classes, total);
+    if (found < 0) { free(classes); Log(@"[INDEX-SKIP] reason=class-list-failed"); return; }
+    if (found > total) found = total;
+    NSMutableData *output = [NSMutableData data];
+    AppendIndexLine(output, @"format=FaceIDOrientationLab-runtime-index-v1\tread-only=YES");
+    unsigned classCount = 0, methodCount = 0, ivarCount = 0;
+    for (int i = 0; i < found && output.length < 1536 * 1024; i++) {
+        Class cls = classes[i];
+        const char *image = cls ? class_getImageName(cls) : NULL;
+        if (!image || (strcmp(image, kBKDM) && strcmp(image, kBK))) continue;
+        const char *name = class_getName(cls);
+        Class parent = class_getSuperclass(cls);
+        AppendIndexLine(output, [NSString stringWithFormat:@"CLASS\timage=%s\tname=%s\tsuper=%s", image, name ?: "", parent ? class_getName(parent) : ""]);
+        classCount++;
+        unsigned ivars = 0;
+        Ivar *ivarList = class_copyIvarList(cls, &ivars);
+        for (unsigned j = 0; j < ivars && output.length < 1536 * 1024; j++) {
+            const char *ivarName = ivar_getName(ivarList[j]), *type = ivar_getTypeEncoding(ivarList[j]);
+            AppendIndexLine(output, [NSString stringWithFormat:@"IVAR\tclass=%s\tname=%s\ttype=%s\toffset=%td", name ?: "", ivarName ?: "", type ?: "", ivar_getOffset(ivarList[j])]);
+            ivarCount++;
+        }
+        free(ivarList);
+        for (unsigned kind = 0; kind < 2 && output.length < 1536 * 1024; kind++) {
+            Class owner = kind ? object_getClass(cls) : cls;
+            unsigned methods = 0;
+            Method *list = owner ? class_copyMethodList(owner, &methods) : NULL;
+            for (unsigned j = 0; j < methods && output.length < 1536 * 1024; j++) {
+                SEL sel = method_getName(list[j]);
+                const char *selector = sel ? sel_getName(sel) : "", *types = method_getTypeEncoding(list[j]);
+                IMP imp = method_getImplementation(list[j]);
+                const void *address = imp ? ptrauth_strip((void *)imp, ptrauth_key_function_pointer) : NULL;
+                Dl_info located = {0};
+                BOOL valid = address && dladdr(address, &located) && located.dli_fbase && located.dli_fname;
+                uint64_t offset = valid ? (uint64_t)((uintptr_t)address - (uintptr_t)located.dli_fbase) : 0;
+                AppendIndexLine(output, [NSString stringWithFormat:@"METHOD\tkind=%s\tclass=%s\tselector=%s\ttypes=%s\timplImage=%s\timplUUID=%@\timplOffset=0x%llx", kind ? "class" : "instance", name ?: "", selector ?: "", types ?: "", valid ? located.dli_fname : "unknown", valid ? (UUID(located.dli_fbase) ?: @"unknown") : @"unknown", (unsigned long long)offset]);
+                methodCount++;
+            }
+            free(list);
+        }
+    }
+    free(classes);
+    int fd = openat(gDir, "Runtime-method-index.txt", O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0640);
+    if (!RegularFile(fd) || ftruncate(fd, 0) || fchown(fd, geteuid(), gid) || fchmod(fd, 0640)) {
+        if (fd >= 0) close(fd);
+        Log(@"[INDEX-SKIP] reason=unsafe-output"); return;
+    }
+    const uint8_t *cursor = output.bytes; size_t pending = output.length;
+    while (pending) {
+        ssize_t n = write(fd, cursor, pending);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) break;
+        cursor += n; pending -= (size_t)n;
+    }
+    close(fd);
+    if (pending) { Log(@"[INDEX-SKIP] reason=short-write"); return; }
+    Log(@"[INDEX-DUMP] file=Runtime-method-index.txt classes=%u methods=%u ivars=%u bytes=%lu truncated=%s", classCount, methodCount, ivarCount, (unsigned long)output.length, output.length >= 1536 * 1024 ? "YES" : "NO");
+}
+#endif
 static void CreateControl(const char *name, const char *value, gid_t gid) {
     int fd = openat(gDir, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0660);
     if (fd < 0) return;
@@ -321,6 +390,7 @@ static void CaptureBKDMCode(void) {
         if (pending) { Log(@"[METHOD-SKIP] selector=%s reason=short-write", selectors[i]); continue; }
         Log(@"[METHOD-DUMP] file=%s selector=%s uuid=%@ implOffset=0x%llx baseRelativeStart=0x%llx length=0x%llx source=mapped-__TEXT", filenames[i], selectors[i], uuid, (unsigned long long)implOffset, (unsigned long long)methodStart, (unsigned long long)bytes);
     }
+    DumpRuntimeIndex(gid);
 }
 #endif
 static NSString *ReadControl(const char *name) {
@@ -423,7 +493,7 @@ __attribute__((constructor)) static void Initialize(void) {
             @autoreleasepool {
                 if (!OpenLogs()) { if (gFD >= 0) close(gFD); if (gDir >= 0) close(gDir); gFD = gDir = -1; return; }
                 gSession = NSUUID.UUID.UUIDString; gStarted = Now();
-                Log(@"[SESSION] version=0.1.4-alpha5 process=%s pid=%d build=20F66 model=iPhone14,4 mode=observe-only maxBytes=2097152 maxSamplesPerMethodPerSecond=4", LAB_PROCESS, getpid());
+                Log(@"[SESSION] version=0.1.5-alpha6 process=%s pid=%d build=20F66 model=iPhone14,4 mode=observe-only maxBytes=2097152 maxSamplesPerMethodPerSecond=4", LAB_PROCESS, getpid());
                 Log(@"[NOTICE] raw-enum=unknown analytics-is-not-proof-of-control-path phase=manual no-identities-or-auth-results-recorded");
                 gTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, gQueue);
                 dispatch_source_set_timer(gTimer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_SEC / 10);

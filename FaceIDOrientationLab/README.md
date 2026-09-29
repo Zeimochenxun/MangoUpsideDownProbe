@@ -1,14 +1,14 @@
-# FaceID Orientation Lab 0.1.4-alpha5
+# FaceID Orientation Lab 0.1.5-alpha6
 
-第五个原生可安装诊断版，可替换之前版本。追加读取两个 Objective-C 方法实际实现附近的代码，并记录各自的基址相对偏移。只适用于 iPhone 13 mini / iPhone14,4、iOS 16.5 build 20F66、Dopamine RootHide。
+第六个原生可安装诊断版，可替换之前版本。新增认证进程中已加载的 BiometricKit 与 libBKDM2 类、方法签名、实现镜像及偏移索引，供定位后续认证判断。只适用于 iPhone 13 mini / iPhone14,4、iOS 16.5 build 20F66、Dopamine RootHide。
 
 **这是定位用插件，安装后不会使倒置 Face ID 自动恢复。没有启用 iPad 伪装、方向改写或认证结果修改。**
 
 ## 安装与测试
 
-1. 保存并安装 `com.chenxun.faceidorientationlab_0.1.4~alpha5_iphoneos-arm64e.deb`。包管理器可按 Conflicts 提示移除旧 `FaceIDOrientationProbe`；两者不能同时挂接同一组接口。保留当前 Mango / UpsideDowned 及视觉补丁，测试期间不要更新它们。
+1. 保存并安装 `com.chenxun.faceidorientationlab_0.1.5~alpha6_iphoneos-arm64e.deb`。包管理器可按 Conflicts 提示移除旧 `FaceIDOrientationProbe`；两者不能同时挂接同一组接口。保留当前 Mango / UpsideDowned 及视觉补丁，测试期间不要更新它们。
 2. 在 Dopamine 中执行“重启用户空间”，然后先用密码解锁一次。单纯 Respring 不保证 biometrickitd 加载。
-3. 等约 15 秒。认证进程目录还会出现 `BKDM-code-from-4000.bin`；这份文件只保存经镜像 UUID 校验的已加载可执行代码片段（基址偏移 `0x4000`，最多 48 KiB）。本版若 `[METHOD-DUMP]` 出现，还会生成 `BKDM-device-method.bin`、`BKDM-analytics-method.bin`，从 Filza 导出这些文件和同目录的 Probe.log 即可，不需要重复刷脸。若日志是 `[CODE-SKIP]`，文件不会生成。Filza 中会自动出现以下两个目录，各自有 `Probe.log`、`Phase.txt`、`Disable.txt`，不需手动创建。
+3. 等约 15 秒。认证进程目录还会出现 `BKDM-code-from-4000.bin`；这份文件只保存经镜像 UUID 校验的已加载可执行代码片段（基址偏移 `0x4000`，最多 48 KiB）。本版还生成 `Runtime-method-index.txt`，其中列出两个目标镜像已加载的类、实例变量及方法；其生成情况记录在 `Probe.log` 的 `[INDEX-DUMP]` 或 `[INDEX-SKIP]`。从 Filza 导出索引和同目录的 Probe.log 即可，无需重复刷脸。其他三份代码片段仍会导出。Filza 中会自动出现以下两个目录，各自有 `Probe.log`、`Phase.txt`、`Disable.txt`，不需手动创建。
 
 ```text
 /var/mobile/Library/Logs/FaceIDOrientationLab-SB/
@@ -26,6 +26,7 @@
 
 - SpringBoard：`UIDevice.userInterfaceIdiom` 与 `SBTraitsSceneParticipantDelegate._orientationMode` 的原始返回值及直接 caller；不替换返回值。保留已经存在的 hook 链，记录当前 IMP 镜像。
 - biometrickitd：沿用之前四个严格校验签名和镜像 UUID 的方向观察入口。
+- 运行时索引在安装方法钩子之前生成，限制在目标镜像内，大小最多约 1.5 MiB；列出方法元数据，不读取面容数据或认证对象。方法名称本身不证明其负责方向限制。
 - biometrickitd：若进程已经加载 `libMobileGestalt.dylib` 且导出 `MGCopyAnswer` / `MGGetBoolAnswer`，额外观察八个列明的设备类型和能力键查询；记录查询键及直接调用者，不读取查询答案，也不改变返回值。`MG-HOOK` 表示挂接成功，`MG-QUERY` 表示测试期间实际查询。没有查询记录可能是启动前已经缓存，不能据此排除该能力判断。
 - UpsideDowned 只在 `_orientationMode` 运行期间临时返回 iPad idiom。0.1.0 记录到的 `UIDevice.userInterfaceIdiom=0` 都来自其调用原方法的内层；本版仍不会把该内层值误称为交给系统的最终值。日志无法证明 Face ID 使用这一 UI idiom。
 - `[CALLER]`：镜像、UUID、相对返回地址偏移。不是文件偏移，不是已确认的认证 gate。只记录直接调用者，不采集完整调用栈。

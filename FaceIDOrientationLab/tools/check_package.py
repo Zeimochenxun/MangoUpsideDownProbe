@@ -16,7 +16,7 @@ with tarfile.open(fileobj=io.BytesIO(payload),mode='r:') as t:
         magic,cpu,subtype,kind,ncmds,size=struct.unpack_from('<6I',b)
         assert (magic,cpu,subtype&0xffffff,kind)==(0xfeedfacf,0x100000c,2,6)
         assert all(x in b for x in (b'20F66',b'iPhone14,4',b'MSHookMessageEx',b'observe-only'))
-        if name=='FaceIDLabBio': assert b'BKDM-code-from-4000.bin' in b and b'BKDM-device-method.bin' in b and b'BKDM-analytics-method.bin' in b
+        if name=='FaceIDLabBio': assert all(x in b for x in (b'BKDM-code-from-4000.bin',b'BKDM-device-method.bin',b'BKDM-analytics-method.bin',b'Runtime-method-index.txt'))
         commands=[];offset=32;dependencies=[]
         for _ in range(ncmds):
             cmd,n=struct.unpack_from('<2I',b,offset);assert n>=8 and offset+n<=32+size
@@ -34,7 +34,7 @@ with tarfile.open(fileobj=io.BytesIO(control),mode='r:') as t:
     regular=[m for m in t if m.isfile()]
     assert len(regular)==1 and pathlib.PurePosixPath(regular[0].name).name=='control'
     s=t.extractfile(regular[0]).read().decode()
-    for x in ['Package: com.chenxun.faceidorientationlab','Version: 0.1.4~alpha5',
+    for x in ['Package: com.chenxun.faceidorientationlab','Version: 0.1.5~alpha6',
               'Architecture: iphoneos-arm64e','Conflicts: com.chenxun.faceidorientationprobe']:
         assert x in s,x
 print('PASS: exact filters, four payload files, signed arm64e dylibs, RootHide substrate paths, no install scripts')
