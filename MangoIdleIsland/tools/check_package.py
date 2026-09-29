@@ -42,7 +42,10 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'mode=global-island-native-reapply+idle-fresh-init',
         b'global-Island-glass-logic=enabled',
         b'TintRGBARepair101Done',
-        b'version=1.1.5-active-edge',
+        b'version=1.1.6-geometry-sync',
+        b'idle-size-guard=1',
+        b'implicit-animation=off',
+        b'[IDLE-GEOMETRY]',
         b'hooks=initializer+updateSpecular',
         b'scope=all-MGLiveBackdropView',
         b'readonly=1',
@@ -97,8 +100,8 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--ctr
     regular = [m for m in t if m.isfile()]
     assert len(regular) == 1 and pathlib.PurePosixPath(regular[0].name).name == 'control'
     control = t.extractfile(regular[0]).read().decode()
-    assert 'Version: 1.1.5' in control
+    assert 'Version: 1.1.6' in control
     assert 'Architecture: iphoneos-arm64e' in control
     assert 'Depends: mobilesubstrate, firmware (= 16.5)' in control
 
-print('PASS: MangoIdleIsland 1.1.5 arm64e RootHide; read-only all-MGLiveBackdropView init/updateSpecular lifecycle probe included')
+print('PASS: MangoIdleIsland 1.1.6 arm64e RootHide; idle geometry guard + no independent implicit animation + diagnostics included')
