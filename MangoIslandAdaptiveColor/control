@@ -1,8 +1,8 @@
 Package: com.chenxun.mangoislandadaptivecolor
 Name: MangoIslandAdaptiveColor
-Version: 0.1.3
+Version: 0.1.3.1
 Architecture: iphoneos-arm64e
-Description: Island-only adaptive contrast glass with bright-background detail retention, edge contrast compensation, dispersion boost, configurable parameters, and reset defaults.
+Description: Island-only adaptive contrast glass with stable Light/Dark transport markers and unified unwarped luminance reference to reduce color flicker during Island transitions.
 Maintainer: Chen Xun
 Author: Chen Xun
 Section: Tweaks
