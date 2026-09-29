@@ -45,6 +45,7 @@ jobs:
           export THEOS="$HOME/theos"
           cd FaceIDOrientationLab
           python3 tools/test_recorder.py
+          python3 tools/test_gestalt.py
           xcrun clang --version
           git -C "$THEOS" rev-parse HEAD
           make clean
