@@ -4,7 +4,7 @@ THEOS_PACKAGE_SCHEME = roothide
 INSTALL_TARGET_PROCESSES = backboardd
 include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = MangoIslandAdaptiveColor
-MangoIslandAdaptiveColor_FILES = Tweak.m
+MangoIslandAdaptiveColor_FILES = TweakSafe.m
 MangoIslandAdaptiveColor_CFLAGS = -fno-objc-arc -Wall -Wextra -Werror
 MangoIslandAdaptiveColor_FRAMEWORKS = Foundation Metal
 MangoIslandAdaptiveColor_LIBRARIES = substrate
