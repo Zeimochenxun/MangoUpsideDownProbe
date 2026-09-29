@@ -1,4 +1,4 @@
-name: Build MangoIslandAdaptiveColor 0.1.2.1 RootHide
+name: Build MangoIslandAdaptiveColor 0.1.2.2 RootHide
 on:
   workflow_dispatch:
   push:
@@ -40,16 +40,27 @@ jobs:
           xcrun lipo -info "$dylib"
           xcrun lipo -info "$prefs"
           xcrun otool -L "$dylib"
-          dpkg-deb -I packages/*.deb
+          dpkg-deb -I packages/*.deb | tee "$RUNNER_TEMP/control.txt"
+          grep -q 'Version: 0.1.2.2' "$RUNNER_TEMP/control.txt"
           dpkg-deb -c packages/*.deb | tee "$RUNNER_TEMP/package-files.txt"
           grep -q 'MangoIslandAdaptiveColorPrefs.bundle' "$RUNNER_TEMP/package-files.txt"
           grep -q 'PreferenceLoader/Preferences/MangoIslandAdaptiveColorPrefs.plist' "$RUNNER_TEMP/package-files.txt"
           strings "$dylib" | grep -q 'MangoIslandAdaptiveColor.Adaptation'
-          strings "$dylib" | grep -q 'smoothstep(0.08, 0.42, luminance)'
+          strings "$dylib" | grep -q 'MangoIslandAdaptiveColor.LumaStart'
+          strings "$dylib" | grep -q 'MangoIslandAdaptiveColor.BrightOpacity'
+          strings "$dylib" | grep -q 'smoothstep(start, end, luminance)'
+          if strings "$prefs" | grep -q 'MIAAdaptivePreviewCell'; then
+            echo 'Preview cell unexpectedly present' >&2
+            exit 1
+          fi
+          if strings "$prefs" | grep -q 'MIAAdaptivePreviewView'; then
+            echo 'Preview view unexpectedly present' >&2
+            exit 1
+          fi
           shasum -a 256 packages/*.deb > packages/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: MangoIslandAdaptiveColor-0.1.2.1-RootHide
+          name: MangoIslandAdaptiveColor-0.1.2.2-RootHide
           if-no-files-found: error
           path: |
             MangoIslandAdaptiveColor/packages/*.deb
