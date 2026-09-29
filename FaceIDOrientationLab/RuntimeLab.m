@@ -218,7 +218,7 @@ static void AppendIndexLine(NSMutableData *output, NSString *line) {
 static void DumpRuntimeIndex(gid_t gid) {
     int total = objc_getClassList(NULL, 0);
     if (total <= 0 || total > 65536) { Log(@"[INDEX-SKIP] reason=invalid-class-count count=%d", total); return; }
-    Class *classes = calloc((size_t)total, sizeof(Class));
+    Class *classes = (Class *)calloc((size_t)total, sizeof(Class));
     if (!classes) { Log(@"[INDEX-SKIP] reason=allocation-failed"); return; }
     int found = objc_getClassList(classes, total);
     if (found < 0) { free(classes); Log(@"[INDEX-SKIP] reason=class-list-failed"); return; }
