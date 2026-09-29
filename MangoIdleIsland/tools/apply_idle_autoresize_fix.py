@@ -14,16 +14,15 @@ def replace_exact(old: str, new: str, expected: int = 1) -> None:
     source = source.replace(old, new)
 
 # The Idle glass is manually framed by Update(). It must not also participate in
-# parent-driven UIKit/CALayer autoresizing, otherwise host long-press expansion
-# can resize its model/presentation layer before our next Update() clamps it back.
+# parent-driven UIView autoresizing, otherwise host long-press expansion can
+# resize it before our next Update() clamps it back.
 replace_exact(
     "    view.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;",
-    "    view.autoresizingMask = UIViewAutoresizingNone;\n"
-    "    view.layer.autoresizingMask = 0;"
+    "    view.autoresizingMask = UIViewAutoresizingNone;"
 )
 
 # Add a diagnostic whenever the size guard toggles so device logs tell us whether
-# the visible layer still diverges from the manually pinned UIView geometry.
+# the visible presentation layer still diverges from the manually pinned UIView.
 old_log = '''                    Log([NSString stringWithFormat:@"[IDLE-GEOMETRY] guard=%d host=%.2fx%.2f idle=%.2fx%.2f",
                          geometryGuard, host.bounds.size.width, host.bounds.size.height,
                          stable.size.width, stable.size.height]);'''
@@ -41,7 +40,7 @@ replace_exact(old_log, new_log)
 
 replace_exact(
     '[SESSION] version=1.1.7-preview-handoff background=Mango-glass duplicate-preview-suppression=1 idle-size-guard=1 implicit-animation=off activity-detaches-idle touch=unchanged',
-    '[SESSION] version=1.1.8-no-autoresize background=Mango-glass duplicate-preview-suppression=1 idle-size-guard=1 view-autoresize=off layer-autoresize=off implicit-animation=off activity-detaches-idle touch=unchanged'
+    '[SESSION] version=1.1.8-no-autoresize background=Mango-glass duplicate-preview-suppression=1 idle-size-guard=1 view-autoresize=off implicit-animation=off activity-detaches-idle touch=unchanged'
 )
 
 if source == original:
