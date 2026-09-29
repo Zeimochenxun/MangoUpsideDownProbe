@@ -1,4 +1,4 @@
-name: Build MangoIslandAdaptiveColor 0.1.2.2 RootHide
+name: Build MangoIslandAdaptiveColor 0.1.3 RootHide
 on:
   workflow_dispatch:
   push:
@@ -15,6 +15,16 @@ jobs:
         working-directory: MangoIslandAdaptiveColor
     steps:
       - uses: actions/checkout@v4
+      - name: Verify 0.1.3 source selection and Island-only guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'MangoIslandAdaptiveColor_FILES = TweakSafe.m' Makefile
+          grep -q 'MangoIslandAdaptiveColorPrefs_FILES = PrefsSafe.m' MangoIslandAdaptiveColorPrefs/Makefile
+          grep -q 'MarkerAlphaForPacked' TweakSafe.m
+          grep -q 'miaMarkerAlpha' TweakSafe.m
+          grep -q 'Highlight Glass' TweakSafe.m
+          grep -q '恢复默认参数' MangoIslandAdaptiveColorPrefs/PrefsSafe.m
       - name: Install tools
         uses: dhinakg/procursus-action@main
         with:
@@ -41,14 +51,18 @@ jobs:
           xcrun lipo -info "$prefs"
           xcrun otool -L "$dylib"
           dpkg-deb -I packages/*.deb | tee "$RUNNER_TEMP/control.txt"
-          grep -q 'Version: 0.1.2.2' "$RUNNER_TEMP/control.txt"
+          grep -q 'Version: 0.1.3' "$RUNNER_TEMP/control.txt"
           dpkg-deb -c packages/*.deb | tee "$RUNNER_TEMP/package-files.txt"
           grep -q 'MangoIslandAdaptiveColorPrefs.bundle' "$RUNNER_TEMP/package-files.txt"
           grep -q 'PreferenceLoader/Preferences/MangoIslandAdaptiveColorPrefs.plist' "$RUNNER_TEMP/package-files.txt"
-          strings "$dylib" | grep -q 'MangoIslandAdaptiveColor.Adaptation'
-          strings "$dylib" | grep -q 'MangoIslandAdaptiveColor.LumaStart'
+          strings "$dylib" | grep -q '0.1.3 Island-only adaptive contrast glass compiled'
+          strings "$dylib" | grep -q '\[ISLAND-ONLY\]'
           strings "$dylib" | grep -q 'MangoIslandAdaptiveColor.BrightOpacity'
-          strings "$dylib" | grep -q 'smoothstep(start, end, luminance)'
+          strings "$prefs" | grep -q '恢复默认参数'
+          if strings "$dylib" | grep -q '0.1.2.2 configurable baseline'; then
+            echo 'Old renderer unexpectedly compiled' >&2
+            exit 1
+          fi
           if strings "$prefs" | grep -q 'MIAAdaptivePreviewCell'; then
             echo 'Preview cell unexpectedly present' >&2
             exit 1
@@ -60,7 +74,7 @@ jobs:
           shasum -a 256 packages/*.deb > packages/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: MangoIslandAdaptiveColor-0.1.2.2-RootHide
+          name: MangoIslandAdaptiveColor-0.1.3-RootHide
           if-no-files-found: error
           path: |
             MangoIslandAdaptiveColor/packages/*.deb
