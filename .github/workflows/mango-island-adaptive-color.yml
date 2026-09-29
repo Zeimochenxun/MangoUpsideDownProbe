@@ -55,10 +55,14 @@ jobs:
           dpkg-deb -c packages/*.deb | tee "$RUNNER_TEMP/package-files.txt"
           grep -q 'MangoIslandAdaptiveColorPrefs.bundle' "$RUNNER_TEMP/package-files.txt"
           grep -q 'PreferenceLoader/Preferences/MangoIslandAdaptiveColorPrefs.plist' "$RUNNER_TEMP/package-files.txt"
-          strings "$dylib" | grep -q '0.1.3 Island-only adaptive contrast glass compiled'
-          strings "$dylib" | grep -q '\[ISLAND-ONLY\]'
+          echo '[check] renderer signature'
+          strings "$dylib" | grep -F -q 'Island-only adaptive contrast glass compiled'
+          echo '[check] island-only marker'
+          strings "$dylib" | grep -F -q '[ISLAND-ONLY]'
+          echo '[check] configurable key'
           strings "$dylib" | grep -q 'MangoIslandAdaptiveColor.BrightOpacity'
-          strings "$prefs" | grep -q '恢复默认参数'
+          echo '[check] reset selector'
+          strings "$prefs" | grep -q 'resetDefaults:'
           if strings "$dylib" | grep -q '0.1.2.2 configurable baseline'; then
             echo 'Old renderer unexpectedly compiled' >&2
             exit 1
