@@ -406,16 +406,16 @@ static BOOL StableIdleHostGeometry(UIView *host) {
     CALayer *presentation = host.layer.presentationLayer;
     if (!presentation) return YES;
     CGSize visible = presentation.bounds.size;
-    // Require a returning bounds animation to reach its compact destination.
-    // A host transform/position animation carries its child glass with it and
-    // must not be treated as a mismatched local bounds size.
-    return StableIdleGeometry(visible) &&
-           fabs(visible.width - model.width) <= 0.5 &&
-           fabs(visible.height - model.height) <= 0.5;
+    // Content can dismiss before compact bounds reach their final size.
+    // Restore backing once both sizes are compact; expanded model or
+    // presentation bounds remain excluded by the compact geometry gates.
+    return StableIdleGeometry(visible);
 }
 
-static NSString *Eligibility(UIView *host, CGFloat *activity) {
+static NSString *Eligibility(UIView *host, CGFloat *activity, CGFloat *elementOpacityOut, CGFloat *glassOpacityOut) {
     *activity = 0;
+    *elementOpacityOut = 0;
+    *glassOpacityOut = 0;
     if (Disabled) return @"disabled";
     UIWindow *w = host.window;
     if (![w isKindOfClass:WindowClass] || !w.userInteractionEnabled) return @"window-excluded";
@@ -446,6 +446,8 @@ static NSString *Eligibility(UIView *host, CGFloat *activity) {
         }
         [todo addObjectsFromArray:v.subviews];
     }
+    *elementOpacityOut = elementOpacity;
+    *glassOpacityOut = glassOpacity;
     if (todo.count) return @"scan-limit";
 
     *activity = MAX(glassOpacity, elementOpacity);
@@ -459,8 +461,8 @@ static void Update(UIView *host) {
     if (InUpdate || !NSThread.isMainThread) return;
     InUpdate = YES;
     @try {
-        CGFloat activity = 0;
-        NSString *state = Eligibility(host, &activity);
+        CGFloat activity = 0, elementOpacity = 0, glassOpacity = 0;
+        NSString *state = Eligibility(host, &activity, &elementOpacity, &glassOpacity);
         BOOL stableGeometry = StableIdleHostGeometry(host);
         BOOL backgroundState = [state isEqualToString:@"background"];
         BOOL activityState = [state isEqualToString:@"activity"];
@@ -518,9 +520,14 @@ static void Update(UIView *host) {
         NSString *old = objc_getAssociatedObject(host, &StateKey);
         if (![old isEqualToString:state]) {
             Pulse();
-            Log([NSString stringWithFormat:@"[STATE] host=%p state=%@ stable=%d activity=%.3f size=%.2fx%.2f background=%.3f",
+            CALayer *presentation = host.layer.presentationLayer;
+            CGSize presentationSize = presentation ? presentation.bounds.size : host.bounds.size;
+            Log([NSString stringWithFormat:@"[STATE] host=%p state=%@ stable=%d activity=%.3f size=%.2fx%.2f presentation=%.2fx%.2f hasPresentation=%d elementOpacity=%.3f glassOpacity=%.3f background=%.3f bgAttached=%d bgHidden=%d",
                  (void *)host, state, stableGeometry, activity,
-                 host.bounds.size.width, host.bounds.size.height, bg ? bg.alpha : 0.0]);
+                 host.bounds.size.width, host.bounds.size.height,
+                 presentationSize.width, presentationSize.height, presentation != nil,
+                 elementOpacity, glassOpacity, bg ? bg.alpha : 0.0,
+                 bg.superview == host, bg ? bg.hidden : YES]);
             objc_setAssociatedObject(host, &StateKey, state, OBJC_ASSOCIATION_COPY_NONATOMIC);
         }
     } @finally {
@@ -608,7 +615,7 @@ __attribute__((constructor)) static void Start(void) {
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=1.1.9.1~alpha1-stable-idle-handoff background=Mango-glass stable-idle-only=1 inverse-native-opacity=1 presentation-opacity=1 presentation-bounds-guard=1 activity-detaches-idle touch=unchanged");
+            Log(@"[SESSION] version=1.1.9.2~alpha2-stable-idle-handoff background=Mango-glass stable-idle-only=1 inverse-native-opacity=1 presentation-opacity=1 presentation-bounds-guard=1 compact-return-handoff=1 activity-detaches-idle touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");

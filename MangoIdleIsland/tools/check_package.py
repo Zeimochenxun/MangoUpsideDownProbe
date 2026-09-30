@@ -42,9 +42,15 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--fsy
         b'mode=global-island-native-reapply+idle-fresh-init',
         b'global-Island-glass-logic=enabled',
         b'TintRGBARepair101Done',
-        b'version=1.1.9.1~alpha1-stable-idle-handoff',
+        b'version=1.1.9.2~alpha2-stable-idle-handoff',
         b'presentation-opacity=1',
         b'presentation-bounds-guard=1',
+        b'compact-return-handoff=1',
+        b'presentation=%.2fx%.2f',
+        b'elementOpacity=%.3f',
+        b'glassOpacity=%.3f',
+        b'bgAttached=%d',
+        b'bgHidden=%d',
         b'stable-idle-only=1',
         b'inverse-native-opacity=1',
         b'transition',
@@ -110,8 +116,8 @@ with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['dpkg-deb', '--ctr
     regular = [m for m in t if m.isfile()]
     assert len(regular) == 1 and pathlib.PurePosixPath(regular[0].name).name == 'control'
     control = t.extractfile(regular[0]).read().decode()
-    assert 'Version: 1.1.9.1~alpha1' in control.splitlines()
+    assert 'Version: 1.1.9.2~alpha2' in control.splitlines()
     assert 'Architecture: iphoneos-arm64e' in control
     assert 'Depends: mobilesubstrate, firmware (= 16.5)' in control
 
-print('PASS: MangoIdleIsland 1.1.9.1~alpha1 arm64e RootHide; presentation-aware stable-idle handoff state machine + diagnostics included')
+print('PASS: MangoIdleIsland 1.1.9.2~alpha2 arm64e RootHide; compact-return stable-idle handoff state machine + diagnostics included')

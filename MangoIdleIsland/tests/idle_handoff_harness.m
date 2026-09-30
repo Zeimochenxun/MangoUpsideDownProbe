@@ -31,6 +31,7 @@ static int Failures;
 @end
 
 /* ACTUAL_HELPERS */
+/* ACTUAL_POLICY_EXPRESSIONS */
 
 static UIView *View(CGFloat width, CGFloat height, CGFloat alpha) {
     UIView *v = [UIView new];
@@ -96,13 +97,13 @@ int main(void) {
     Presented(host, 150, 44, 1);
     assert(!StableIdleHostGeometry(host));
     Presented(host, 143, 40, 1);
-    assert(!StableIdleHostGeometry(host));
+    assert(StableIdleHostGeometry(host));
     Presented(host, 125.6, 36.67, 1);
-    assert(!StableIdleHostGeometry(host));
+    assert(StableIdleHostGeometry(host));
     Presented(host, 125.4, 36.67, 1);
     assert(StableIdleHostGeometry(host));
     Presented(host, 125, 37.27, 1);
-    assert(!StableIdleHostGeometry(host));
+    assert(StableIdleHostGeometry(host));
     Presented(host, 125, 37.07, 1);
     assert(StableIdleHostGeometry(host));
     Presented(host, NAN, 36.67, 1);
@@ -115,8 +116,36 @@ int main(void) {
     host.layer.position = 80;
     host.layer.presentationLayer.position = 82;
     assert(StableIdleHostGeometry(host));
+
+    // Return after notification content clears: compact geometry must restore
+    // backing before bounds reach near-exact agreement with the model.
+    host.alpha = 1;
+    host.layer.opacity = 1;
+    native.superview = host;
+    native.alpha = 0;
+    native.layer.opacity = 0;
+    Presented(native, 125, 36.67, 0);
+    CGFloat widths[] = {160, 143, 129, 125.8, 125};
+    for (NSUInteger i = 0; i < sizeof(widths) / sizeof(widths[0]); i++) {
+        Presented(host, widths[i], 36.67, 1);
+        CGFloat expected = widths[i] > 145 ? 0 : 1;
+        Near(Backing(host, EffectiveOpacity(native, host)), expected);
+    }
+    Presented(host, 129, 38, 1);
+    native.layer.presentationLayer.opacity = 0.75;
+    Near(Backing(host, EffectiveOpacity(native, host)), 0.25);
+    native.layer.presentationLayer.opacity = 1;
+    Near(Backing(host, EffectiveOpacity(native, host)), 0);
+    Presented(host, 150, 44, 1);
+    Near(Backing(host, 0), 0);
+    Presented(host, 145.01, 36.67, 1);
+    assert(!StableIdleHostGeometry(host));
+    Presented(host, 125, 45.01, 1);
+    assert(!StableIdleHostGeometry(host));
+    Presented(host, 125, 36.67, 1);
     host.bounds = (CGRect){ .size = { 150, 44 } };
     assert(!StableIdleHostGeometry(host));
+    Near(Backing(host, 0), 0);
     if (Failures) {
         fprintf(stderr, "FAIL: actual helper bodies failed %d behavior expectations\n", Failures);
         return 1;

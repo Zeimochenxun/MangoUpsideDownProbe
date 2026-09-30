@@ -1,8 +1,8 @@
-name: Verify conservative Island glass alpha1
+name: Verify notification return Island glass alpha2
 on:
   workflow_dispatch:
   push:
-    branches: [island-glass-conservative-alpha1]
+    branches: [island-glass-conservative-alpha2]
     paths: ['MangoIdleIsland/**', 'AdaptiveColorPatch/**', 'tests/**', 'tools/**', '.github/workflows/island-glass-conservative-alpha1.yml']
 permissions:
   contents: read
@@ -52,7 +52,7 @@ jobs:
           shasum -a 256 packages/*.deb > ../build-info/idle/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: IslandGlass-conservative-alpha1-verified
+          name: IslandGlass-conservative-alpha2-verified
           if-no-files-found: error
           path: |
             MangoIdleIsland/packages/*.deb
