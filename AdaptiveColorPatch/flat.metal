@@ -1,0 +1,1 @@
+flat.rgb = mangoIslandAdaptiveColor(flat.rgb, u.tintColor);

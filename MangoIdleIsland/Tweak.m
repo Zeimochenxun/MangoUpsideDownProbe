@@ -374,7 +374,7 @@ static UIView *CreateBackground(BOOL useMango, CGRect rect) {
     view.layer.cornerCurve = kCACornerCurveContinuous;
     BOOL actualMangoGlass = useMango && [view isKindOfClass:GlassClass];
     view.clipsToBounds = !actualMangoGlass;
-    view.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+    view.autoresizingMask = UIViewAutoresizingNone;
     objc_setAssociatedObject(view, &GlassModeKey, @(actualMangoGlass), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     return view;
 }
@@ -384,9 +384,34 @@ static CGFloat EffectiveOpacity(UIView *v, UIView *host) {
     for (UIView *p = v; p && p != host; p = p.superview) {
         if (p.hidden || p.layer.hidden) return 0;
         CALayer *layer = p.layer.presentationLayer ?: p.layer;
-        opacity *= MIN(p.alpha, layer.opacity);
+        // During a fade, the presentation layer is the currently visible
+        // value. The model alpha is already the destination of the animation.
+        opacity *= layer.opacity;
     }
     return MAX(0, MIN(1, opacity));
+}
+
+static BOOL StableIdleGeometry(CGSize size) {
+    // Device logs show stable compact Island geometries around 125x36.67,
+    // 129x38, 133x39.33 and 137.67x40.67. Long-press preview is 150x44.
+    // Keep the supplemental glass strictly on the compact side of that split.
+    return isfinite(size.width) && isfinite(size.height) &&
+           size.width >= 110.0 && size.width <= 145.0 &&
+           size.height >= 28.0 && size.height <= 45.0;
+}
+
+static BOOL StableIdleHostGeometry(UIView *host) {
+    CGSize model = host.bounds.size;
+    if (!StableIdleGeometry(model)) return NO;
+    CALayer *presentation = host.layer.presentationLayer;
+    if (!presentation) return YES;
+    CGSize visible = presentation.bounds.size;
+    // Require a returning bounds animation to reach its compact destination.
+    // A host transform/position animation carries its child glass with it and
+    // must not be treated as a mismatched local bounds size.
+    return StableIdleGeometry(visible) &&
+           fabs(visible.width - model.width) <= 0.5 &&
+           fabs(visible.height - model.height) <= 0.5;
 }
 
 static NSString *Eligibility(UIView *host, CGFloat *activity) {
@@ -397,6 +422,7 @@ static NSString *Eligibility(UIView *host, CGFloat *activity) {
     if (!Visible(host)) return @"host-not-visible";
     CGSize size = host.bounds.size;
     if (!isfinite(size.width) || !isfinite(size.height) || size.width < 100 || size.width > 350 || size.height < 28 || size.height > 145) return @"geometry-excluded";
+    BOOL stableIdleGeometry = StableIdleHostGeometry(host);
     NSMutableArray<UIView *> *todo = [host.subviews mutableCopy];
     UIView *own = objc_getAssociatedObject(host, &BackgroundKey);
     NSUInteger count = 0;
@@ -405,8 +431,8 @@ static NSString *Eligibility(UIView *host, CGFloat *activity) {
         UIView *v = todo.lastObject; [todo removeLastObject];
         if (v == own) continue;
         if (ElementClass && [v isKindOfClass:ElementClass]) elementOpacity = MAX(elementOpacity, EffectiveOpacity(v, host));
-        // Only Island-domain Mango glass is allowed to control the idle/active
-        // handoff. Other Mango glass surfaces must not suppress Idle Island.
+        // Keep active-Island edge/specular maintenance independent of the idle
+        // geometry gate. We still observe native glass throughout transitions.
         if (IsIslandGlass(v)) {
             EnsureActiveEdge(v);
             if (!CGRectIsEmpty(v.bounds)) {
@@ -421,10 +447,12 @@ static NSString *Eligibility(UIView *host, CGFloat *activity) {
         [todo addObjectsFromArray:v.subviews];
     }
     if (todo.count) return @"scan-limit";
-    // Activity content can precede its glass. Treat either as activity so
-    // a dormant glass never masks an already visible media element.
+
     *activity = MAX(glassOpacity, elementOpacity);
-    return *activity > 0.01 ? @"activity" : @"background";
+    if (*activity > 0.01) return @"activity";
+    // A no-content geometry such as 150x44 is a press/preview transition, not
+    // idle. Never keep an independent supplemental glass in that animation.
+    return stableIdleGeometry ? @"background" : @"transition";
 }
 
 static void Update(UIView *host) {
@@ -433,12 +461,21 @@ static void Update(UIView *host) {
     @try {
         CGFloat activity = 0;
         NSString *state = Eligibility(host, &activity);
-        BOOL eligible = [state isEqualToString:@"background"] || [state isEqualToString:@"activity"];
+        BOOL stableGeometry = StableIdleHostGeometry(host);
+        BOOL backgroundState = [state isEqualToString:@"background"];
+        BOOL activityState = [state isEqualToString:@"activity"];
+        BOOL blendableActivity = activityState && stableGeometry;
+
         UIView *bg = objc_getAssociatedObject(host, &BackgroundKey);
-        BOOL constructor = eligible && GlassConstructorVerified && !GlassConstructionFailed;
+        // During a compact activity fade, allow the Idle glass to exist only as
+        // the inverse-opacity backing layer. Outside compact geometry it exits
+        // immediately and never participates in press/preview motion.
+        BOOL needBackground = backgroundState || (blendableActivity && activity < 0.995);
+        BOOL constructor = needBackground && GlassConstructorVerified && !GlassConstructionFailed;
         BOOL mango = constructor && (OriginalIslandGlassSeen || MangoGlassSetting());
-        BOOL upgrading = eligible && bg && mango && ![objc_getAssociatedObject(bg, &GlassModeKey) boolValue];
-        if ([state isEqualToString:@"background"] && (!bg || upgrading)) {
+        BOOL upgrading = needBackground && bg && mango && ![objc_getAssociatedObject(bg, &GlassModeKey) boolValue];
+
+        if (needBackground && (!bg || upgrading)) {
             UIView *old = bg;
             bg = CreateBackground(mango, host.bounds);
             if (bg) {
@@ -450,38 +487,40 @@ static void Update(UIView *host) {
                      OriginalIslandGlassSeen ? @"observed" : (mango ? @"setting" : @"fallback"), constructor, upgrading]);
             }
         }
+
         if (bg) {
-            if ([state isEqualToString:@"background"]) {
-                if (bg.superview != host) [host insertSubview:bg atIndex:0];
-                if (!CGRectEqualToRect(bg.frame, host.bounds)) bg.frame = host.bounds;
-                CGFloat radius = host.bounds.size.height / 2.0;
-                if (bg.layer.cornerRadius != radius) bg.layer.cornerRadius = radius;
-                CFTimeInterval now = CACurrentMediaTime();
-                NSNumber *since = objc_getAssociatedObject(host, &OpaqueSinceKey);
-                if (activity < 0.98) {
-                    since = nil;
-                    objc_setAssociatedObject(host, &OpaqueSinceKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                } else if (!since) {
-                    since = @(now);
-                    objc_setAssociatedObject(host, &OpaqueSinceKey, since, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                }
-                CGFloat coverage = activity >= 0.98 && now - since.doubleValue < 0.06 ? 0 : activity;
-                CGFloat backingOpacity = MAX(0, MIN(1, 1 - coverage));
-                if (fabs(bg.alpha - backingOpacity) > 0.001) bg.alpha = backingOpacity;
-                if (bg.hidden) bg.hidden = NO;
+            if (backgroundState || (blendableActivity && activity < 0.995)) {
+                CGFloat backingOpacity = backgroundState ? 1.0 : MAX(0, MIN(1, 1 - activity));
+                [UIView performWithoutAnimation:^{
+                    [CATransaction begin];
+                    [CATransaction setDisableActions:YES];
+                    if (bg.superview != host) [host insertSubview:bg atIndex:0];
+                    bg.frame = host.bounds;
+                    bg.layer.cornerRadius = host.bounds.size.height / 2.0;
+                    bg.alpha = backingOpacity;
+                    bg.hidden = NO;
+                    [CATransaction commit];
+                }];
             } else {
-                // A detached idle backdrop cannot participate in Mango's
-                // live activity rendering or backdrop composition.
-                if (!bg.hidden) bg.hidden = YES;
-                if ([state isEqualToString:@"activity"] && bg.superview) [bg removeFromSuperview];
-                objc_setAssociatedObject(host, &OpaqueSinceKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                // Preview/expanded geometry and fully established activity are
+                // exclusively native/Mango-owned. Do not animate our independent
+                // Idle glass alongside them.
+                [UIView performWithoutAnimation:^{
+                    [CATransaction begin];
+                    [CATransaction setDisableActions:YES];
+                    bg.hidden = YES;
+                    [bg removeFromSuperview];
+                    [CATransaction commit];
+                }];
             }
         }
+
         NSString *old = objc_getAssociatedObject(host, &StateKey);
         if (![old isEqualToString:state]) {
             Pulse();
-            Log([NSString stringWithFormat:@"[STATE] host=%p state=%@ size=%.2fx%.2f background=%.2f",
-                 (void *)host, state, host.bounds.size.width, host.bounds.size.height, bg.alpha]);
+            Log([NSString stringWithFormat:@"[STATE] host=%p state=%@ stable=%d activity=%.3f size=%.2fx%.2f background=%.3f",
+                 (void *)host, state, stableGeometry, activity,
+                 host.bounds.size.width, host.bounds.size.height, bg ? bg.alpha : 0.0]);
             objc_setAssociatedObject(host, &StateKey, state, OBJC_ASSOCIATION_COPY_NONATOMIC);
         }
     } @finally {
@@ -569,7 +608,7 @@ __attribute__((constructor)) static void Start(void) {
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=1.1.5-active-edge background=Mango-glass activity-detaches-idle touch=unchanged");
+            Log(@"[SESSION] version=1.1.9.1~alpha1-stable-idle-handoff background=Mango-glass stable-idle-only=1 inverse-native-opacity=1 presentation-opacity=1 presentation-bounds-guard=1 activity-detaches-idle touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");

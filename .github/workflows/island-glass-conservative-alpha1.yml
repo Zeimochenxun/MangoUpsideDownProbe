@@ -1,0 +1,57 @@
+name: Verify conservative Island glass alpha1
+on:
+  workflow_dispatch:
+  push:
+    branches: [island-glass-conservative-alpha1]
+    paths: ['MangoIdleIsland/**', 'AdaptiveColorPatch/**', 'tests/**', 'tools/**', '.github/workflows/island-glass-conservative-alpha1.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the actual helpers and compile plugin Metal fragments
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 MangoIdleIsland/tests/test_idle_conservative.py --require-clang
+          python3 tools/compile_adaptive_fragments.py
+      - name: Install tools
+        uses: dhinakg/procursus-action@main
+        with:
+          packages: ldid make
+      - name: Install RootHide Theos
+        run: git clone --recursive https://github.com/roothide/theos.git "$HOME/theos"
+      - name: Install verified SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz --output "$RUNNER_TEMP/sdk.tar.xz"
+          echo "5e0fd3f01266cce4ce012d4a99b38eb56578fca40d09edc81cd83dee958202fb  $RUNNER_TEMP/sdk.tar.xz" | shasum -a 256 -c -
+          mkdir -p "$HOME/theos/sdks"
+          tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$HOME/theos/sdks"
+      - name: Build the already generated 1.1.9 baseline with two local fixes
+        working-directory: MangoIdleIsland
+        shell: bash
+        run: |
+          set -euo pipefail
+          export THEOS="$HOME/theos"
+          make package FINALPACKAGE=1 2>&1 | tee "$RUNNER_TEMP/build.log"
+          if grep -qi "incompatible arm64e ABI" "$RUNNER_TEMP/build.log"; then exit 1; fi
+          python3 tools/check_package.py packages/*.deb
+          dylib="$(find .theos -name MangoIdleIsland.dylib -type f | head -n 1)"
+          mkdir -p ../build-info/idle
+          xcrun lipo -info "$dylib" | tee ../build-info/idle/architecture.txt
+          xcrun otool -L "$dylib" | tee ../build-info/idle/dependencies.txt
+          cp "$RUNNER_TEMP/build.log" ../build-info/idle/
+          shasum -a 256 packages/*.deb > ../build-info/idle/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IslandGlass-conservative-alpha1-verified
+          if-no-files-found: error
+          path: |
+            MangoIdleIsland/packages/*.deb
+            build-info/**
+            AdaptiveColorPatch/*.metal
