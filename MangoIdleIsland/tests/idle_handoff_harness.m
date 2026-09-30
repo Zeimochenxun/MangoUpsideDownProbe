@@ -1,29 +1,15 @@
 // Test-only property stubs: actual three helper bodies are inserted by runner.
 // This executable checks their Objective-C syntax/traversal/math; it is not UIKit.
-#include <objc/runtime.h>
+#import <Foundation/Foundation.h>
+#import <CoreGraphics/CoreGraphics.h>
 #include <math.h>
 #include <stdio.h>
 
 static int Failures;
+#undef assert
 #define assert(condition) do { if (!(condition)) { Failures++; } } while (0)
 
-typedef double CGFloat;
-typedef struct { CGFloat width, height; } CGSize;
-typedef struct { CGSize size; } CGRect;
-static CGFloat MAX(CGFloat a, CGFloat b) { return a > b ? a : b; }
-static CGFloat MIN(CGFloat a, CGFloat b) { return a < b ? a : b; }
-
-__attribute__((objc_root_class))
-@interface TestObject
-+ (instancetype)alloc;
-+ (instancetype)new;
-@end
-@implementation TestObject
-+ (instancetype)alloc { return class_createInstance(self, 0); }
-+ (instancetype)new { return [self alloc]; }
-@end
-
-@interface CALayer : TestObject
+@interface CALayer : NSObject
 @property (nonatomic) CGFloat opacity;
 @property (nonatomic) BOOL hidden;
 @property (nonatomic, assign) CALayer *presentationLayer;
@@ -34,7 +20,7 @@ __attribute__((objc_root_class))
 @implementation CALayer
 @end
 
-@interface UIView : TestObject
+@interface UIView : NSObject
 @property (nonatomic) CGFloat alpha;
 @property (nonatomic) BOOL hidden;
 @property (nonatomic, assign) CALayer *layer;

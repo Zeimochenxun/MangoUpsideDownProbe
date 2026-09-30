@@ -294,13 +294,15 @@ def run_objc_stub(require_clang=False):
             executable = Path(directory) / label
             harness.write_text(template.replace("/* ACTUAL_HELPERS */", bodies), encoding="utf-8")
             subprocess.run([clang, "-x", "objective-c", "-std=gnu11", "-Wall", "-Wextra", "-Werror",
-                            str(harness), "-lobjc", "-o", str(executable)], check=True)
+                            str(harness), "-framework", "Foundation", "-framework", "CoreGraphics",
+                            "-o", str(executable)], check=True)
             result = subprocess.run([str(executable)], capture_output=True, text=True)
+            diagnostic = f"{label} returncode={result.returncode}\nstdout={result.stdout!r}\nstderr={result.stderr!r}"
             if expected_success:
-                assert result.returncode == 0, result.stdout + result.stderr
+                assert result.returncode == 0, diagnostic
                 print(result.stdout.strip())
             else:
-                assert result.returncode == 1, "Baseline did not show the expected assertion failures: " + result.stdout + result.stderr
+                assert result.returncode == 1, "Baseline did not show the expected assertion failures: " + diagnostic
                 print("PASS: compiled baseline helpers failed the same new behavior expectations (expected negative control).")
 
 
