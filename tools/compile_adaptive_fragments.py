@@ -43,8 +43,9 @@ kernel void checkAdaptive(texture2d<float, access::sample> src [[texture(0)]],
 ''' + dispersion + '\n' + curved + '\nfloat glare=0.1;\n' + glare + '''
     float3 curvedRGB=outRGB;
     {
+        float4 flat=bg;
 ''' + flat + '''
-        dst.write(float4((outRGB+curvedRGB)*0.5,1.0),tid);
+        dst.write(float4((flat.rgb+curvedRGB)*0.5,1.0),tid);
     }
 }
 '''
