@@ -1,0 +1,20 @@
+name: Verify Debian directory packaging
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/deb.py'
+      - 'tests/check_directories.py'
+      - 'tests/test_dpkg_install.py'
+      - 'tests/install-layout.json'
+      - '.github/workflows/verify-packaging.yml'
+permissions:
+  contents: read
+jobs:
+  unpack:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reproduce old failure and verify fixed dpkg unpack
+        run: sudo python3 tests/test_dpkg_install.py

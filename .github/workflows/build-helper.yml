@@ -1,0 +1,124 @@
+name: Build Mango Suite Beta8 (RootHide)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/**'
+      - 'prefs/**'
+      - 'modules/**'
+      - 'tests/**'
+      - 'tools/**'
+      - 'beta8-compatibility.json'
+      - 'Makefile'
+      - 'control'
+      - 'AMangoSuiteLoader.plist'
+      - '.github/workflows/build-helper.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Refuse original binaries and private shader in build source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '(^inputs/|/(evidence|split-old|world-old)/|\.(deb|dylib|zip|metal|air|metallib)$)'; then
+            echo 'Original binaries and private shader must remain local.'
+            exit 1
+          fi
+          test -f src/Loader.m
+          test -f prefs/Prefs.m
+
+      - name: Verify independent module routing
+        run: |
+          cc -Wall -Wextra -Werror tests/policy.c -o /tmp/mangosuite-policy
+          /tmp/mangosuite-policy
+
+      - name: Verify Settings entry, persistence, and native independence
+        run: python3 tests/test_settings_entry.py
+
+      - name: Verify actual Beta8 compatibility parser
+        run: python3 tests/test_compatibility.py
+
+      - name: Verify idle animation handoff and direction geometry
+        run: |
+          set -euo pipefail
+          python3 modules/visual/tests/test_idle_handoff.py --require-clang
+          clang -std=c11 -Wall -Wextra -Werror modules/orientation/tests/world_math_test.c -lm -o /tmp/world-test
+          /tmp/world-test
+          clang -std=c11 -Wall -Wextra -Werror modules/orientation/tests/placement_test.c -lm -o /tmp/placement-test
+          /tmp/placement-test
+          clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation -framework CoreGraphics modules/orientation/tests/pan_correction_test.m -o /tmp/pan-test
+          /tmp/pan-test
+
+      - name: Compile final Beta8 shader without publishing its source
+        env:
+          BETA8_METAL_SOURCE: ${{ secrets.MANGOSUITE_BETA8_METAL_5BB839 }}
+        run: python3 tests/test_metal_private.py
+
+      - name: Install signing and packaging tools
+        uses: dhinakg/procursus-action@main
+        with:
+          packages: ldid make
+
+      - name: Install RootHide Theos
+        run: git clone --recursive https://github.com/roothide/theos.git "$HOME/theos"
+
+      - name: Install verified iOS 16.5 SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz \
+            --output "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz"
+          echo "5e0fd3f01266cce4ce012d4a99b38eb56578fca40d09edc81cd83dee958202fb  $RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" | shasum -a 256 -c -
+          mkdir -p "$HOME/theos/sdks"
+          tar -xJf "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" -C "$HOME/theos/sdks"
+
+      - name: Build Beta8 loader, preferences, and three adapted modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          export THEOS="$HOME/theos"
+          mkdir -p build-info
+          xcrun clang --version | tee build-info/compiler.txt
+          git -C "$THEOS" rev-parse HEAD > build-info/theos-commit.txt
+          git rev-parse HEAD > build-info/source-commit.txt
+          make package FINALPACKAGE=1 2>&1 | tee build-info/build.log
+          if grep -qi 'incompatible arm64e ABI' build-info/build.log; then
+            echo 'Refusing an incompatible arm64e ABI.'
+            exit 1
+          fi
+          python3 tools/check_helper.py packages/*.deb
+          for binary in build-info/verified-images/*; do
+            name="$(basename "$binary")"
+            xcrun lipo -info "$binary" | tee "build-info/$name.architecture.txt"
+            xcrun otool -L "$binary" | tee "build-info/$name.dependencies.txt"
+            xcrun otool -l "$binary" > "build-info/$name.load-commands.txt"
+            ldid -e "$binary" > "build-info/$name.entitlements.plist"
+          done
+          shasum -a 256 packages/*.deb > build-info/SHA256SUMS.txt
+
+      - name: Upload adapted module artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MangoSuite-Beta8-helper-arm64e-RootHide
+          if-no-files-found: error
+          path: |
+            packages/*.deb
+            build-info/*
+
+  install-layout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify dpkg installation, upgrade, and preserved preferences
+        run: python3 tests/test_dpkg_install.py

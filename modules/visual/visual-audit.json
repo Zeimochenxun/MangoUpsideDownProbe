@@ -1,0 +1,86 @@
+{
+  "sourceVersion": "1.1.9.3~beta8.1",
+  "methodABI": {
+    "MangoPanda": {
+      "initWithFrame:groupName:filterType:": {
+        "imp": "0x7aef30",
+        "type": "@64@0:8{CGRect={CGPoint=dd}{CGSize=dd}}16@48@56"
+      },
+      "lgFilterType": {
+        "imp": "0x7e8eb0",
+        "type": "@16@0:8"
+      },
+      "lgSpecularEnabledOverride": {
+        "imp": "0x7b7a10",
+        "type": "@16@0:8"
+      },
+      "setLgSpecularEnabledOverride:": {
+        "imp": "0x7b8a04",
+        "type": "v24@0:8@16"
+      },
+      "reapplyFilterForParameterReload": {
+        "imp": "0x7e794c",
+        "type": "v16@0:8"
+      }
+    },
+    "MangoHello": {
+      "initWithFrame:groupName:filterType:": {
+        "imp": "0xc687a4",
+        "type": "@64@0:8{CGRect={CGPoint=dd}{CGSize=dd}}16@48@56"
+      },
+      "lgFilterType": {
+        "imp": "0xc9e254",
+        "type": "@16@0:8"
+      },
+      "lgSpecularEnabledOverride": {
+        "imp": "0xc71bac",
+        "type": "@16@0:8"
+      },
+      "setLgSpecularEnabledOverride:": {
+        "imp": "0xc72f58",
+        "type": "v24@0:8@16"
+      },
+      "reapplyFilterForParameterReload": {
+        "imp": "0xc9cbf4",
+        "type": "v16@0:8"
+      }
+    }
+  },
+  "renderingUUID": "0D23BE7C-63FC-335E-A5B2-6773627BA077",
+  "renderReload": {
+    "registration": "0x6494",
+    "callback": "0x88fc",
+    "preferenceRead": "0x7d54",
+    "parameterBroadcast": "0x89ec"
+  },
+  "nativeFallbackDefaults": {
+    "Island.Blur": 0.1,
+    "Island.DispersionStrength": 5.0,
+    "Island.DispersionEnabled": true,
+    "Island.LightTintColor": "#00000000",
+    "Island.DarkTintColor": "#00000000",
+    "Island.SpecularOpacity": 0.6
+  },
+  "suiteEdgeOptInDefault": false,
+  "shaderRewrite": {
+    "0x8300": {
+      "occurrences": 1,
+      "length": 57
+    },
+    "0x8320": {
+      "occurrences": 1,
+      "length": 60
+    },
+    "0x8340": {
+      "occurrences": 1,
+      "length": 58
+    },
+    "0x8360": {
+      "occurrences": 1,
+      "length": 46
+    }
+  },
+  "shaderSHA256": "af6430f9d38830c81fd924f7fee8b1851535af7e26f23336023253b241f46259",
+  "idleSourceSHA256": "7884e47d0c995cce4310f99c36776added29b185214c095cc4b0ab7141fd1ae1",
+  "localStatus": "MachO ABI, exact shader rewrite, runtime fallback defaults and source scope verified. Objective-C behavior/Metal compilation pending macOS CI."
+}

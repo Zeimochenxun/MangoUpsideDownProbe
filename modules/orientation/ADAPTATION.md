@@ -1,0 +1,49 @@
+# Beta8 方向模块适配
+
+适用基线是用户提供的 RootHide Mango `1.0-Beta8-1`，iPhone 13 mini、iOS 16.5。用户已经在正常授权的原版上验证外部写入 `LeXiang.UpsideDown.Enabled` 可以开启原生倒置。本目录的方向模块不写这个偏好，不修改 Mango 文件或授权。
+
+## 已确认的差异
+
+旧 Suite 输入 `World 1.2.0`、`Split 0.1.1-alpha2` 围绕 `mango.dylib` 编写。Beta8 将 `MangoPillElement`、`DecoratedAppSceneView` 和 `DecoratedFloatingView` 放在 `MangoHello.dylib`。原倒置支持位在 `MangoPanda.dylib`，它和布局/手势模块职责分开。因此不能只把旧 guard 的 UUID 换成 Panda UUID。
+
+| 证据 | Beta8 |
+|---|---|
+| MangoHello UUID | `15D63429-C2F1-3997-B6A2-3E0F803D8FED` |
+| MangoPanda UUID | `05FEE465-833B-3982-AC57-CC721F1DA2E5` |
+| scene 当前方向 getter | `+[DecoratedAppSceneView mango_currentInterfaceOrientation]`，`q16@0:8`，`0x4e4514` |
+| pill 布局回调 | `layoutHostContainerViewDidLayoutSubviews:`，`v24@0:8@16`，`0xb4b870` |
+| pill 自身 pan | `handlePanGesture:`，`v24@0:8@16`，`0xb7e16c` |
+| 分屏 scene 布局 | `adjustWindowForSceneOrientationChange:isLandscape:`，`v28@0:8q16B24`，`0x544004` |
+| 原 System Aperture resize-pan replacement | `0xba069c`，构造函数 `0xb9b8c0` 动态注册 `_handleResizePan:` |
+
+Beta8 的 resize-pan 仍将方向 1/2 放到相同 portrait 分支，Ended 时使用原 `translationInView:` 的 y 做正负 30 的动作判断，没有方向 2 的显式 y 反转。旧 World 1.2.0 二进制 `0xef98` 的增量只是在这个调用内临时反转 Ended 的 translation.y，并在返回/异常时恢复。新模块保留这项行为，但额外要求 **World 实际拥有该手势所在岛窗口的半转**；原生窗口已经倒置、World 没有施加变换时不做补偿。
+
+## 成品源码职责
+
+- `Beta8Identity.h`：同时确认两个原版镜像 UUID、Mango 声明类来源和实际方法 ABI。独立的设置/加载器开关不被当作 Mango 授权结果。
+- `World.m`：保留 iOS 16.5 上原 System Aperture window 半转、content 归一化、有限 hit-test 回退和倒置方向锁定。已有倒置 basis 不再施加第二次半转。删除旧诊断浮窗、全局 pan/velocity hook、只读长按 probe 和每次显式锁定的日志。
+- `WorldPlacement.m`：仅修正由 Mango 布局回调确认的 container。保持弱引用 pending hosts、30 秒期限、64 项上限；实际窗口已经倒置且容器仍在错误物理边缘时才平移。
+- `Split.m`：重新实现旧 Split 的纯 UIWindow 分屏作用范围。先识别 Mango 子视图、全屏形状、中心 anchor 和实际 coordinate-space basis；窗口已经倒置时不改。使用关联状态记录自己写入的 before/after，只恢复确实由自己写过且当前仍匹配的变换。原生或其他布局写过的半转不被旧版“见到 π 就清回 identity”的逻辑覆盖。
+- `WorldMath.h`、`Geometry.h`：共享实际数学运算。`MWOwns` 明确区分当前矩阵相同与真正拥有该矩阵。
+
+所有回调在主线程上改变 UIKit 几何。停用标记兼容原路径和 RootHide 映射路径。载入阶段允许 20 秒等待原 Mango 镜像/类注册，运行期间不卸载已挂钩的方法。
+
+## 构建与验证
+
+World target files：`World.m WorldPlacement.m`。
+Split target files：`Split.m`。
+框架：Foundation、CoreFoundation、UIKit、QuartzCore。
+库：substrate、roothide。
+编译：arm64e、iOS 16.5 SDK、RootHide、ARC、blocks。
+
+`tests/world_math_test.c` 直接调用成品 `WorldMath.h`，覆盖 375×812 物理屏幕、非中心/缩放窗口半转、归一化、原生半转没有所有权、外部写入后所有权失效。`tests/placement_test.c` 直接调用 `Geometry.h`，沿用已捕获的真机几何，检查 10000 次调和不累积、父坐标反变换、尺寸变化和拒绝条件。`tests/pan_correction_test.m` 直接调用成品 `PanCorrection.h` 的同步临时修改函数，在 macOS Foundation 上验证临时只反转 y、原回调仅一次、正常返回与原回调异常时恢复、恢复 setter 异常时递归计数仍归零。它不模拟 UIKit 的坐标转换。
+
+Windows 本机没有可用 C 编译器；WSL 启动因 `HCS_E_HYPERV_NOT_INSTALLED` 失败。以上测试需由套件的 macOS CI 实际运行，不能把“已编写测试”当作已通过。也需要套件 CI 编译实际 Objective-C 并检查最终签名/包结构。
+
+## 证据与来源
+
+本地旧 Split 源码从 [exact source commit](https://github.com/Zeimochenxun/MangoUpsideDownProbe/tree/1a376ee74bdb480d5b1e918343e8dad7205f9971) 只读获取。World 的基础几何源码来自 [integrated placement commit](https://github.com/Zeimochenxun/MangoUpsideDownProbe/tree/04833c037e76e43f8e403d774054b16cbec92b8c)，此 commit control 为 **1.1.0**；没有冒称它就是 1.2.0 源码。1.2.0 的最小 pan 修复直接依据原输入二进制反汇编重建。
+
+`evidence/` 保存原输入二进制摘要、原 1.2.0 反汇编、Beta8 ABI 与函数反汇编。`split-old/` 和 `world-old/` 是只读分析副本；它们不是新目标的编译输入。CI/发布只应采用本节列出的成品源码。
+
+静态检查可以确认作用范围和调用条件，无法独立证明真机显示、触摸、动画和旋转锁定全部正常。本轮没有连接或部署手机。
