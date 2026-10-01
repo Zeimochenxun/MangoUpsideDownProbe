@@ -1,0 +1,15 @@
+# Original modules and final combined artifacts stay on this computer.
+inputs/
+packages/
+dist/
+delivery/
+build-info/
+.theos/
+**/.theos/
+**/packages/
+__pycache__/
+*.pyc
+*.deb
+*.zip
+*.dylib
+
