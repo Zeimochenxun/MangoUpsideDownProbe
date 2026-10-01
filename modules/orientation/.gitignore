@@ -1,0 +1,5 @@
+# Analysis copies / original binaries stay local; only adapted source is built.
+evidence/
+split-old/
+world-old/
+world-main/

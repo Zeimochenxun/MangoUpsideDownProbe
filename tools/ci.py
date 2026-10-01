@@ -44,9 +44,9 @@ def main():
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             for info in archive.infolist():
                 content = archive.read(info).decode("utf-8", errors="replace")
-                if "Build loader" in info.filename or "Settings root" in info.filename or "Reproduce old failure" in info.filename or "error:" in content or "Traceback" in content or "FAIL" in content:
+                if "/" in info.filename and ("error:" in content or "Traceback" in content or "FAIL" in content):
                     print(info.filename)
-                    print(content[-16000:])
+                    print(content[-12000:])
         return
     metadata = get(f"/actions/runs/{args.run}/artifacts", token)
     matches = [a for a in metadata["artifacts"] if a["name"] == "MangoSuite-Beta8-helper-arm64e-RootHide"]

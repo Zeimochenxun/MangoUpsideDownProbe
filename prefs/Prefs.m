@@ -81,7 +81,8 @@ static BOOL SuiteFlag(NSString *key) {
     PSSpecifier *orientationGroup = _specifiers.lastObject;
     if (nativeReadError) [orientationGroup setProperty:nativeReadError.localizedDescription forKey:@"footerText"];
     [self addSwitch:@"Mango 原生屏幕倒置" key:NativeUpsideDownKey];
-    [_specifiers.lastObject setProperty:@(!nativeReadError) forKey:@"enabled"];
+    PSSpecifier *nativeItem = _specifiers.lastObject;
+    [nativeItem setProperty:@(!nativeReadError) forKey:@"enabled"];
     [self addSwitch:@"倒置方向修复" key:@"WorldEnabled"];
     [self addSection:nil];
     [self addSwitch:@"分屏倒置修复" key:@"SplitEnabled"];

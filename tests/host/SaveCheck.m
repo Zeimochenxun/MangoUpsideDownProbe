@@ -81,6 +81,34 @@ int main(int argc, const char *argv[]) {
             Write(controller, @"IdleEnabled", YES);
             Require(!controller.presentedViewController && ReadMask([root new]) == 23, @"legacy selection migrated without resetting other switches");
             puts("PASS: redirected alpha3 settings migrate on edit and preserve sibling selections");
+        } else if ([mode isEqual:@"emergency-marker"]) {
+            NSString *testRoot = [NSProcessInfo.processInfo.environment objectForKey:@"MANGOSUITE_HOST_ROOT"];
+            NSString *marker = nil;
+            for (NSString *path in MSMarkerPathsForKey(@"IdleEnabled"))
+                if ([path hasPrefix:[testRoot stringByAppendingString:@"/"]]) marker = path;
+            Require(marker != nil, @"RootHide mapped emergency marker available");
+            NSFileManager *files = NSFileManager.defaultManager;
+            Require([files createDirectoryAtPath:marker.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL], @"isolated marker parent");
+            NSData *contents = [@"original marker must survive failure" dataUsingEncoding:NSUTF8StringEncoding];
+            Require([contents writeToFile:marker atomically:YES], @"mapped marker seed");
+            Require(MSHasEmergencyMarker(@"IdleEnabled") && ![[controller readValue:Item(controller,@"IdleEnabled")] boolValue], @"UI reflects mapped emergency stop");
+            Write(controller,@"IdleEnabled",YES);
+            Require(!controller.presentedViewController && !MSHasEmergencyMarker(@"IdleEnabled") && [[controller readValue:Item(controller,@"IdleEnabled")] boolValue], @"successful enable clears mapped marker");
+            Write(controller,@"IdleEnabled",NO);
+            Require([contents writeToFile:marker atomically:YES], @"rollback marker seed");
+            NSString *storeParent = MSPreferencesPath().stringByDeletingLastPathComponent;
+            Require([files setAttributes:@{NSFilePosixPermissions:@0555} ofItemAtPath:storeParent error:NULL], @"force real storage write failure");
+            @try {
+                Write(controller,@"IdleEnabled",YES);
+                UIAlertController *alert = controller.presentedViewController;
+                Require([alert.title isEqual:@"保存失败"], @"marker removal followed by storage failure reports failure");
+                Require([[NSData dataWithContentsOfFile:marker] isEqual:contents], @"original marker contents restored after failed save");
+                Require(!MSPreferenceFlag(MSReadPreferences(NULL),@"IdleEnabled"), @"failed enable retains stored off state");
+            } @finally {
+                Require([files setAttributes:@{NSFilePosixPermissions:@0755} ofItemAtPath:storeParent error:NULL], @"restore isolated store permissions");
+                [files removeItemAtPath:marker error:NULL];
+            }
+            puts("PASS: actual UI clears RootHide mapped stop marker; failed persistence restores its exact contents");
         } else if ([mode isEqual:@"native-ui"]) {
             CFStringRef domain = CFSTR(MS_NATIVE_DOMAIN);
             CFStringRef key = CFSTR("LeXiang.UpsideDown.Enabled");

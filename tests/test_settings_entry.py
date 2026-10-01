@@ -64,6 +64,7 @@ with tempfile.TemporaryDirectory(prefix="mangosuite-entry-") as directory:
     migrated = migration_root / "var/mobile/Library/Application Support/MangoSuite/settings.plist"
     assert plistlib.loads(migrated.read_bytes()) == dict(old_state, IdleEnabled=True)
 
+    subprocess.run([str(work / "save-check"), str(fixed), "emergency-marker"], env=env, check=True)
     subprocess.run([str(work / "save-check"), str(fixed), "native-ui"], env=env, check=True)
 
     before = store.read_bytes()
