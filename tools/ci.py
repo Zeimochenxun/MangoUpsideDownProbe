@@ -44,7 +44,7 @@ def main():
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             for info in archive.infolist():
                 content = archive.read(info).decode("utf-8", errors="replace")
-                if "Build loader" in info.filename or "Reproduce old failure" in info.filename or "error:" in content or "Traceback" in content or "FAIL" in content:
+                if "Build loader" in info.filename or "Settings root" in info.filename or "Reproduce old failure" in info.filename or "error:" in content or "Traceback" in content or "FAIL" in content:
                     print(info.filename)
                     print(content[-16000:])
         return

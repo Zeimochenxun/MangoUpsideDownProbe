@@ -8,18 +8,21 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 output = ROOT / "delivery"
 output.mkdir(exist_ok=True)
 files = [ROOT / n for n in ("README.md", "ACCEPTANCE.md", "Makefile", "control", "AMangoSuiteLoader.plist", ".gitignore", "build-source.json")]
-for folder in ("src", "prefs", "tools", "tests", ".github", "packages"):
+for folder in ("src", "prefs", "tools", "tests", ".github"):
     files.extend(p for p in (ROOT / folder).rglob("*") if p.is_file() and "__pycache__" not in p.parts)
+files.extend(p for p in (ROOT / "packages").iterdir() if p.is_file() and not any(old in p.name for old in ("MangoSuite-1.0.0-alpha1", "MangoSuite-1.0.0-alpha2")))
 sources = json.loads((ROOT / "inputs/sources.json").read_text())
 files.append(ROOT / "inputs/sources.json")
 files.extend(ROOT / "inputs" / source["file"] for source in sources.values())
 builds = list((ROOT / "build-artifacts").glob("*/artifact.json"))
-assert len(builds) == 1
-build = builds[0].parent
+manifest = json.loads((ROOT / "packages/MangoSuite-1.0.0-alpha3-RootHide-arm64e.manifest.json").read_text())
+matching = [p.parent for p in builds if any(hashlib.sha256(deb.read_bytes()).hexdigest() == manifest["helperSHA256"] for deb in (p.parent / "packages").glob("*.deb"))]
+assert len(matching) == 1
+build = matching[0]
 files.extend(p for p in build.rglob("*") if p.is_file() and p.suffix not in (".deb", ".zip") and "verified-images" not in p.parts)
 files = sorted(set(files))
 hashes = {p.relative_to(ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
-archive = output / "MangoSuite-1.0.0-alpha2-完整工程与回退.zip"
+archive = output / "MangoSuite-1.0.0-alpha3-完整工程与回退.zip"
 with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
     for p in files:
         z.write(p, "MangoSuite/" + p.relative_to(ROOT).as_posix())
@@ -28,7 +31,7 @@ with zipfile.ZipFile(archive) as z:
     assert z.testzip() is None
     for name, digest in hashes.items():
         assert hashlib.sha256(z.read("MangoSuite/" + name)).hexdigest() == digest
-package = ROOT / "packages/MangoSuite-1.0.0-alpha2-RootHide-arm64e.deb"
+package = ROOT / "packages/MangoSuite-1.0.0-alpha3-RootHide-arm64e.deb"
 report = {"archive": archive.name, "archiveSHA256": hashlib.sha256(archive.read_bytes()).hexdigest(),
           "package": package.name, "packageSHA256": hashlib.sha256(package.read_bytes()).hexdigest(),
           "files": len(files), "deviceTested": False}

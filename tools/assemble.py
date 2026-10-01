@@ -34,11 +34,13 @@ def assemble(helper_path, output):
         data[name] = item
     assert DYNAMIC + "AMangoSuiteLoader.dylib" in data
     assert "Library/PreferenceBundles/MangoSuitePrefs.bundle/MangoSuitePrefs" in data
+    info = plistlib.loads(data["Library/PreferenceBundles/MangoSuitePrefs.bundle/Info.plist"][0])
+    assert info.get("NSPrincipalClass") == "MangoSuitePrefsController", "Settings entry must open the five-switch root controller"
     # The final package, not the helper, owns the only visible Settings entry.
     entry = {"entry": {"cell": "PSLinkCell", "label": "Mango 整合", "bundle": "MangoSuitePrefs",
                        "detail": "MangoSuitePrefsController", "isController": True}}
     data["Library/PreferenceLoader/Preferences/MangoSuitePrefs.plist"] = (plistlib.dumps(entry), 0o644)
-    manifest = {"suiteVersion": "1.0.0~alpha2", "helperSHA256": sha256(helper_path.read_bytes()), "modules": {}}
+    manifest = {"suiteVersion": "1.0.0~alpha3", "helperSHA256": sha256(helper_path.read_bytes()), "modules": {}}
     for label, source in sources.items():
         path = ROOT / "inputs" / source["file"]
         assert sha256(path.read_bytes()) == source["sha256"], f"Input checksum mismatch: {label}"
@@ -71,7 +73,7 @@ def assemble(helper_path, output):
     conflicts = original_ids + ["com.chenxun.mangoupsidedownfix", "com.chenxun.mangoorientationprobe"]
     provides = [f'{s["package"]} (= {s["version"]})' for s in sources.values()]
     control = "\n".join([
-        "Package: com.chenxun.mangosuite", "Name: Mango Suite", "Version: 1.0.0~alpha2",
+        "Package: com.chenxun.mangosuite", "Name: Mango Suite", "Version: 1.0.0~alpha3",
         "Architecture: iphoneos-arm64e", "Section: Tweaks", "Maintainer: Chen Xun", "Author: Chen Xun",
         "Description: Unified Mango patch suite with independent startup switches and a single Settings panel. Requires Mango on iOS 16.5 RootHide.",
         "Depends: mobilesubstrate, preferenceloader, firmware (= 16.5)",
@@ -89,7 +91,7 @@ def assemble(helper_path, output):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--helper-deb", required=True, type=pathlib.Path)
-    parser.add_argument("--output", type=pathlib.Path, default=ROOT / "packages/MangoSuite-1.0.0-alpha2-RootHide-arm64e.deb")
+    parser.add_argument("--output", type=pathlib.Path, default=ROOT / "packages/MangoSuite-1.0.0-alpha3-RootHide-arm64e.deb")
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     assemble(args.helper_deb, args.output)

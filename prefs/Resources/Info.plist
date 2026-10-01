@@ -6,15 +6,15 @@
     <string>com.chenxun.mangosuiteprefs</string>
     <key>CFBundleExecutable</key>
     <string>MangoSuitePrefs</string>
-    <key>CFBundlePrincipalClass</key>
+    <key>NSPrincipalClass</key>
     <string>MangoSuitePrefsController</string>
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
     <key>CFBundleName</key>
     <string>Mango Suite</string>
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>1.0.1</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>1.0.1</string>
 </dict>
 </plist>

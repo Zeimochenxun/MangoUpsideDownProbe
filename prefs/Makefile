@@ -5,7 +5,7 @@ THEOS_PACKAGE_SCHEME = roothide
 include $(THEOS)/makefiles/common.mk
 
 BUNDLE_NAME = MangoSuitePrefs
-MangoSuitePrefs_FILES = $(wildcard *.m)
+MangoSuitePrefs_FILES = Prefs.m GlassPage.m
 MangoSuitePrefs_FRAMEWORKS = UIKit Foundation CoreFoundation
 MangoSuitePrefs_PRIVATE_FRAMEWORKS = Preferences
 MangoSuitePrefs_INSTALL_PATH = /Library/PreferenceBundles

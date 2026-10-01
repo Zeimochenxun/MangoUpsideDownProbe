@@ -11,6 +11,9 @@ for filename in sys.argv[1:]:
     prefix = "Library/MobileSubstrate/DynamicLibraries/AMangoSuiteLoader"
     assert plistlib.loads(content[prefix + ".plist"][0]) == {"Filter": {"Executables": ["SpringBoard", "backboardd"]}}
     binaries = [prefix + ".dylib", "Library/PreferenceBundles/MangoSuitePrefs.bundle/MangoSuitePrefs"]
+    info = plistlib.loads(content["Library/PreferenceBundles/MangoSuitePrefs.bundle/Info.plist"][0])
+    assert info.get("NSPrincipalClass") == "MangoSuitePrefsController"
+    assert "CFBundlePrincipalClass" not in info
     extracted = pathlib.Path("build-info/verified-images")
     extracted.mkdir(parents=True, exist_ok=True)
     for name in binaries:
@@ -22,4 +25,4 @@ for filename in sys.argv[1:]:
     for string in [b"MangoSuitePrefsController", b"MangoSuiteGlassController", b"com.chenxun.mangosuite",
                    b"IdleEnabled", b"AdaptiveEnabled", b"WorldEnabled", b"SplitEnabled"]:
         assert string in prefs, string
-    print("PASS: helper architecture, embedded signatures, two process scopes, and UI classes")
+    print("PASS: helper architecture, embedded signatures, two process scopes, UI classes, and root principal class")

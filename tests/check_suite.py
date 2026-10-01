@@ -18,7 +18,7 @@ def verify(filename):
     data = suite["data"]
     ctl = control_fields(suite["control"]["control"][0])
     assert ctl["Package"] == "com.chenxun.mangosuite"
-    assert ctl["Version"] == "1.0.0~alpha2"
+    assert ctl["Version"] == "1.0.0~alpha3"
     assert ctl["Architecture"] == "iphoneos-arm64e"
     assert "firmware (= 16.5)" in ctl["Depends"]
     assert "preferenceloader" in ctl["Depends"]
@@ -29,6 +29,9 @@ def verify(filename):
     assert entries == ["Library/PreferenceLoader/Preferences/MangoSuitePrefs.plist"]
     entry = plistlib.loads(data[entries[0]][0])["entry"]
     assert entry["bundle"] == "MangoSuitePrefs" and entry["detail"] == "MangoSuitePrefsController"
+    bundle_info = plistlib.loads(data["Library/PreferenceBundles/MangoSuitePrefs.bundle/Info.plist"][0])
+    assert bundle_info.get("NSPrincipalClass") == entry["detail"]
+    assert "CFBundlePrincipalClass" not in bundle_info
     links = [(n, content) for n, (content, _) in data.items() if isinstance(content, str)]
     assert links == [(MODULES + ".jbroot", "../../..")]
     assert posixpath.normpath(posixpath.join(MODULES, links[0][1])) == "."
@@ -58,7 +61,8 @@ def verify(filename):
     report["checks"] = ["four exact versions", "unchanged original module hashes", "arm64e ABI",
                          "all signed code pages", "one settings entry", "isolated process routing",
                          "RootHide module dependency link", "legacy package replacement/conflicts",
-                         "explicit parent directories precede every archive entry", "dpkg fixture layout matches final package"]
+                         "explicit parent directories precede every archive entry", "dpkg fixture layout matches final package",
+                         "Settings entry and NSPrincipalClass select the five-switch root controller"]
     report["deviceTested"] = False
     (ROOT / "packages/verification.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=True, indent=2))
