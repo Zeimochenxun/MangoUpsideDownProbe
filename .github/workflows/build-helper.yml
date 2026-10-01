@@ -65,10 +65,10 @@ jobs:
             exit 1
           fi
           python3 tools/check_helper.py packages/*.deb
-          loader="$(find .theos/obj -name AMangoSuiteLoader.dylib -type f | head -n 1)"
-          prefs="$(find prefs/.theos/obj -name MangoSuitePrefs -type f | head -n 1)"
-          test -n "$loader"
-          test -n "$prefs"
+          loader="build-info/verified-images/AMangoSuiteLoader.dylib"
+          prefs="build-info/verified-images/MangoSuitePrefs"
+          test -f "$loader"
+          test -f "$prefs"
           for binary in "$loader" "$prefs"; do
             name="$(basename "$binary")"
             xcrun lipo -info "$binary" | tee "build-info/$name.architecture.txt"
