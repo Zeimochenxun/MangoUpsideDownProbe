@@ -1,12 +1,29 @@
 #import <UIKit/UIKit.h>
 #import <Preferences/PSListController.h>
 #import <Preferences/PSSpecifier.h>
-#import "../src/SuitePreferences.h"
+#import <CoreFoundation/CoreFoundation.h>
+
+static CFStringRef const SuiteDomain = CFSTR("com.chenxun.mangosuite");
+static NSString * const SuiteFile = @"/var/mobile/Library/Preferences/com.chenxun.mangosuite.plist";
+
+static NSString *MarkerForKey(NSString *key) {
+    if ([key isEqualToString:@"IdleEnabled"]) return @"/var/mobile/Library/Logs/MangoIdleIsland/DISABLED";
+    if ([key isEqualToString:@"WorldEnabled"]) return @"/var/mobile/Library/Preferences/MangoUpsideDownWorld.disabled";
+    if ([key isEqualToString:@"SplitEnabled"]) return @"/var/mobile/Library/Preferences/MangoSplitUpsideDownFix.disabled";
+    return nil;
+}
+
+static id StoredValue(NSString *key) {
+    return CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, SuiteDomain));
+}
 
 static BOOL SuiteFlag(NSString *key) {
-    NSString *marker = MSMarkerForKey(key);
+    NSString *marker = MarkerForKey(key);
     if (marker && [NSFileManager.defaultManager fileExistsAtPath:marker]) return NO;
-    return MSPreferenceFlag(MSReadPreferences(NULL), key);
+    NSDictionary *snapshot = [NSDictionary dictionaryWithContentsOfFile:SuiteFile];
+    if (!snapshot && [NSFileManager.defaultManager fileExistsAtPath:SuiteFile]) return NO;
+    id value = snapshot[key];
+    return value == nil ? YES : ([value isKindOfClass:NSNumber.class] && [value boolValue]);
 }
 
 @interface MangoSuitePrefsController : PSListController
@@ -54,6 +71,7 @@ static BOOL SuiteFlag(NSString *key) {
     if (_specifiers) return _specifiers;
     self.title = @"Mango 整合设置";
     _specifiers = [NSMutableArray new];
+    CFPreferencesAppSynchronize(SuiteDomain);
 
     [self addSection:@"总开关" footer:@"修改本页任何开关后，请在越狱工具中重新启动用户空间。仅重新加载桌面不足以应用全部模块。关闭总开关会保留各模块的选择。"];
     [self addSwitch:@"启用 Mango 整合补丁" key:@"Enabled"];
@@ -84,6 +102,7 @@ static BOOL SuiteFlag(NSString *key) {
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    CFPreferencesAppSynchronize(SuiteDomain);
     [self reloadSpecifiers];
 }
 
@@ -97,13 +116,8 @@ static BOOL SuiteFlag(NSString *key) {
     NSArray *known = @[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled"];
     if (![known containsObject:key] || ![value isKindOfClass:NSNumber.class]) return;
     BOOL enabled = [value boolValue];
-    NSError *saveError = nil;
-    if (!MSReadPreferences(&saveError)) {
-        [self reloadSpecifiers];
-        [self showMessage:[NSString stringWithFormat:@"%@\n%@", saveError.localizedDescription, saveError.userInfo[NSFilePathErrorKey]] title:@"保存失败"];
-        return;
-    }
-    NSString *marker = MSMarkerForKey(key);
+    id previous = StoredValue(key);
+    NSString *marker = MarkerForKey(key);
     NSFileManager *files = NSFileManager.defaultManager;
     BOOL hadMarker = enabled && marker && [files fileExistsAtPath:marker];
     NSData *markerContents = nil;
@@ -116,11 +130,15 @@ static BOOL SuiteFlag(NSString *key) {
             return;
         }
     }
-    if (!MSWritePreferenceFlag(key, enabled, &saveError)) {
+    CFPreferencesSetAppValue((__bridge CFStringRef)key, enabled ? kCFBooleanTrue : kCFBooleanFalse, SuiteDomain);
+    BOOL synchronized = CFPreferencesAppSynchronize(SuiteDomain);
+    id saved = [NSDictionary dictionaryWithContentsOfFile:SuiteFile][key];
+    if (!synchronized || ![saved isKindOfClass:NSNumber.class] || [saved boolValue] != enabled) {
+        CFPreferencesSetAppValue((__bridge CFStringRef)key, (__bridge CFPropertyListRef)previous, SuiteDomain);
+        CFPreferencesAppSynchronize(SuiteDomain);
         BOOL markerRestored = !hadMarker || [markerContents writeToFile:marker options:NSDataWritingAtomic error:NULL];
         [self reloadSpecifiers];
-        NSError *cause = saveError.userInfo[NSUnderlyingErrorKey];
-        NSString *message = [NSString stringWithFormat:@"%@\n%@\n%@%@", saveError.localizedDescription, saveError.userInfo[NSFilePathErrorKey], cause.localizedDescription ?: @"", markerRestored ? @"" : @"\n旧停用标记未能恢复；重启前请确认模块状态。"];
+        NSString *message = markerRestored ? @"设置未能写入，请检查偏好文件权限后重试。" : @"设置未能写入，且旧停用标记未能恢复。请检查文件权限；重启用户空间前先确认该模块的状态。";
         [self showMessage:message title:@"保存失败"];
         return;
     }

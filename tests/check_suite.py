@@ -18,7 +18,7 @@ def verify(filename):
     data = suite["data"]
     ctl = control_fields(suite["control"]["control"][0])
     assert ctl["Package"] == "com.chenxun.mangosuite"
-    assert ctl["Version"] == "1.0.0~alpha3"
+    assert ctl["Version"] == "1.0.0~alpha4"
     assert ctl["Architecture"] == "iphoneos-arm64e"
     assert "firmware (= 16.5)" in ctl["Depends"]
     assert "preferenceloader" in ctl["Depends"]

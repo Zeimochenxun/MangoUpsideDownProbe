@@ -4,7 +4,7 @@
 @implementation UIViewController
 - (void)viewWillAppear:(BOOL)animated { (void)animated; }
 - (void)presentViewController:(id)controller animated:(BOOL)animated completion:(void (^)(void))completion {
-    (void)controller; (void)animated; if (completion) completion();
+    self.presentedViewController = controller; (void)animated; if (completion) completion();
 }
 @end
 @implementation UIAlertAction
@@ -14,14 +14,15 @@
 @end
 @implementation UIAlertController
 + (instancetype)alertControllerWithTitle:(NSString *)title message:(NSString *)message preferredStyle:(UIAlertControllerStyle)style {
-    (void)message; (void)style; UIAlertController *result = [self new]; result.title = title; return result;
+    (void)style; UIAlertController *result = [self new]; result.title = title; result.message = message; return result;
 }
 - (void)addAction:(UIAlertAction *)action { (void)action; }
 @end
 @implementation PSSpecifier
 + (instancetype)preferenceSpecifierNamed:(NSString *)name target:(id)target set:(SEL)set get:(SEL)get detail:(Class)detail cell:(PSCellType)cell edit:(Class)edit {
-    (void)target; (void)set; (void)get; (void)edit;
+    (void)edit;
     PSSpecifier *result = [self new]; result.name = name; result.detailClass = detail;
+    result.target = target; result.setter = set; result.getter = get;
     result.cellType = cell; result.properties = [NSMutableDictionary new]; return result;
 }
 + (instancetype)groupSpecifierWithName:(NSString *)name {

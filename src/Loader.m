@@ -6,15 +6,7 @@
 #import <roothide.h>
 #import <string.h>
 #import "Policy.h"
-
-static NSString * const SuiteDomain = @"com.chenxun.mangosuite";
-
-static BOOL ReadFlag(NSDictionary *snapshot, NSString *key) {
-    id value = snapshot[key];
-    // Missing preferences preserve the enabled state of the four original packages.
-    // Invalid types fail closed instead of treating e.g. the string "false" as YES.
-    return value == nil ? YES : ([value isKindOfClass:NSNumber.class] && [value boolValue]);
-}
+#import "SuitePreferences.h"
 
 static BOOL HasImage(const char *filename) {
     for (uint32_t i = 0; i < _dyld_image_count(); ++i) {
@@ -57,33 +49,29 @@ __attribute__((constructor)) static void StartSuite(void) {
         BOOL backboard = [process isEqualToString:@"backboardd"];
         if (!springboard && !backboard) return;
 
-        // Read the mobile user's saved file directly: backboardd must see exactly
-        // the same configuration as SpringBoard, independent of daemon CF domains.
-        NSString *preferences = [@"/var/mobile/Library/Preferences" stringByAppendingPathComponent:
-                                 [SuiteDomain stringByAppendingPathExtension:@"plist"]];
-        BOOL exists = [NSFileManager.defaultManager fileExistsAtPath:preferences];
-        NSDictionary *snapshot = [NSDictionary dictionaryWithContentsOfFile:preferences];
-        if (exists && ![snapshot isKindOfClass:NSDictionary.class]) {
-            NSLog(@"[MangoSuite] invalid preferences; modules not loaded");
+        NSError *readError = nil;
+        NSDictionary *snapshot = MSReadPreferences(&readError);
+        if (!snapshot) {
+            NSLog(@"[MangoSuite] preferences unavailable; modules not loaded: %@", readError);
             return;
         }
 
         MSState state = {
-            .enabled = ReadFlag(snapshot, @"Enabled"),
-            .idle = ReadFlag(snapshot, @"IdleEnabled"),
-            .adaptive = ReadFlag(snapshot, @"AdaptiveEnabled"),
-            .world = ReadFlag(snapshot, @"WorldEnabled"),
-            .split = ReadFlag(snapshot, @"SplitEnabled"),
-            .idleEmergency = [NSFileManager.defaultManager fileExistsAtPath:@"/var/mobile/Library/Logs/MangoIdleIsland/DISABLED"],
-            .worldEmergency = [NSFileManager.defaultManager fileExistsAtPath:@"/var/mobile/Library/Preferences/MangoUpsideDownWorld.disabled"],
-            .splitEmergency = [NSFileManager.defaultManager fileExistsAtPath:@"/var/mobile/Library/Preferences/MangoSplitUpsideDownFix.disabled"],
+            .enabled = MSPreferenceFlag(snapshot, @"Enabled"),
+            .idle = MSPreferenceFlag(snapshot, @"IdleEnabled"),
+            .adaptive = MSPreferenceFlag(snapshot, @"AdaptiveEnabled"),
+            .world = MSPreferenceFlag(snapshot, @"WorldEnabled"),
+            .split = MSPreferenceFlag(snapshot, @"SplitEnabled"),
+            .idleEmergency = [NSFileManager.defaultManager fileExistsAtPath:MSMarkerForKey(@"IdleEnabled")],
+            .worldEmergency = [NSFileManager.defaultManager fileExistsAtPath:MSMarkerForKey(@"WorldEnabled")],
+            .splitEmergency = [NSFileManager.defaultManager fileExistsAtPath:MSMarkerForKey(@"SplitEnabled")],
         };
         // Fail closed if a package manager was bypassed and an old orientation
         // hook is still present. The deb declares the same conflicts.
         state.legacyOrientation = HasImage("MangoUpsideDownFix.dylib") ||
                                   HasImage("MangoOrientationProbe.dylib");
         unsigned modules = MSModulesForProcess(state, springboard ? MS_SPRINGBOARD : MS_BACKBOARD);
-        NSLog(@"[MangoSuite] version=1.0.0~alpha1 process=%@ startup-mask=%u changes=require-userspace-restart", process, modules);
+        NSLog(@"[MangoSuite] version=1.0.0~alpha4 process=%@ startup-mask=%u changes=require-userspace-restart", process, modules);
         if (state.legacyOrientation) NSLog(@"[MangoSuite] legacy orientation hook detected; orientation modules suppressed");
 
         // The renderer process must receive the shader hook during startup.

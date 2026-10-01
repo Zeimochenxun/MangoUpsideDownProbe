@@ -38,7 +38,7 @@ jobs:
           cc -Wall -Wextra -Werror tests/policy.c -o /tmp/mangosuite-policy
           /tmp/mangosuite-policy
 
-      - name: Verify Settings root entry and all module switches
+      - name: Verify Settings root entry and independent switch persistence
         run: python3 tests/test_settings_entry.py
 
       - name: Install signing and packaging tools

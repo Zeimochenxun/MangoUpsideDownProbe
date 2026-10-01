@@ -4,6 +4,7 @@
 #import <Preferences/PSTableCell.h>
 #import <CoreFoundation/CoreFoundation.h>
 #import <math.h>
+#import "../src/SuitePreferences.h"
 
 static CFStringRef const Domain = CFSTR("com.go.mangoosprefs");
 // Beta7-1 MangoOSRendering listens here, reloads its parameter cache, then
@@ -12,13 +13,8 @@ static CFStringRef const RenderReload = CFSTR("com.go.mangoosprefs/Reload");
 static NSString * const TintUIKey = @"MangoIdleIsland.TintAlpha";
 
 static BOOL SuiteAdaptiveEnabled(void) {
-    CFStringRef suiteDomain = CFSTR("com.chenxun.mangosuite");
-    CFPreferencesAppSynchronize(suiteDomain);
-    id master = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("Enabled"), suiteDomain));
-    id adaptive = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("AdaptiveEnabled"), suiteDomain));
-    BOOL masterOn = master == nil ? YES : ([master isKindOfClass:NSNumber.class] && [master boolValue]);
-    BOOL adaptiveOn = adaptive == nil ? YES : ([adaptive isKindOfClass:NSNumber.class] && [adaptive boolValue]);
-    return masterOn && adaptiveOn;
+    NSDictionary *snapshot = MSReadPreferences(NULL);
+    return MSPreferenceFlag(snapshot, @"Enabled") && MSPreferenceFlag(snapshot, @"AdaptiveEnabled");
 }
 
 @interface MangoSuiteGlassController : PSListController

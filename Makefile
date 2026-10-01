@@ -6,7 +6,7 @@ INSTALL_TARGET_PROCESSES = SpringBoard Preferences
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = AMangoSuiteLoader
-AMangoSuiteLoader_FILES = src/Loader.m
+AMangoSuiteLoader_FILES = src/Loader.m src/SuitePreferences.m
 AMangoSuiteLoader_CFLAGS = -fobjc-arc -fblocks -Wall -Wextra -Werror
 AMangoSuiteLoader_FRAMEWORKS = Foundation CoreFoundation
 AMangoSuiteLoader_LIBRARIES = roothide
