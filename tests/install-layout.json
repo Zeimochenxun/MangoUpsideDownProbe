@@ -41,6 +41,11 @@
     "mode": 493
   },
   {
+    "path": "Library/PreferenceBundles/MangoSuitePrefs.bundle/.jbroot",
+    "mode": 511,
+    "link": "../../.."
+  },
+  {
     "path": "Library/PreferenceBundles/MangoSuitePrefs.bundle/Info.plist",
     "mode": 420
   },

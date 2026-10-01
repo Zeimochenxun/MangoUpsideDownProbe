@@ -84,6 +84,7 @@ class DpkgInstallTest(unittest.TestCase):
                 self.assertEqual(path.stat().st_mode & 0o777, mode)
         self.assertFalse(list(self.root.rglob("*.dpkg-new")))
         self.assertEqual((self.root / "Library/MangoSuite/Modules/.jbroot").resolve(), self.root.resolve())
+        self.assertEqual((self.root / "Library/PreferenceBundles/MangoSuitePrefs.bundle/.jbroot").resolve(), self.root.resolve())
 
     def test_old_archive_reproduces_missing_parent(self):
         package, _ = self.package("1.0.0~alpha1", faulty=True)
@@ -96,7 +97,7 @@ class DpkgInstallTest(unittest.TestCase):
         print("REPRODUCED: old archive fails real dpkg with missing parent directory", flush=True)
 
     def test_fixed_archive_installs_on_empty_root(self):
-        package, expected = self.package("1.0.0~alpha2")
+        package, expected = self.package("1.0.0~alpha4")
         check_directory_members(package)
         code, log = self.unpack(package)
         self.assertEqual(code, 0, log)
@@ -105,7 +106,7 @@ class DpkgInstallTest(unittest.TestCase):
     def test_install_after_failed_old_unpack(self):
         old, _ = self.package("1.0.0~alpha1", faulty=True)
         self.assertNotEqual(self.unpack(old)[0], 0)
-        fixed, expected = self.package("1.0.0~alpha2")
+        fixed, expected = self.package("1.0.0~alpha4")
         code, log = self.unpack(fixed)
         self.assertEqual(code, 0, log)
         self.assert_payload(expected)
@@ -116,11 +117,15 @@ class DpkgInstallTest(unittest.TestCase):
         preferences = self.root / "var/mobile/Library/Preferences/com.chenxun.mangosuite.plist"
         preferences.parent.mkdir(parents=True)
         preferences.write_bytes(b"user preferences must survive")
-        fixed, expected = self.package("1.0.0~alpha2")
+        shared = self.root / "var/mobile/Library/Application Support/MangoSuite/settings.plist"
+        shared.parent.mkdir(parents=True)
+        shared.write_bytes(b"saved suite switch selections must survive")
+        fixed, expected = self.package("1.0.0~alpha4")
         code, log = self.unpack(fixed)
         self.assertEqual(code, 0, log)
         self.assert_payload(expected)
         self.assertEqual(preferences.read_bytes(), b"user preferences must survive")
+        self.assertEqual(shared.read_bytes(), b"saved suite switch selections must survive")
 
 
 if __name__ == "__main__":

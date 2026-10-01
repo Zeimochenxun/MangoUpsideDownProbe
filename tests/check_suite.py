@@ -33,8 +33,9 @@ def verify(filename):
     assert bundle_info.get("NSPrincipalClass") == entry["detail"]
     assert "CFBundlePrincipalClass" not in bundle_info
     links = [(n, content) for n, (content, _) in data.items() if isinstance(content, str)]
-    assert links == [(MODULES + ".jbroot", "../../..")]
-    assert posixpath.normpath(posixpath.join(MODULES, links[0][1])) == "."
+    assert sorted(links) == [(MODULES + ".jbroot", "../../.."), ("Library/PreferenceBundles/MangoSuitePrefs.bundle/.jbroot", "../../..")]
+    for name, target in links:
+        assert posixpath.normpath(posixpath.join(posixpath.dirname(name), target)) == "."
     sources = json.loads((ROOT / "inputs/sources.json").read_text())
     report = {"packageSHA256": sha256(pathlib.Path(filename).read_bytes()), "binaries": {}, "explicitDirectoryCounts": directory_counts}
     expected_layout = json.loads((ROOT / "tests/install-layout.json").read_text())
@@ -57,12 +58,17 @@ def verify(filename):
             assert mode & 0o111
             report["binaries"][name] = inspect(blob)
     assert len(report["binaries"]) == 7  # Four original modules + loader + two UI images.
+    store_path = b"/var/mobile/Library/Application Support/MangoSuite/settings.plist"
+    for name in (DYNAMIC + "AMangoSuiteLoader.dylib", "Library/PreferenceBundles/MangoSuitePrefs.bundle/MangoSuitePrefs"):
+        assert store_path in data[name][0], "UI and loader must use the same shared store"
+        assert "@loader_path/.jbroot/usr/lib/libroothide.dylib" in report["binaries"][name]["dependencies"]
     report["result"] = "PASS"
     report["checks"] = ["four exact versions", "unchanged original module hashes", "arm64e ABI",
                          "all signed code pages", "one settings entry", "isolated process routing",
-                         "RootHide module dependency link", "legacy package replacement/conflicts",
+                         "RootHide module and settings bundle dependency links", "legacy package replacement/conflicts",
                          "explicit parent directories precede every archive entry", "dpkg fixture layout matches final package",
-                         "Settings entry and NSPrincipalClass select the five-switch root controller"]
+                         "Settings entry and NSPrincipalClass select the five-switch root controller",
+                         "loader and settings use the same RootHide shared store"]
     report["deviceTested"] = False
     (ROOT / "packages/verification.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=True, indent=2))

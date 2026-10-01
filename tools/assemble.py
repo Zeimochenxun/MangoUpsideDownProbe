@@ -67,6 +67,9 @@ def assemble(helper_path, output):
     # The original signed images reference @loader_path/.jbroot/usr/lib/...
     # Three parents from Library/MangoSuite/Modules is the jailbreak root.
     data[MODULES + ".jbroot"] = ("../../..", 0o777)
+    # The unified UI now calls jbroot too. Its libroothide dependency is also
+    # @loader_path/.jbroot/...; this bundle owns its local dependency link.
+    data["Library/PreferenceBundles/MangoSuitePrefs.bundle/.jbroot"] = ("../../..", 0o777)
     data["Library/MangoSuite/manifest.json"] = (json.dumps(manifest, ensure_ascii=False, indent=2).encode(), 0o644)
     installed_size = sum(math.ceil(len(blob)/1024) for blob, _ in data.values() if isinstance(blob, bytes))
     original_ids = [s["package"] for s in sources.values()]
