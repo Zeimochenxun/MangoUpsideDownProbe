@@ -71,7 +71,7 @@ __attribute__((constructor)) static void StartSuite(void) {
         state.legacyOrientation = HasImage("MangoUpsideDownFix.dylib") ||
                                   HasImage("MangoOrientationProbe.dylib");
         unsigned modules = MSModulesForProcess(state, springboard ? MS_SPRINGBOARD : MS_BACKBOARD);
-        NSLog(@"[MangoSuite] version=1.0.0~alpha4 process=%@ startup-mask=%u changes=require-userspace-restart", process, modules);
+        NSLog(@"[MangoSuite] version=1.0.0~alpha5 process=%@ startup-mask=%u changes=require-userspace-restart", process, modules);
         if (state.legacyOrientation) NSLog(@"[MangoSuite] legacy orientation hook detected; orientation modules suppressed");
 
         // The renderer process must receive the shader hook during startup.

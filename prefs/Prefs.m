@@ -24,9 +24,8 @@ static BOOL SuiteFlag(NSString *key) {
     [self presentViewController:alert animated:YES completion:nil];
 }
 
-- (void)addSection:(NSString *)name footer:(NSString *)footer {
+- (void)addSection:(NSString *)name {
     PSSpecifier *group = name.length ? [PSSpecifier groupSpecifierWithName:name] : [PSSpecifier emptyGroupSpecifier];
-    if (footer.length) [group setProperty:footer forKey:@"footerText"];
     [_specifiers addObject:group];
 }
 
@@ -55,27 +54,31 @@ static BOOL SuiteFlag(NSString *key) {
     self.title = @"Mango 整合设置";
     _specifiers = [NSMutableArray new];
 
-    [self addSection:@"总开关" footer:@"修改本页任何开关后，请在越狱工具中重新启动用户空间。仅重新加载桌面不足以应用全部模块。关闭总开关会保留各模块的选择。"];
+    PSSpecifier *notice = [PSSpecifier emptyGroupSpecifier];
+    [notice setProperty:@"本插件为mango插件的自改补丁，仅自用" forKey:@"footerText"];
+    [_specifiers addObject:notice];
+
+    [self addSection:@"总开关"];
     [self addSwitch:@"启用 Mango 整合补丁" key:@"Enabled"];
 
-    [self addSection:@"灵动岛外观" footer:@"在静止状态补充玻璃，并协调通知、音乐和展开收拢时的过渡。参数页中的玻璃参数属于 Mango 全局灵动岛设置。"];
+    [self addSection:@"灵动岛外观"];
     [self addSwitch:@"静止灵动岛与过渡修复" key:@"IdleEnabled"];
     PSSpecifier *glass = [PSSpecifier preferenceSpecifierNamed:@"玻璃与边缘光参数" target:self set:nil get:nil detail:NSClassFromString(@"MangoSuiteGlassController") cell:PSLinkCell edit:nil];
     [_specifiers addObject:glass];
 
-    [self addSection:nil footer:@"按背景明暗调整岛体颜色。开启时，色调强度由自适应参数中的明暗不透明度控制；基础色调强度在关闭自适应并重启用户空间后生效。"];
+    [self addSection:nil];
     [self addSwitch:@"背景颜色自适应" key:@"AdaptiveEnabled"];
     Class adaptiveClass = [self adaptiveControllerClass];
     PSSpecifier *adaptive = [PSSpecifier preferenceSpecifierNamed:@"自适应颜色参数" target:self set:nil get:nil detail:adaptiveClass cell:adaptiveClass ? PSLinkCell : PSButtonCell edit:nil];
     if (!adaptiveClass) [adaptive setButtonAction:@selector(showMissingAdaptive)];
     [_specifiers addObject:adaptive];
 
-    [self addSection:@"旋转与布局" footer:@"控制整体倒置方向修复。可与分屏倒置修复分别开关；修改后重启用户空间。"];
+    [self addSection:@"旋转与布局"];
     [self addSwitch:@"倒置方向修复" key:@"WorldEnabled"];
-    [self addSection:nil footer:@"修复倒置时的分屏布局。只影响此模块，关闭不会更改上方的方向修复选择。"];
+    [self addSection:nil];
     [self addSwitch:@"分屏倒置修复" key:@"SplitEnabled"];
 
-    [self addSection:@"版本与使用" footer:@"IdleIsland 1.1.9.2 alpha2\nAdaptiveColor 0.1.3\nMangoUpsideDownWorld 1.2.0\nMangoSplitUpsideDownFix 0.1.1 alpha2\n\n适用于 Mango Beta7-1、iOS 16.5、RootHide arm64e。整合包需要原版 Mango。旧版独立补丁应由安装器替换，避免重复注入。"];
+    [self addSection:@"使用"];
     PSSpecifier *help = [PSSpecifier preferenceSpecifierNamed:@"如何应用开关更改" target:self set:nil get:nil detail:nil cell:PSButtonCell edit:nil];
     [help setButtonAction:@selector(showRestartHelp)];
     [_specifiers addObject:help];

@@ -1,6 +1,8 @@
-# Mango 整合补丁 1.0.0 alpha4
+# Mango 整合补丁 1.0.0 alpha5
 
 一个安装包、一个设置入口，整合指定的四个补丁。需要已经安装原版 Mango；不包含 Mango 主插件。
+
+**alpha5 简化首页：** 首级菜单删除所有功能及版本小字描述，最上方只保留一行“本插件为mango插件的自改补丁，仅自用”。分组标题、总开关、四个模块开关及两个参数入口保留；应用方式仍可从“如何应用开关更改”查看。
 
 **alpha4 修复开关保存失败：** alpha3 通过 CFPreferences 保存，却使用未转换的 `/var/mobile/Library/Preferences` 路径校验与回读。RootHide 会重定向非系统偏好域，两个位置并不一致；旧校验可能将成功写入判为失败并回滚。本版由设置首页、玻璃页和加载器共用 `src/SuitePreferences.m`，通过 `jbroot` 访问同一份配置，不再混用偏好接口和固定文件路径。
 
@@ -23,7 +25,7 @@
 
 ## 安装和使用
 
-1. 使用 Sileo 等安装 `packages/MangoSuite-1.0.0-alpha4-RootHide-arm64e.deb`。可以直接覆盖 alpha3，无需手动改文件权限。安装器会提示替换四个独立补丁；还会阻止与旧 `MangoUpsideDownFix`、`MangoOrientationProbe` 同时安装。确认操作列表保留 **Mango 主插件**。
+1. 使用 Sileo 等安装 `packages/MangoSuite-1.0.0-alpha5-RootHide-arm64e.deb`。可以直接覆盖旧版整合包，无需手动改文件权限。安装器会提示替换四个独立补丁；还会阻止与旧 `MangoUpsideDownFix`、`MangoOrientationProbe` 同时安装。确认操作列表保留 **Mango 主插件**。
 2. 在越狱工具中执行 **重新启动用户空间**。
 3. 打开系统设置 → **Mango 整合**。页面依次为总开关、灵动岛外观、旋转与布局。
 4. 按需调整四个开关。总开关关闭时保留各子开关的选择。**本页开关更改均需重新启动用户空间**；仅 Respring 不足以重载 backboardd 中的自适应渲染模块。
@@ -47,7 +49,7 @@
 
 `tests/test_settings_entry.py` 在 macOS 上将实际首页/玻璃页源码配合最小界面类替身编译为测试 bundle，调用真实 NSBundle，复现错误字段导致直接打开玻璃页，并验证修复后加载首页、生成五个开关和两个参数入口。保存回归还编译实际共享存储代码，以临时目录模拟 `jbroot` 的路径映射：复现 alpha3 写入成功却报错回滚，检查实际首页 setter 对全部 32 种选择的独立保存、新控制器回读、独立进程回读、玻璃页联动、旧配置迁移，以及目录不可写和配置损坏时保留原数据。它使用真实 Foundation 文件读写，不模拟 iPhone 的显示、触摸或越狱沙盒。
 
-编译和包结构验证不能代替真机测试。此版本标为 alpha4；交付时应以 `packages/verification.json` 和构建日志为准。尚需真机验证开关保存后退出设置再进入、重新启动用户空间后开关生效，以及通知上划清除、灵动岛展开收拢、音乐活动切换、正反转向和分屏拖动。
+编译和包结构验证不能代替真机测试。此版本标为 alpha5；交付时应以 `packages/verification.json` 和构建日志为准。尚需真机验证开关保存后退出设置再进入、重新启动用户空间后开关生效，以及通知上划清除、灵动岛展开收拢、音乐活动切换、正反转向和分屏拖动。
 
 RootHide 路径依据：[开发者的文件路径 API](https://github.com/roothide/Developer/blob/main/interface.md)、[共享文件存放说明](https://github.com/roothide/Developer/blob/main/entitlements.md)、[偏好重定向实现](https://github.com/roothide/Bootstrap-basebin/blob/main/bootstrap/prefshook.m)。
 
@@ -63,7 +65,7 @@ macOS CI 只构建新的加载器及统一设置 bundle，使用 RootHide Theos�
 
 ```text
 python tools/assemble.py --helper-deb <helper.deb>
-python tests/check_suite.py packages/MangoSuite-1.0.0-alpha4-RootHide-arm64e.deb
+python tests/check_suite.py packages/MangoSuite-1.0.0-alpha5-RootHide-arm64e.deb
 ```
 
 `helper` 是中间构建产物，不是供设备安装的完整插件。请只安装最终 MangoSuite 包。
