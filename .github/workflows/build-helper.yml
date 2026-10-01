@@ -3,6 +3,13 @@ name: Build Mango Suite Helper (RootHide)
 on:
   workflow_dispatch:
   push:
+    paths:
+      - 'src/**'
+      - 'prefs/**'
+      - 'Makefile'
+      - 'control'
+      - 'AMangoSuiteLoader.plist'
+      - '.github/workflows/build-helper.yml'
 
 permissions:
   contents: read

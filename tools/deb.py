@@ -44,11 +44,27 @@ def read_deb(path):
 
 
 def make_tar(files):
+    # dpkg's unpacker does not infer missing directories from file paths.
+    # Emit the root and all parent directory members before any payload.
+    directories = {pathlib.PurePosixPath(".")}
+    for name in files:
+        path = pathlib.PurePosixPath(name)
+        if not name or path.is_absolute() or ".." in path.parts or "\\" in name or path.as_posix() != name or name == ".":
+            raise ValueError(name)
+        directories.update(path.parents)
+    if any(str(path) in files for path in directories):
+        raise ValueError("A file or symlink cannot also be a parent directory")
     stream = io.BytesIO()
     with tarfile.open(fileobj=stream, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+        for directory in sorted(directories, key=lambda p: (len(p.parts), p.as_posix())):
+            item = tarfile.TarInfo("./" if directory == pathlib.PurePosixPath(".") else "./" + directory.as_posix() + "/")
+            item.type = tarfile.DIRTYPE
+            item.uid = item.gid = 0
+            item.uname = item.gname = "root"
+            item.mtime = 0
+            item.mode = 0o755
+            archive.addfile(item)
         for name, (data, mode) in sorted(files.items()):
-            if name.startswith("/") or ".." in pathlib.PurePosixPath(name).parts:
-                raise ValueError(name)
             item = tarfile.TarInfo("./" + name)
             item.uid = item.gid = 0
             item.uname = item.gname = "root"

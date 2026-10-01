@@ -12,4 +12,5 @@ __pycache__/
 *.deb
 *.zip
 *.dylib
-
+build-artifacts/
+build-source.json
