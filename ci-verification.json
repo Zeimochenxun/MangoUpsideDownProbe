@@ -1,0 +1,20 @@
+{
+  "source_commit": "2d4f6bf7909edb0c5f2b2991ef2c12696ef425a5",
+  "run": 36719975017,
+  "url": "https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/36719975017",
+  "conclusion": "success",
+  "artifact_zip_sha256": "5632f34613eb480a4d0d2063f6865d9694a54f028ade106ecf2134338620bdbf",
+  "pass_lines": [
+    "2026-09-30T13:12:44.3161240Z PASS: actual alpha1 helpers fail compact-return expectations; alpha2 restores from the compact region.",
+    "2026-09-30T13:12:44.3163580Z PASS: negative controls using actual 1.1.9 helpers fail fade-out and return-geometry expectations; candidate passes.",
+    "2026-09-30T13:12:44.3165450Z PASS: actual helper bodies compiled and executed with Objective-C property stubs (no UIKit/device validation)",
+    "2026-09-30T13:12:44.3167130Z PASS: compiled alpha1 helpers failed the same new behavior expectations (expected negative control).",
+    "2026-09-30T13:12:44.3168810Z PASS: compiled baseline119 helpers failed the same new behavior expectations (expected negative control).",
+    "2026-09-30T13:12:46.9962770Z PASS: actual plugin fragments compile and link; device rendering remains untested",
+    "2026-09-30T13:13:38.4646950Z PASS: MangoIdleIsland 1.1.9.2~alpha2 arm64e RootHide; compact-return stable-idle handoff state machine + diagnostics included"
+  ],
+  "limits": [
+    "No device install/rendering test",
+    "Potential offscreen activity-opacity delay still needs device logs"
+  ]
+}
