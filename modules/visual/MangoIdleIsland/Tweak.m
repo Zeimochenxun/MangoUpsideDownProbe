@@ -7,8 +7,10 @@
 #import <unistd.h>
 #import <math.h>
 #import <string.h>
+#import <stdint.h>
 #import <CoreFoundation/CoreFoundation.h>
 #import <roothide.h>
+#import "../../../src/RuntimeDiagnostics.h"
 
 // Beta8-1 runtime surface verified against the supplied Mango binaries.
 // Every optional Mango method is signature-gated before it is hooked/called.
@@ -591,6 +593,159 @@ static void GlassHidden(id self, SEL cmd, BOOL hidden) {
     }
 }
 
+// These observations run only after Scan's existing repairs have completed.
+// They never call Eligibility (which also maintains native glass), layout, or
+// any setter on a sampled view. A native activity is not proof of visible pixels.
+@interface MangoIdleDiagnosticsState : NSObject
+@property(nonatomic, copy) NSString *state, *summary;
+@property(nonatomic) CFTimeInterval lastLog;
+@property(nonatomic) uint32_t generation, epoch;
+@end
+@implementation MangoIdleDiagnosticsState
+@end
+
+static char IdleDiagnosticsKey;
+static BOOL IdleDiagnosticsWasActive;
+static uint32_t IdleDiagnosticsEpoch;
+
+static BOOL IdleDiagnosticsPriority(UIView *view, UIView *own) {
+    NSString *name = NSStringFromClass(view.class);
+    return (ContentClass && [view isKindOfClass:ContentClass]) ||
+        (ElementClass && [view isKindOfClass:ElementClass]) ||
+        [name hasPrefix:@"SAUI"] || [name hasPrefix:@"MRU"] ||
+        (view != own && IsIslandGlass(view));
+}
+
+static NSString *IdleDiagnosticsSummary(UIView *host, NSString *state) {
+    return [NSString stringWithFormat:@"%@ %@", state, MSDiagnosticsViewLine(host)];
+}
+
+static void IdleDiagnosticsSample(UIView *host, NSString *trigger, MangoIdleDiagnosticsState *record) {
+    if (!NSThread.isMainThread || !MSDiagnosticsActive() || !host.window ||
+        record.epoch != IdleDiagnosticsEpoch) return;
+    @try {
+    const NSUInteger treeCap = 48, ancestorCap = 16, bodyCap = 6500;
+    UIView *own = objc_getAssociatedObject(host, &BackgroundKey);
+    NSHashTable<UIView *> *seen = [NSHashTable hashTableWithOptions:
+        NSPointerFunctionsStrongMemory | NSPointerFunctionsObjectPointerPersonality];
+    [seen addObject:host];
+    NSMutableArray<UIView *> *ancestors = [NSMutableArray array];
+    UIView *parent = host.superview;
+    while (parent && ancestors.count < ancestorCap - 1) {
+        if ([seen containsObject:parent]) break;
+        [seen addObject:parent];
+        [ancestors addObject:parent];
+        if (parent == host.window) { parent = nil; break; }
+        parent = parent.superview;
+    }
+    BOOL ancestorTruncated = parent != nil;
+    if (![seen containsObject:host.window]) {
+        [seen addObject:host.window];
+        [ancestors addObject:host.window];
+    }
+
+    NSMutableArray<UIView *> *queue = [NSMutableArray arrayWithObject:host];
+    NSMutableArray<UIView *> *selected = [NSMutableArray array];
+    NSMutableArray<UIView *> *context = [NSMutableArray array];
+    NSUInteger discovered = 1, visited = 1;
+    BOOL treeTruncated = NO;
+    while (queue.count) {
+        UIView *view = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if (view != host) {
+            ++visited;
+            [(IdleDiagnosticsPriority(view, own) ? selected : context) addObject:view];
+        }
+        NSArray<UIView *> *children = view.subviews;
+        for (NSUInteger i = 0; i < children.count; ++i) {
+            if (discovered >= treeCap) { treeTruncated = YES; break; }
+            UIView *child = children[i];
+            if ([seen containsObject:child]) continue;
+            [seen addObject:child];
+            ++discovered;
+            if (IdleDiagnosticsPriority(child, own)) [queue insertObject:child atIndex:0];
+            else [queue addObject:child];
+        }
+    }
+
+    NSMutableString *body = [NSMutableString string];
+    NSUInteger ancestorLogged = 0, selectedLogged = 0, contextLogged = 0, budgetDropped = 0;
+    NSArray<NSArray<UIView *> *> *groups = @[@[host], ancestors, selected, context];
+    NSArray<NSString *> *roles = @[@"host", @"ancestor", @"selected-child", @"context-child"];
+    for (NSUInteger group = 0; group < groups.count; ++group) {
+        for (UIView *view in groups[group]) {
+            NSString *line = [NSString stringWithFormat:@"\nsampleRole=%@ %@", roles[group], MSDiagnosticsViewLine(view)];
+            if (body.length + line.length > bodyCap) { ++budgetDropped; continue; }
+            [body appendString:line];
+            if (group == 1) ++ancestorLogged;
+            else if (group == 2) ++selectedLogged;
+            else if (group == 3) ++contextLogged;
+        }
+    }
+    NSString *state = objc_getAssociatedObject(host, &StateKey) ?: @"unobserved";
+    MSDiagnosticsLog(@"Idle", [NSString stringWithFormat:
+        @"sampleRole=summary trigger=%@ epoch=%u generation=%u host=%p state=%@ activity-presence-only=1 pixels-visible=unknown hostsKnown=%lu hostsCap=4 hostsTruncated=%d ancestorVisited=%lu ancestorLogged=%lu ancestorTruncated=%d treeCap=%lu treeVisited=%lu treeTruncated=%d selected=%lu selectedLogged=%lu contextLogged=%lu budgetDropped=%lu%@",
+        trigger, record.epoch, record.generation, (__bridge void *)host, state,
+        (unsigned long)Hosts.count, Hosts.count > 4,
+        (unsigned long)ancestors.count, (unsigned long)ancestorLogged, ancestorTruncated,
+        (unsigned long)treeCap, (unsigned long)visited, treeTruncated,
+        (unsigned long)selected.count, (unsigned long)selectedLogged,
+        (unsigned long)contextLogged, (unsigned long)budgetDropped, body]);
+    record.lastLog = CACurrentMediaTime();
+    record.summary = IdleDiagnosticsSummary(host, state);
+    } @catch (__unused NSException *exception) {}
+}
+
+static void IdleDiagnosticsScan(void) {
+    if (!NSThread.isMainThread) return;
+    @try {
+    BOOL active = MSDiagnosticsActive();
+    if (!active) { IdleDiagnosticsWasActive = NO; return; }
+    if (!IdleDiagnosticsWasActive) {
+        IdleDiagnosticsWasActive = YES;
+        IdleDiagnosticsEpoch = IdleDiagnosticsEpoch == UINT32_MAX ? 1 : IdleDiagnosticsEpoch + 1;
+    }
+    NSUInteger count = 0;
+    for (UIView *host in Hosts.allObjects) {
+        if (!host.window || ![host.window isKindOfClass:WindowClass]) continue;
+        if (count++ >= 4) break;
+        MangoIdleDiagnosticsState *record = objc_getAssociatedObject(host, &IdleDiagnosticsKey);
+        if (!record) {
+            record = [MangoIdleDiagnosticsState new];
+            objc_setAssociatedObject(host, &IdleDiagnosticsKey, record, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        NSString *state = objc_getAssociatedObject(host, &StateKey) ?: @"unobserved";
+        BOOL changedState = record.epoch != IdleDiagnosticsEpoch || ![record.state isEqualToString:state];
+        NSString *summary = IdleDiagnosticsSummary(host, state);
+        CFTimeInterval now = CACurrentMediaTime();
+        if (!changedState && now - record.lastLog < ([record.summary isEqualToString:summary] ? 10.0 : 1.0)) continue;
+        if (changedState) {
+            record.epoch = IdleDiagnosticsEpoch;
+            record.generation = record.generation == UINT32_MAX ? 1 : record.generation + 1;
+            record.state = state;
+        }
+        IdleDiagnosticsSample(host, changedState ? @"scan-state-change" : @"scan-summary", record);
+        if (!changedState) continue;
+        uint32_t generation = record.generation, epoch = record.epoch;
+        __weak UIView *weakHost = host;
+        __weak UIWindow *weakWindow = host.window;
+        for (NSNumber *delay in @[@350, @1000]) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay.longLongValue * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+                @try {
+                UIView *current = weakHost;
+                MangoIdleDiagnosticsState *currentRecord = current ? objc_getAssociatedObject(current, &IdleDiagnosticsKey) : nil;
+                if (!MSDiagnosticsActive() || !current.window || current.window != weakWindow ||
+                    epoch != IdleDiagnosticsEpoch || currentRecord.epoch != epoch ||
+                    currentRecord.generation != generation || ![currentRecord.state isEqualToString:state] ||
+                    ![objc_getAssociatedObject(current, &StateKey) isEqualToString:state]) return;
+                IdleDiagnosticsSample(current, [NSString stringWithFormat:@"state-change+%@ms", delay], currentRecord);
+                } @catch (__unused NSException *exception) {}
+            });
+        }
+    }
+    } @catch (__unused NSException *exception) {}
+}
+
 static void Scan(void) {
     Disabled = access([[LogDir stringByAppendingPathComponent:@"DISABLED"] fileSystemRepresentation], F_OK) == 0;
     NSMutableOrderedSet<UIWindow *> *windows = [NSMutableOrderedSet orderedSetWithArray:UIApplication.sharedApplication.windows];
@@ -608,6 +763,7 @@ static void Scan(void) {
         }
     }
     for (UIView *host in Hosts.allObjects) Update(host);
+    IdleDiagnosticsScan();
 }
 
 __attribute__((constructor)) static void Start(void) {
@@ -617,7 +773,7 @@ __attribute__((constructor)) static void Start(void) {
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=1.1.9.4~beta8.4-visible-native-handoff background=Mango-glass stable-idle-only=1 inverse-native-opacity=1 presentation-opacity=1 presentation-bounds-guard=1 compact-return-handoff=1 visible-activity-only=1 settled-background-no-rewrite=1 touch=unchanged");
+            Log(@"[SESSION] version=1.1.9.4~beta8.4.1-diagnostics background=Mango-glass stable-idle-only=1 inverse-native-opacity=1 presentation-opacity=1 presentation-bounds-guard=1 compact-return-handoff=1 visible-activity-only=1 settled-background-no-rewrite=1 touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");

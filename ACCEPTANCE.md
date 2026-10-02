@@ -1,6 +1,6 @@
 # Beta8 成品验收
 
-成品版本：`1.1.0~beta8.4`，文件：`MangoSuite-1.1.0-Beta8.4-RootHide-arm64e.deb`。本次构建、代码测试和最终包检查待完成，真机项目均待测。
+成品版本：`1.1.0~beta8.4`，文件：`MangoSuite-1.1.0-Beta8.4-RootHide-arm64e.deb`。本次构建、代码测试和最终包检查已通过，真机项目均待测。
 
 目标设备：iPhone 13 mini / iOS 16.5 / Dopamine RootHide / 已正常授权的 Mango 1.0-Beta8-1。
 
@@ -11,7 +11,7 @@
 - Beta8.2 将小芒悬浮球、根面板、独立通知泡／卡片和同类提示窗适配加入 World；使用现有“倒置方向与小芒修复”开关，没有额外模块或开关。AdaptiveColor 二进制与参数 UI 保留精确 0.1.3 原件。
 - Beta8.3 的手机反馈是播放时整岛消失、启动器从开始就不倒置，安装后只执行 Respring；已建议补一次用户空间重启，但不把重启不足当成确定原因。Beta8.4 收窄媒体交接并恢复分屏首次施加条件；此前媒体缺失的根因与本次手机效果均待确认。
 - Shader 本次没有改动，复用 Beta8.1 CI [36913456075](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/36913456075) 的实际 Apple Metal 编译证据，不能描述为本次重新编译。
-- Beta8.4 的源码 commit、CI 和完整包 SHA256 待生成。最终检查需要核对 7 个镜像、14 个载荷路径、helper 精确匹配、RootHide 依赖、签名页和唯一入口，并保留真实 dpkg 惰性载荷安装／失败重试／升级保留配置检查。
+- 本次 CI [37058736152](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/37058736152) 的全部检查与 arm64e 构建成功，源码 commit 为 `3f6f752ebc7d49616816983174c30a84a9db6d17`。完整包 `tests/check_suite.py` 为 PASS，确认 7 个镜像、14 个载荷路径、helper 精确匹配、签名代码页、RootHide 依赖及唯一入口；真实 dpkg 惰性载荷安装／失败重试／升级保留配置检查通过。完整包 SHA256 为 `68a88575da855d688468e10ff4f1e6e222b96356f67773ed894bb935a456df86`，本次记录导出至 `delivery/1.1.0-beta8.4`。
 - **Beta8.4 完整整合包与本次修复尚未在目标 iPhone 实测；下列真机项目均待测。** 原生倒置此前的成功反馈不代表本次所有模块已通过。
 
 ## 最少真机检查

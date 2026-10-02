@@ -2,7 +2,7 @@
 
 版本：`1.1.0~beta8.4`。完整安装包：`MangoSuite-1.1.0-Beta8.4-RootHide-arm64e.deb`。目标是 iPhone 13 mini、iOS 16.5、Dopamine RootHide，以及已经正常授权的 Mango `1.0-Beta8-1`。
 
-当前状态：保留 Beta8.2 的小芒几何和动画实现，沿用 Beta8.4 的共享方向策略。本次 CI、arm64e 构建和完整包检查待完成。**完整整合包与小芒适配尚未在手机上实测。** 之前原生倒置偏好工具已经生效的反馈，不能代替小芒窗口的显示和交互验收。
+当前状态：保留 Beta8.2 的小芒几何和动画实现，沿用 Beta8.4 的共享方向策略。本次 CI、arm64e 构建和完整包检查已通过。**完整整合包与小芒适配尚未在手机上实测。** 之前原生倒置偏好工具已经生效的反馈，不能代替小芒窗口的显示和交互验收。
 
 ## 范围与开关
 
@@ -36,8 +36,8 @@
 - `tests/xiaomang_geometry_test.c` 调用生产几何 helper，通过独立的正向坐标模型检查主窗、偏中心通知窗、scene 缩放／平移／旋转补偿、三点和角点物理镜像、重布局以及无效／已有倒置输入。
 - `tests/xiaomang_mutation_test.m` 调用生产事务 helper，检查原函数看到真实基线、嵌套只由外层恢复／完成，及各阶段异常后计数释放。
 - `tests/xiaomang_animation_test.m` 调用生产动画清理 helper，在真实 QuartzCore layer 上检查外层几何动画与纯几何组清理，保留 fade、混合组和子层 fly-in。
-- 三项小芒 helper 在旧版 CI 中执行过；本次 Beta8.4 CI 待完成。它们不模拟 iPhone 的实际触摸、窗口分发和 Core Animation 时序，旧版记录不能替代本次成品和手机验证。
-- 本次最终 `tests/check_suite.py` 待完成，需要核对 7 个镜像、14 个载荷路径、小芒所在 World 精确匹配本次 helper、签名代码页、RootHide 依赖及唯一入口；完成后以本次交付报告与 SHA256 为准。
+- 三项小芒 helper 已在本次 Beta8.4 CI [37058736152](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/37058736152) 执行通过。它们不模拟 iPhone 的实际触摸、窗口分发和 Core Animation 时序，不能替代手机验证。
+- 本次 CI [37058736152](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/37058736152) 的全部检查与 arm64e 构建成功，源码 commit 为 `3f6f752ebc7d49616816983174c30a84a9db6d17`。完整包 `tests/check_suite.py` 为 PASS，确认 7 个镜像、14 个载荷路径、helper 精确匹配、签名代码页、RootHide 依赖及唯一入口；真实 dpkg 惰性载荷安装／失败重试／升级保留配置检查通过。完整包 SHA256 为 `68a88575da855d688468e10ff4f1e6e222b96356f67773ed894bb935a456df86`，本次记录导出至 `delivery/1.1.0-beta8.4`。
 - 本次没有改动 AdaptiveColor 或最终 shader，复用 Beta8.1 CI [36913456075](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/36913456075) 的实际 Apple Metal 编译证据，不能称为本次重新编译。
 
 ## 最少真机检查

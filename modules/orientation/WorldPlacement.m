@@ -25,6 +25,7 @@
 #include <errno.h>
 #include "Geometry.h"
 #import "Beta8Identity.h"
+#import "../../src/RuntimeDiagnostics.h"
 
 static const char *WPDisabled = "/var/mobile/Library/Preferences/MangoUpsideDownWorld.disabled";
 static const char *WPLogPath = "/var/mobile/Library/Logs/MangoUpsideDownWorld.log";
@@ -49,6 +50,9 @@ static char WPStateKey;
 @property(nonatomic) BOOL suspended;
 @property(nonatomic) unsigned mutationDepth;
 @property(nonatomic) double lastLog;
+@property(nonatomic,copy) NSString *diagnosticReason;
+@property(nonatomic) BOOL diagnosticDecisionRead;
+@property(nonatomic) NSInteger diagnosticDecision;
 @end
 @implementation MWPState
 @end
@@ -184,13 +188,16 @@ static void WPUpdate(UIView *v) {
     if (!s || s.mutationDepth || WPOwnWrite || WPLayoutDepth || ![NSThread isMainThread]) return;
 
     if (s.applied && !WPNear(v.transform, s.appliedTransform)) {
+        s.diagnosticReason=@"transform-conflict";
         WPRestore(v, s, @"transform-conflict");
         return;
     }
-    if (s.suspended) return;
+    if (s.suspended) {s.diagnosticReason=@"suspended";return;}
 
+    s.diagnosticDecisionRead=NO;
     if (!WPEnabled || B8Disabled(WPDisabled) ||
-        WPOrientation() != UIInterfaceOrientationPortraitUpsideDown) {
+        (s.diagnosticDecisionRead=YES,s.diagnosticDecision=WPOrientation()) != UIInterfaceOrientationPortraitUpsideDown) {
+        s.diagnosticReason=@"orientation-or-disabled";
         WPRestore(v, s, @"orientation-or-disabled");
         return;
     }
@@ -200,6 +207,7 @@ static void WPUpdate(UIView *v) {
     UIWindow *window = v.window;
     if (!host || !parent || ![window isKindOfClass:WPWindowClass] ||
         window.screen != UIScreen.mainScreen) {
+        s.diagnosticReason=@"host-or-window-detached";
         WPRestore(v, s, @"host-or-window-detached");
         return;
     }
@@ -208,15 +216,17 @@ static void WPUpdate(UIView *v) {
     // integrated version must not: wait until World has really turned the
     // aperture window. This also makes install/constructor ordering harmless.
     if (!WPWindowIsWorldTurned(window)) {
+        s.diagnosticReason=@"waiting-for-world-turn";
         WPRestore(v, s, @"waiting-for-world-turn");
         return;
     }
 
     if (s.applied && s.parent != parent) WPRestore(v, s, @"parent-changed");
-    if (s.suspended) return;
+    if (s.suspended) {s.diagnosticReason=@"parent-change-suspended";return;}
     s.parent = parent;
 
     if (!WPAffineHierarchy(host)) {
+        s.diagnosticReason=@"non-affine-hierarchy";
         WPRestore(v, s, @"non-affine-hierarchy");
         WPStateLog(s, @"SKIP non-affine hierarchy");
         return;
@@ -243,6 +253,7 @@ static void WPUpdate(UIView *v) {
     MUDFPlanResult result = MUDFPlan(WPRect(fixed.bounds), baseline, map, &delta, &target);
 
     if (result == MUDFPlanAlreadyAtOtherEdge) {
+        s.diagnosticReason=@"world-already-placed";
         // The World window turn already put this island on physical bottom,
         // which is visual top while the phone is upside down. If an older
         // placement translation is still present, remove it now.
@@ -252,6 +263,7 @@ static void WPUpdate(UIView *v) {
     }
 
     if (result != MUDFPlanOK) {
+        s.diagnosticReason=@"geometry-guard";
         WPRestore(v, s, @"geometry-guard");
         WPStateLog(s, @"SKIP invalid placement geometry");
         return;
@@ -268,18 +280,52 @@ static void WPUpdate(UIView *v) {
     if (!MUDFFiniteRect(WPRect(after)) ||
         fabs(CGRectGetMinY(after)-target.y) > 1.0 ||
         fabs(CGRectGetMinX(after)-target.x) > 1.0) {
+        s.diagnosticReason=@"post-write-mismatch";
         WPRestore(v, s, @"post-write-mismatch");
         s.suspended = YES;
         WPLog(@"SUSPEND post-write geometry verification failed");
         return;
     }
 
+    s.diagnosticReason=@"applied";
     WPStateLog(s, [NSString stringWithFormat:
         @"APPLY container=%p baselineFixed=%@ targetFixed=%@ actualFixed=%@ deltaParent={%.3f,%.3f}",
         (__bridge void *)v,
         NSStringFromCGRect(WPCGRect(baseline)),
         NSStringFromCGRect(WPCGRect(target)),
         NSStringFromCGRect(after), delta.x, delta.y]);
+}
+
+static void WPDiagnosticScan(void) {
+    if(!MSDiagnosticsActive())return;
+    @try {
+        static double sampled,logged;
+        static NSString *signature;
+        double now=CACurrentMediaTime();
+        if(now-sampled<1.0)return;
+        sampled=now;
+        NSMutableString *body=[NSMutableString stringWithFormat:
+            @"PLACEMENT_STATE installed=%d enabled=%d containers=%lu pending=%lu expired=%u sampleMango=%ld sampleSystem=%ld ownWrite=%u layoutDepth=%u containerCap=4 pixels-visible=unknown",
+            WPInstalled,WPEnabled,(unsigned long)WPContainers.count,(unsigned long)WPPending.count,WPPendingExpired,
+            (long)B8MangoOrientation(),(long)B8SystemOrientation(),WPOwnWrite,WPLayoutDepth];
+        unsigned seen=0;
+        for(UIView *container in WPContainers.allObjects) {
+            if(seen++>=4)break;
+            MWPState *state=WPState(container);
+            UIView *host=WPCurrentHost(container,state);
+            NSString *line=[NSString stringWithFormat:
+                @"\ncontainer lastDecision=%@ decisionRead=%d decisionResolved=%ld applied=%d suspended=%d hosts=%lu currentHost=%p worldTurnedSample=%d modelMatchesOwned=%d mutationDepth=%u %@\nhost %@",
+                state.diagnosticReason ?: @"none",state.diagnosticDecisionRead,(long)state.diagnosticDecision,
+                state.applied,state.suspended,(unsigned long)state.hosts.count,(__bridge void *)host,
+                WPWindowIsWorldTurned(container.window),WPNear(container.transform,state.appliedTransform),state.mutationDepth,
+                MSDiagnosticsViewLine(container),MSDiagnosticsViewLine(host)];
+            if(body.length+line.length>7500){[body appendString:@"\n[container-budget-truncated]"];break;}
+            [body appendString:line];
+        }
+        if([signature isEqualToString:body] && now-logged<10.0)return;
+        signature=body;logged=now;
+        MSDiagnosticsLog(@"World",body);
+    } @catch (__unused NSException *exception) {}
 }
 
 static void WPUpdateAll(void) {
@@ -546,6 +592,7 @@ static void WPInstall(void) {
             WPResolvePending();
             WPUpdateAll();
         }
+        WPDiagnosticScan();
         if (!WPEnabled) dispatch_source_cancel(WPTimer);
     });
     dispatch_resume(WPTimer);

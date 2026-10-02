@@ -12,12 +12,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 DYNAMIC = "Library/MobileSubstrate/DynamicLibraries/"
 MODULES = "Library/MangoSuite/Modules/"
 PREFS = "Library/PreferenceBundles/MangoSuitePrefs.bundle/"
-VERSION = "1.1.0~beta8.4"
-OUTPUT_NAME = "MangoSuite-1.1.0-Beta8.4-RootHide-arm64e.deb"
+VERSION = "1.1.0~beta8.4.1"
+OUTPUT_NAME = "MangoSuite-1.1.0-Beta8.4.1-Diagnostics-RootHide-arm64e.deb"
+DIAGNOSTIC_CAPTURE = "Library/MangoSuite/Diagnostics/capture-runtime.sh"
 COMPILED = {
-    "IdleIsland": ("MangoIdleIsland", "1.1.9.4~beta8.4"),
-    "UpsideDownWorld": ("MangoUpsideDownWorld", "1.3.0~beta8.4"),
-    "SplitUpsideDownFix": ("MangoSplitUpsideDownFix", "0.1.2~beta8.4"),
+    "IdleIsland": ("MangoIdleIsland", "1.1.9.4~beta8.4.1"),
+    "UpsideDownWorld": ("MangoUpsideDownWorld", "1.3.0~beta8.4.1"),
+    "SplitUpsideDownFix": ("MangoSplitUpsideDownFix", "0.1.2~beta8.4.1"),
 }
 NATIVE_PREFERENCE = {
     "domain": "com.go.mangoosprefs",
@@ -144,6 +145,16 @@ def assemble(helper_path, output, source_commit):
     # Both locations resolve @loader_path/.jbroot into the RootHide root.
     data[MODULES + ".jbroot"] = ("../../..", 0o777)
     data[PREFS + ".jbroot"] = ("../../..", 0o777)
+    # Universal-newline normalization keeps the packaged shell source executable
+    # through sh even when the host checkout uses Windows CRLF.
+    collector = (ROOT / "diagnostics/capture-runtime.sh").read_text(encoding="utf-8").encode("utf-8")
+    assert collector.startswith(b"#!/bin/sh\n") and b"\r" not in collector
+    data[DIAGNOSTIC_CAPTURE] = (collector, 0o644)
+    manifest["diagnostics"] = {
+        "collectorPath": DIAGNOSTIC_CAPTURE, "collectorSHA256": sha256(collector),
+        "loggerTTLSeconds": 1200, "loggerFileLimitBytes": 262144,
+        "captureFileLimitBytes": 1048576, "repairBehaviorChanged": False,
+    }
     manifest["payloadSHA256"] = {name: sha256(blob) for name, (blob, _) in sorted(data.items())
                                   if isinstance(blob, bytes)}
     data["Library/MangoSuite/manifest.json"] = (json.dumps(manifest, ensure_ascii=False, indent=2).encode(), 0o644)
@@ -154,13 +165,13 @@ def assemble(helper_path, output, source_commit):
     control = "\n".join([
         "Package: com.chenxun.mangosuite", "Name: Mango Suite", "Version: " + VERSION,
         "Architecture: iphoneos-arm64e", "Section: Tweaks", "Maintainer: Chen Xun", "Author: Chen Xun",
-        "Description: Mango Beta8 suite with source-built modules, retained AdaptiveColor 0.1.3, and one Settings panel for iOS 16.5 RootHide.",
+        "Description: Mango Beta8.4 suite with bounded read-only diagnostics, retained AdaptiveColor 0.1.3, and one Settings panel for iOS 16.5 RootHide.",
         "Depends: mobilesubstrate, preferenceloader, firmware (= 16.5), com.go.mango (= 1.0-Beta8-1)",
         "Conflicts: " + ", ".join(conflicts), "Replaces: " + ", ".join(conflicts),
         "Provides: " + ", ".join(provides), f"Installed-Size: {installed_size}", "",
     ]).encode()
     expected_layout = json.loads((ROOT / "tests/install-layout.json").read_text(encoding="utf-8"))
-    assert len(data) == 14 and set(data) == {row["path"] for row in expected_layout}
+    assert len(data) == 15 and set(data) == {row["path"] for row in expected_layout}
     for row in expected_layout:
         blob, mode = data[row["path"]]
         assert mode == row["mode"], (row["path"], mode)

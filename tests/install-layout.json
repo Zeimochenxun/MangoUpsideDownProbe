@@ -1,5 +1,9 @@
 [
   {
+    "path": "Library/MangoSuite/Diagnostics/capture-runtime.sh",
+    "mode": 420
+  },
+  {
     "path": "Library/MangoSuite/Modules/.jbroot",
     "mode": 511,
     "link": "../../.."

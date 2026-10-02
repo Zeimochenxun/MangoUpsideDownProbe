@@ -1,6 +1,6 @@
 # Beta8 方向模块适配
 
-整合包版本：`1.1.0~beta8.4`，完整文件：`MangoSuite-1.1.0-Beta8.4-RootHide-arm64e.deb`。本次回归修正的 CI 与成品检查待完成，手机验证仍待完成。
+整合包版本：`1.1.0~beta8.4`，完整文件：`MangoSuite-1.1.0-Beta8.4-RootHide-arm64e.deb`。本次回归修正的 CI 与成品检查已通过，手机验证仍待完成。
 
 适用基线是用户提供的 RootHide Mango `1.0-Beta8-1`，iPhone 13 mini、iOS 16.5。用户已经在正常授权的原版上验证外部写入 `LeXiang.UpsideDown.Enabled` 可以开启原生倒置。本目录的方向模块不写这个偏好，不修改 Mango 文件或授权。
 
@@ -47,7 +47,7 @@ Split target files：`Split.m`。
 
 `tests/xiaomang_geometry_test.c` 直接调用 `XiaoMangGeometry.h`，使用独立的正向坐标模型验证 260×260 主窗、偏中心通知小窗、父 scene 缩放／平移和旋转补偿、物理三点／角点镜像、布局更新、已有原生倒置与无效输入；局部拖动方向检查只验证几何模型，不模拟真实 UIKit 手势。`tests/xiaomang_mutation_test.m` 直接调用 `XiaoMangMutation.h`，检查原回调读取原生基线、嵌套 setter 仅外层恢复／重算，以及恢复、原回调、完成回调异常后计数释放。`tests/xiaomang_animation_test.m` 直接调用 `XiaoMangAnimation.h`，使用真实 QuartzCore layer 检查外层几何属性与纯几何组的清理，同时保留 fade、混合组和子层 fly-in。
 
-Beta8.4 恢复 Split 的 Beta8.2 首次施加语义，保留作用域内的原生启动器回调与外部 reset 同回调恢复；World 和小芒 helper 继续回归。本次 macOS CI、arm64e 构建和完整包检查待完成。Beta8.3 已有实测回归，因此旧版编译成功不能当成此次效果证明；这些 helper 检查也不模拟 UIKit 真机行为。
+Beta8.4 恢复 Split 的 Beta8.2 首次施加语义，保留作用域内的原生启动器回调与外部 reset 同回调恢复；World 和小芒 helper 继续回归。本次 CI [37058736152](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/37058736152) 的全部检查与 arm64e 构建成功，源码 commit 为 `3f6f752ebc7d49616816983174c30a84a9db6d17`。完整包 `tests/check_suite.py` 为 PASS，确认 7 个镜像、14 个载荷路径、helper 精确匹配、签名代码页、RootHide 依赖及唯一入口；真实 dpkg 惰性载荷安装／失败重试／升级保留配置检查通过。完整包 SHA256 为 `68a88575da855d688468e10ff4f1e6e222b96356f67773ed894bb935a456df86`，本次记录导出至 `delivery/1.1.0-beta8.4`。Beta8.3 已有实测回归，因此旧版编译成功不能当成此次效果证明；这些 helper 检查也不模拟 UIKit 真机行为。
 
 ## 证据与来源
 

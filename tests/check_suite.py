@@ -10,7 +10,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from deb import read_deb, sha256
-from assemble import (COMPILED, DYNAMIC, EXTRA_CONFLICTS, MODULES, NATIVE_PREFERENCE,
+from assemble import (COMPILED, DIAGNOSTIC_CAPTURE, DYNAMIC, EXTRA_CONFLICTS, MODULES, NATIVE_PREFERENCE,
                       PREFS, VERSION, compatibility_metadata, control_fields,
                       helper_contents, load_inputs, verified_adaptive)
 from macho import inspect
@@ -46,7 +46,7 @@ def verify(filename, helper_path):
     for name, target in links:
         assert posixpath.normpath(posixpath.join(posixpath.dirname(name), target)) == "."
     expected_layout = json.loads((ROOT / "tests/install-layout.json").read_text(encoding="utf-8"))
-    assert len(data) == 14 and set(data) == {row["path"] for row in expected_layout}, "Unexpected payload layout"
+    assert len(data) == 15 and set(data) == {row["path"] for row in expected_layout}, "Unexpected payload layout"
     for row in expected_layout:
         assert data[row["path"]][1] == row["mode"]
         if "link" in row:
@@ -60,6 +60,14 @@ def verify(filename, helper_path):
     assert manifest["compatibility"] == compatibility
     assert manifest["compatibilityMetadataSHA256"] == compatibility_sha
     assert manifest["nativePreference"] == NATIVE_PREFERENCE
+    collector = (ROOT / "diagnostics/capture-runtime.sh").read_text(encoding="utf-8").encode("utf-8")
+    assert collector.startswith(b"#!/bin/sh\n") and b"\r" not in collector
+    assert data[DIAGNOSTIC_CAPTURE] == (collector, 0o644), "Changed or missing diagnostic collector"
+    assert manifest["diagnostics"] == {
+        "collectorPath": DIAGNOSTIC_CAPTURE, "collectorSHA256": sha256(collector),
+        "loggerTTLSeconds": 1200, "loggerFileLimitBytes": 262144,
+        "captureFileLimitBytes": 1048576, "repairBehaviorChanged": False,
+    }
     assert set(manifest["modules"]) == set(sources)
     for name in (DYNAMIC + "AMangoSuiteLoader.dylib", DYNAMIC + "AMangoSuiteLoader.plist",
                  PREFS + "Info.plist", PREFS + "MangoSuitePrefs"):
@@ -129,7 +137,8 @@ def verify(filename, helper_path):
         "RootHide module and Settings bundle dependency links",
         "exact Mango Beta8 and iOS 16.5 dependencies with legacy replacement/conflicts",
         "explicit parent directories precede every archive entry",
-        "fourteen payload paths and modes match the dpkg fixture layout",
+        "fifteen payload paths and modes match the dpkg fixture layout",
+        "bounded read-only diagnostic collector exactly matches normalized source and manifest",
         "source commit, helper hash, module hashes, and Beta8 image metadata recorded",
         "native upside-down domain/key remain separate from the Suite shared store",
         "XiaoMang window adapter compiled into the existing World module",

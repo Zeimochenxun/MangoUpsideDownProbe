@@ -1,7 +1,8 @@
 """Use real Linux dpkg in isolated roots with the delivery's exact path layout.
 
-Payload bytes are inert fixtures; signed iOS modules remain local. Reproduce the
-old missing-directory failure, then verify initial unpack and upgrade behavior.
+Binary payload bytes are inert fixtures; signed iOS modules remain local. The
+actual diagnostic shell source is installed and parsed, never run. Reproduce
+the old missing-directory failure, then verify initial unpack and upgrades.
 """
 import gzip
 import io
@@ -19,6 +20,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import deb
 from check_directories import check_directory_members
+from assemble import DIAGNOSTIC_CAPTURE
 
 
 def legacy_tar(files):
@@ -42,6 +44,13 @@ class DpkgInstallTest(unittest.TestCase):
         if not shutil.which("dpkg") or not shutil.which("dpkg-deb"):
             raise RuntimeError("Real dpkg is required; this test must not silently skip")
         cls.layout = json.loads((ROOT / "tests/install-layout.json").read_text())
+        assert len(cls.layout) == 15 and len({r["path"] for r in cls.layout}) == 15
+        assert next(r for r in cls.layout if r["path"] == DIAGNOSTIC_CAPTURE)["mode"] == 0o644
+        cls.collector = (ROOT / "diagnostics/capture-runtime.sh").read_text(encoding="utf-8").encode("utf-8")
+        assert cls.collector.startswith(b"#!/bin/sh\n") and b"\r" not in cls.collector
+        cls.shell = shutil.which("sh")
+        if not cls.shell:
+            raise RuntimeError("Shell syntax validation is required; this test must not silently skip")
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="mangosuite-dpkg-")
@@ -54,6 +63,7 @@ class DpkgInstallTest(unittest.TestCase):
 
     def package(self, version, faulty=False):
         data = {r["path"]: (r.get("link", ("inert fixture " + version + "\n").encode()), r["mode"]) for r in self.layout}
+        data[DIAGNOSTIC_CAPTURE] = (self.collector, 0o644)
         control = ("Package: com.chenxun.mangosuite\nVersion: " + version + "\nArchitecture: iphoneos-arm64e\n"
                    "Maintainer: Test <test@example.invalid>\nDescription: Isolated directory unpack regression\n").encode()
         destination = self.work / (version + ".deb")
@@ -110,6 +120,18 @@ class DpkgInstallTest(unittest.TestCase):
         code, log = self.unpack(fixed)
         self.assertEqual(code, 0, log)
         self.assert_payload(expected)
+
+    def test_diagnostic_collector_installs_with_source_and_valid_shell_syntax(self):
+        package, expected = self.package("1.1.0~beta8.4.1")
+        check_directory_members(package)
+        code, log = self.unpack(package)
+        self.assertEqual(code, 0, log)
+        self.assert_payload(expected)
+        installed = self.root / DIAGNOSTIC_CAPTURE
+        self.assertEqual(installed.read_bytes(), self.collector)
+        parsed = subprocess.run([self.shell, "-n", str(installed)], capture_output=True, text=True, timeout=10)
+        self.assertEqual(parsed.returncode, 0, parsed.stdout + parsed.stderr)
+        print("PASS: actual diagnostic collector installed with explicit parent directories, exact source/mode, and valid shell syntax", flush=True)
 
     def test_upgrade_preserves_preferences(self):
         older, _ = self.package("1.0.0~alpha1")

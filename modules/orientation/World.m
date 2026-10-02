@@ -13,6 +13,7 @@
 #include <string.h>
 #include "WorldMath.h"
 #include "WorldPersistence.h"
+#import "../../src/RuntimeDiagnostics.h"
 
 static const char *Disabled="/var/mobile/Library/Preferences/MangoUpsideDownWorld.disabled";
 static Class WindowClass, PassClass, ContentClass, ContainerClass;
@@ -39,6 +40,8 @@ static char StateKey;
 @property(nonatomic) BOOL suspended;
 @property(nonatomic) double lastLog, lastSkipLog;
 @property(nonatomic,copy) NSString *lastSkip;
+@property(nonatomic,copy) NSString *diagnosticSignature, *diagnosticRestoreReason;
+@property(nonatomic) double diagnosticSampleTime, diagnosticLogTime, diagnosticRestoreTime;
 @end
 @implementation MWWorldState
 @end
@@ -115,6 +118,29 @@ static void RestoreWorld(UIView *root){
     // permanently disable the island and its gesture compensation.
     if(!ok)Log(@"RELEASE external transform preserved; waiting for valid world geometry");
 }
+static NSString *DiagnosticTransform(CGAffineTransform t) {
+    return [NSString stringWithFormat:@"(%.3f,%.3f,%.3f,%.3f,%.1f,%.1f)",t.a,t.b,t.c,t.d,t.tx,t.ty];
+}
+static void RestoreWorldReason(UIView *root, NSString *reason) {
+    // Observe the existing restore; neither its guard nor its writes change.
+    NSString *before=nil;
+    MWWorldState *state=State(root);
+    @try {
+        double now=CACurrentMediaTime();
+        if(MSDiagnosticsActive() && state.outer.applied &&
+           (![state.diagnosticRestoreReason isEqualToString:reason] || now-state.diagnosticRestoreTime>=1.0)) {
+            state.diagnosticRestoreReason=reason;state.diagnosticRestoreTime=now;
+            before=[NSString stringWithFormat:@"RESTORE reason=%@ root=%p parent=%p ownedBefore=%@ ownedAfter=%@ modelBefore=%@ matchedBefore=%d",
+                reason,(__bridge void *)root,(__bridge void *)state.parent,DiagnosticTransform(state.outer.before),
+                DiagnosticTransform(state.outer.after),state.parent ? DiagnosticTransform(state.parent.transform) : @"nil",
+                state.parent && MWNear(Math(state.parent.transform),Math(state.outer.after))];
+        }
+    } @catch (__unused NSException *exception) {}
+    RestoreWorld(root);
+    if(before) @try {
+        MSDiagnosticsLog(@"World",[before stringByAppendingFormat:@" appliedAfter=%d modelAfter=%@",state.outer.applied,state.parent ? DiagnosticTransform(state.parent.transform) : @"nil"]);
+    } @catch (__unused NSException *exception) {}
+}
 static void SetOwned(UIView *v,MWOwnedTransform *s,CGAffineTransform t){
     s.before=v.transform;s.after=t;s.applied=YES;v.transform=t;
 }
@@ -162,7 +188,7 @@ static void Discover(UIWindow *window){
 static void ApplyWorld(UIView *root){
     MWWorldState *s=State(root);UIWindow *w=root.window;
     if(s.suspended||root.superview!=w||![w isKindOfClass:WindowClass]||w.screen!=UIScreen.mainScreen)return;
-    if(s.parent!=w){RestoreWorld(root);s.parent=w;}
+    if(s.parent!=w){RestoreWorldReason(root,@"parent-changed");s.parent=w;}
     NSArray<UIView *> *contents=Contents(root);if(!contents.count){Skip(s,@"contents");return;}
     if(!CATransform3DIsAffine(w.layer.transform)||!CATransform3DIsIdentity(w.layer.sublayerTransform)){Skip(s,@"window-layer");return;}
     id<UICoordinateSpace> fixed=w.screen.fixedCoordinateSpace;
@@ -225,7 +251,7 @@ static void ApplyWorld(UIView *root){
     for(int i=0;i<3;i++)if(!isfinite(actual[i].x)||!isfinite(actual[i].y)||
         fabs(actual[i].x-(2*CGRectGetMidX(screen)-old[i].x))>.1||
         fabs(actual[i].y-(2*CGRectGetMidY(screen)-old[i].y))>.1){
-        RestoreWorld(root);s.suspended=YES;Log(@"SUSPEND post-transform verification failed");return;
+        RestoreWorldReason(root,@"post-transform-verification");s.suspended=YES;Log(@"SUSPEND post-transform verification failed");return;
     }
     s.lastSkip=nil;
     if(CACurrentMediaTime()-s.lastLog>5){s.lastLog=CACurrentMediaTime();
@@ -269,7 +295,7 @@ static void ReconcileRoot(UIView *root) {
         for(UIView *view in contents)
             for(UIView *parent=view.superview;parent && parent!=root;parent=parent.superview)
                 if([parent isKindOfClass:ContentClass]){
-                    RestoreWorld(root);Skip(state,@"nested-content");return;
+                    RestoreWorldReason(root,@"nested-content");Skip(state,@"nested-content");return;
                 }
         for(UIView *view in contents){
             MWTransform map=FixedMap(view),value=Math(view.transform);
@@ -287,24 +313,58 @@ static void ReconcileRoot(UIView *root) {
         }
         return;
     }
-    RestoreWorld(root);
+    RestoreWorldReason(root,@"world-ownership-or-basis-lost");
     ApplyWorld(root);
+}
+static void DiagnosticWorldScan(BOOL read, NSInteger decision) {
+    if(!MSDiagnosticsActive())return;
+    @try {
+        double now=CACurrentMediaTime();unsigned sampled=0;
+        for(UIView *root in Roots.allObjects) {
+            if(sampled++>=8)break;
+            MWWorldState *state=State(root);
+            if(!state || now-state.diagnosticSampleTime<1.0)continue;
+            state.diagnosticSampleTime=now;
+            NSMutableString *body=[NSMutableString stringWithFormat:
+                @"STATE enabled=%d decisionRead=%d decisionResolved=%ld sampleMango=%ld sampleSystem=%ld roots=%lu rootsCap=8 depth=%u busy=%d applied=%d suspended=%d keepsWorldSample=%d parent=%p ownedBefore=%@ ownedAfter=%@ innerCount=%lu lastSkip=%@ pixels-visible=unknown\nroot %@\nwindow %@",
+                Enabled,read,(long)decision,(long)B8MangoOrientation(),(long)B8SystemOrientation(),(unsigned long)Roots.count,
+                Depth,Busy,state.outer.applied,state.suspended,KeepsWorld(root,state,root.window),(__bridge void *)state.parent,
+                DiagnosticTransform(state.outer.before),DiagnosticTransform(state.outer.after),(unsigned long)state.inner.count,
+                state.lastSkip ?: @"none",MSDiagnosticsViewLine(root),MSDiagnosticsViewLine(root.window)];
+            unsigned contents=0;
+            for(UIView *view in state.inner.keyEnumerator) {
+                if(contents++>=4)break;
+                MWOwnedTransform *owned=[state.inner objectForKey:view];
+                NSString *line=[NSString stringWithFormat:@"\ncontent applied=%d matched=%d before=%@ after=%@ %@",
+                    owned.applied,MWNear(Math(view.transform),Math(owned.after)),DiagnosticTransform(owned.before),
+                    DiagnosticTransform(owned.after),MSDiagnosticsViewLine(view)];
+                if(body.length+line.length>7500){[body appendString:@"\n[content-budget-truncated]"];break;}
+                [body appendString:line];
+            }
+            [body appendFormat:@"\ncontentCap=4 contentTotal=%lu",(unsigned long)state.inner.count];
+            if([state.diagnosticSignature isEqualToString:body] && now-state.diagnosticLogTime<10.0)continue;
+            state.diagnosticSignature=body;state.diagnosticLogTime=now;
+            MSDiagnosticsLog(@"World",body);
+        }
+    } @catch (__unused NSException *exception) {}
 }
 static void Reconcile(void) {
     if (Busy || Depth || !NSThread.isMainThread) return;
     Busy = YES;
+    __block BOOL decisionRead=NO;
+    __block NSInteger decision=0;
     @try {
         [UIView performWithoutAnimation:^{
             if (Enabled && B8Disabled(Disabled)) { Enabled = NO; Log(@"DISABLED restored owned transforms"); }
-            if (!Enabled || Orientation() != UIInterfaceOrientationPortraitUpsideDown) {
-                for (UIView *root in Roots.allObjects) RestoreWorld(root);
+            if (!Enabled || (decisionRead=YES, decision=Orientation()) != UIInterfaceOrientationPortraitUpsideDown) {
+                for (UIView *root in Roots.allObjects) RestoreWorldReason(root,!Enabled ? @"disabled" : @"resolved-orientation-not-2");
                 return;
             }
             for (UIWindow *w in ExistingWindows()) Discover(w);
             for (UIWindow *w in Windows.allObjects) Discover(w);
             for (UIView *root in Roots.allObjects) ReconcileRoot(root);
         }];
-    } @finally { Busy = NO; }
+    } @finally { Busy = NO; DiagnosticWorldScan(decisionRead,decision); }
 }
 static BOOL Relevant(UIView *v){
     if([v isKindOfClass:WindowClass])return YES;
@@ -314,7 +374,7 @@ static BOOL Relevant(UIView *v){
 static BOOL Begin(UIView *v){
     if(Busy||![NSThread isMainThread]||!Relevant(v))return NO;
     if(Depth++==0){Busy=YES;
-        @try{[UIView performWithoutAnimation:^{for(UIView *root in Roots.allObjects)RestoreWorld(root);}];}
+        @try{[UIView performWithoutAnimation:^{for(UIView *root in Roots.allObjects)RestoreWorldReason(root,@"geometry-setter");}];}
         @finally{Busy=NO;}}
     return YES;
 }
@@ -444,8 +504,13 @@ static void HookMangoPan(id controller, SEL selector, UIPanGestureRecognizer *ge
     }
     UIView *view = gesture.view;
     MWTransform map=FixedMap(view.window);
-    if(!MSB8PanNeedsCorrection(B8MangoOrientation(),OwnsGestureWindow(view),
-                              MWInvertedBasis(map.a,map.d,map.c,map.b))){
+    NSInteger raw=0;BOOL owned=NO,inverted=NO;
+    BOOL correction=MSB8PanNeedsCorrection(raw=B8MangoOrientation(),owned=OwnsGestureWindow(view),
+                              inverted=MWInvertedBasis(map.a,map.d,map.c,map.b));
+    if(MSDiagnosticsActive()) @try {
+        MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN ended view=%p window=%p actualMango=%ld actualOwned=%d actualInverted=%d correction=%d",(__bridge void *)view,(__bridge void *)view.window,(long)raw,owned,inverted,correction]);
+    } @catch (__unused NSException *exception) {}
+    if(!correction){
         OriginalMangoPan(controller,selector,gesture);return;
     }
     CGPoint before = [gesture translationInView:view];

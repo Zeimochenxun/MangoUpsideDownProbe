@@ -43,6 +43,7 @@ for item in tree["tree"]:
     relevant = name.startswith(("src/", "prefs/", "modules/orientation/", "modules/visual/MangoIdleIsland/"))
     relevant = relevant and pathlib.PurePosixPath(name).suffix in (".m", ".h", ".plist")
     relevant = relevant or name in ("Makefile", "control", "AMangoSuiteLoader.plist", "beta8-compatibility.json")
+    relevant = relevant or name == "diagnostics/capture-runtime.sh"
     if not relevant:
         continue
     # Publisher sends UTF-8 text after universal-newline normalization.
@@ -51,6 +52,7 @@ for item in tree["tree"]:
     assert git_hash == item["sha"], "Production source changed after the verified build: " + name
     compiled_sources[name] = hashlib.sha256(blob).hexdigest()
 assert compiled_sources
+assert "diagnostics/capture-runtime.sh" in compiled_sources, "Collector must belong to the verified build source"
 passes = set()
 logs = archive_bytes(f"{BASE}/actions/runs/{RUN}/logs", token)
 with zipfile.ZipFile(io.BytesIO(logs)) as archive:
@@ -72,6 +74,7 @@ summary = {
     "finalPackageVerification": proof, "temporaryPrivateBuildInputRemoved": True,
     "nativePreferenceHistoricalUserFeedback": "Original Mango Beta8 with the independent preference tool; not this suite build.",
     "completeSuiteDeviceTested": False, "suiteDeviceVerificationStatus": "pending",
+    "diagnosticBuild": True, "repairBehaviorChanged": False,
     "device": "iPhone 13 mini / iOS 16.5 / Dopamine RootHide / authorized Mango 1.0-Beta8-1",
 }
 output = ROOT / "delivery" / VERSION.replace("~", "-")
@@ -83,6 +86,9 @@ shutil.copy2(PACKAGE, output / PACKAGE.name)
 shutil.copy2(ROOT / "ACCEPTANCE.md", output / "真机验收.md")
 shutil.copy2(ROOT / "REGRESSIONS.md", output / "REGRESSIONS.md")
 shutil.copy2(ROOT / "modules/orientation/XIAOMANG.md", output / "小芒倒置适配.md")
+shutil.copy2(ROOT / "diagnostics/RUNTIME.md", output / "诊断说明.md")
+(output / "capture-runtime.sh").write_bytes(
+    (ROOT / "diagnostics/capture-runtime.sh").read_text(encoding="utf-8").encode("utf-8"))
 shutil.copy2(ROOT / "packages/verification.json", output / "package-verification.json")
 shutil.copy2(PACKAGE.with_suffix(".manifest.json"), output / "module-manifest.json")
 (output / "build-validation.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -95,7 +101,7 @@ with zipfile.ZipFile(source_archive, "w", zipfile.ZIP_DEFLATED) as archive:
         if not path.is_file():
             continue
         assert path.suffix not in (".metal", ".dylib", ".deb", ".air", ".metallib", ".zip")
-        assert not name.startswith(("inputs/", "packages/", "build-artifacts/", "delivery/"))
+        assert not name.startswith(("inputs/", "packages/", "build-artifacts/", "build-info/", "delivery/"))
         archive.write(path, "MangoSuiteBeta8/" + name)
     archive.write(ROOT / "inputs/sources.json", "MangoSuiteBeta8/inputs/sources.json")
 with zipfile.ZipFile(source_archive) as archive:
