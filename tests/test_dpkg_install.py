@@ -103,7 +103,12 @@ class DpkgInstallTest(unittest.TestCase):
         code, log = self.unpack(package)
         self.assertNotEqual(code, 0, log)
         self.assertIn("No such file or directory", log)
-        self.assertIn("Library/MangoSuite/Modules", log)
+        # dpkg stops at the first sorted payload, now the diagnostic collector.
+        # Require its exact failed create path; the missing-parent negative
+        # control still proves the actual unpack failure, not just any error.
+        failed_target = str(self.root / DIAGNOSTIC_CAPTURE) + ".dpkg-new"
+        self.assertIn("unable to create '" + failed_target + "'", log)
+        self.assertIn("while processing './" + DIAGNOSTIC_CAPTURE + "'", log)
         print("REPRODUCED: old archive fails real dpkg with missing parent directory", flush=True)
 
     def test_fixed_archive_installs_on_empty_root(self):

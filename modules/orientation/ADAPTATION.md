@@ -1,6 +1,6 @@
 # Beta8 方向模块适配
 
-整合包版本：`1.1.0~beta8.4`，完整文件：`MangoSuite-1.1.0-Beta8.4-RootHide-arm64e.deb`。本次回归修正的 CI 与成品检查已通过，手机验证仍待完成。
+整合包版本：`1.1.0~beta8.4.1`（Diagnostics），完整文件：`MangoSuite-1.1.0-Beta8.4.1-Diagnostics-RootHide-arm64e.deb`。本版保留 Beta8.4 的方向／放置／手势功能语义，仅增加有限只读诊断及 collector；新包尚未在手机验证，不宣称新的修复效果。
 
 适用基线是用户提供的 RootHide Mango `1.0-Beta8-1`，iPhone 13 mini、iOS 16.5。用户已经在正常授权的原版上验证外部写入 `LeXiang.UpsideDown.Enabled` 可以开启原生倒置。本目录的方向模块不写这个偏好，不修改 Mango 文件或授权。
 
@@ -28,12 +28,13 @@ Beta8 的 resize-pan 仍将方向 1/2 放到相同 portrait 分支，Ended 时�
 - `XiaoMang.m`：Beta8.2 新增，编入同一个 World target，与系统灵动岛共用“倒置方向与小芒修复”开关和 World 停用标记。只处理经 Panda 身份和方法 ABI 校验的 `XMFloatingWindow` / `XMPortraitVC` 组合；覆盖悬浮球、根面板、独立通知泡／卡片及相同类提示窗。小窗口也围绕物理屏幕中心变换；保留原生局部布局、手势和空白 hit-test。补偿倒置时，外层几何直接落在最终位置，保留独立子视图和透明度动画；不承诺所有原生窗口位置动画完全保留。详细范围与待验证的动画衔接见 [XIAOMANG.md](XIAOMANG.md)。
 - `Split.m`：重新实现旧 Split 的纯 UIWindow 分屏作用范围。先识别 Mango 子视图、全屏形状、中心 anchor 和实际 coordinate-space basis；窗口已经倒置时不改。使用关联状态记录自己写入的 before/after，只恢复确实由自己写过且当前仍匹配的变换。原生或其他布局写过的半转不被旧版“见到 π 就清回 identity”的逻辑覆盖。
 - **Beta8.4：** `SplitReconcile.h` 恢复 Beta8.2 的首次施加后镜像验证与自己拥有矩阵的稳定持有条件；不把施加后暂时改变的 eligibility 当成首次施加失败。保留经原镜像／ABI 校验的启动器旋转与布局回调、外部 reset 同次调和和验证失败后几何变化恢复。`WorldPersistence.h` 的 window/root 基底检查仅继续用于 World；纯布局事务仍保留正确的动画 model。外部替换先释放旧归属，满足完整几何守卫后才允许重新修正。
+- **Beta8.4.1 Diagnostics：** 保留上述实现边界，Idle、World、Split 只在既有决策完成后附加有限观察。新诊断会话每模块最多 20 分钟，新日志每模块约 256 KiB；采样模型／presentation 几何、透明度、裁剪及既有方向决策，不读媒体标题、封面数据或授权，不增加新的全局 hook、修复 timer 或变换策略。新增 collector 只立即保存限定日志，操作见 [运行时诊断说明](../../diagnostics/RUNTIME.md)。
 - `OrientationPolicy.h` 在 Mango cached portrait/unknown 与系统状态栏倒置读数不一致时补充方向信号，不永久锁定倒置，不修改 Mango getter。手势补偿只接受 Mango 的 portrait 1/2 分支，并要求 World 真正拥有当前物理倒置的 window/root；原生或其他来源的半转不被当作本插件所有权。
 - `WorldMath.h`、`Geometry.h`：共享实际数学运算。`MWOwns` 明确区分当前矩阵相同与真正拥有该矩阵。
 - `XiaoMangGeometry.h`、`XiaoMangMutation.h`：分别计算不同 scene 父坐标下的物理屏幕半转，以及同一窗口嵌套几何 setter 的单次恢复／重算事务。已经由原生倒置的实际 basis 不再翻转；恢复只针对仍匹配本插件记录的变换。
 - `XiaoMangAnimation.h`：仅清理当前被镜像或本插件拥有的窗口外层 `position`、`bounds`、`transform` 属性动画及纯几何动画组，避免先前外层动画的 presentation 端点与新镜像模型不一致。透明度、混合动画组和所有子层动画保留。
 
-所有回调在主线程上改变 UIKit 几何。停用标记兼容原路径和 RootHide 映射路径。载入阶段允许 20 秒等待原 Mango 镜像/类注册，运行期间不卸载已挂钩的方法。
+原有修复回调在主线程上改变 UIKit 几何，新增诊断回调只读观察。停用标记兼容原路径和 RootHide 映射路径。载入阶段允许 20 秒等待原 Mango 镜像/类注册，运行期间不卸载已挂钩的方法。
 
 ## 构建与验证
 
@@ -47,7 +48,15 @@ Split target files：`Split.m`。
 
 `tests/xiaomang_geometry_test.c` 直接调用 `XiaoMangGeometry.h`，使用独立的正向坐标模型验证 260×260 主窗、偏中心通知小窗、父 scene 缩放／平移和旋转补偿、物理三点／角点镜像、布局更新、已有原生倒置与无效输入；局部拖动方向检查只验证几何模型，不模拟真实 UIKit 手势。`tests/xiaomang_mutation_test.m` 直接调用 `XiaoMangMutation.h`，检查原回调读取原生基线、嵌套 setter 仅外层恢复／重算，以及恢复、原回调、完成回调异常后计数释放。`tests/xiaomang_animation_test.m` 直接调用 `XiaoMangAnimation.h`，使用真实 QuartzCore layer 检查外层几何属性与纯几何组的清理，同时保留 fade、混合组和子层 fly-in。
 
-Beta8.4 恢复 Split 的 Beta8.2 首次施加语义，保留作用域内的原生启动器回调与外部 reset 同回调恢复；World 和小芒 helper 继续回归。本次 CI [37058736152](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/37058736152) 的全部检查与 arm64e 构建成功，源码 commit 为 `3f6f752ebc7d49616816983174c30a84a9db6d17`。完整包 `tests/check_suite.py` 为 PASS，确认 7 个镜像、14 个载荷路径、helper 精确匹配、签名代码页、RootHide 依赖及唯一入口；真实 dpkg 惰性载荷安装／失败重试／升级保留配置检查通过。完整包 SHA256 为 `68a88575da855d688468e10ff4f1e6e222b96356f67773ed894bb935a456df86`，本次记录导出至 `delivery/1.1.0-beta8.4`。Beta8.3 已有实测回归，因此旧版编译成功不能当成此次效果证明；这些 helper 检查也不模拟 UIKit 真机行为。
+Beta8.4 恢复 Split 的 Beta8.2 首次施加语义，保留作用域内的原生启动器回调与外部 reset 同回调恢复；Beta8.4.1 沿用这些功能，World 和小芒 helper 的模型检查也不能代替 UIKit 真机行为。本次 CI：`TODO_BETA841_CI_RUN`；源码 commit：`TODO_BETA841_SOURCE_SHA`；完整包 SHA256：`TODO_BETA841_PACKAGE_SHA256`。待本次构建及包检查后填写已验证值。目标完整包为 7 个镜像、15 个载荷路径（新增 collector），交付目录 `delivery/1.1.0-beta8.4.1`。
+
+## 用户反馈与现有运行日志
+
+用户已安装 Beta8.4 并完整重新启动用户空间，反馈媒体播放时岛仍在但没有媒体内容，分屏启动器偶发回正，桌面与锁屏仍倒置。不能继续把重启不足当作当前原因，也不能将首次施加条件的源码修正等同于偶发回正已经解决。
+
+`build-info/runtime-20261003-044452` 确认 Suite `1.1.0~beta8.4`／Mango `1.0-Beta8-1`。当前 World 记录在 shell 候选中；rootfs World 副本是旧历史，其 `NO HOOKS` 不代表当前会话。当前 World 的 `contents=1 canceled=1` 与 Idle 的原生 element/glass activity 几乎同秒（World 2001 年参考时间加 `978307200` 转为 Unix）。Idle 补底交接存在，不能证明标题、封面像素可见。
+
+归档未填写复现时刻或“本次已复现”标记；没有与启动器回正对应的退出记录。原日志也没有媒体子树最终几何与裁剪证据。因此 Beta8.4.1 只增加有限观察，不根据这些记录先认定 Content、placement 或某个 setter 已是确认的根因。
 
 ## 证据与来源
 
@@ -55,4 +64,4 @@ Beta8.4 恢复 Split 的 Beta8.2 首次施加语义，保留作用域内的原�
 
 `evidence/` 保存原输入二进制摘要、原 1.2.0 反汇编、Beta8 ABI 与函数反汇编。`split-old/` 和 `world-old/` 是只读分析副本；它们不是新目标的编译输入。CI/发布只应采用本节列出的成品源码。
 
-静态检查可以确认作用范围和调用条件，无法独立证明真机显示、触摸、动画和旋转锁定全部正常。本轮没有连接或部署手机。
+静态检查可以确认作用范围和调用条件，无法独立证明真机显示、触摸、动画和旋转锁定全部正常。已收到 Beta8.4 的手机反馈与历史日志快照；本轮 Beta8.4.1 Diagnostics 未部署到手机，未确认修复这些现象。

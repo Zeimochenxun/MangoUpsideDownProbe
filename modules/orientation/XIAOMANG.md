@@ -1,8 +1,8 @@
 # 小芒同学 Beta8 倒置适配
 
-版本：`1.1.0~beta8.4`。完整安装包：`MangoSuite-1.1.0-Beta8.4-RootHide-arm64e.deb`。目标是 iPhone 13 mini、iOS 16.5、Dopamine RootHide，以及已经正常授权的 Mango `1.0-Beta8-1`。
+版本：`1.1.0~beta8.4.1`（Diagnostics）。完整安装包：`MangoSuite-1.1.0-Beta8.4.1-Diagnostics-RootHide-arm64e.deb`。目标是 iPhone 13 mini、iOS 16.5、Dopamine RootHide，以及已经正常授权的 Mango `1.0-Beta8-1`。
 
-当前状态：保留 Beta8.2 的小芒几何和动画实现，沿用 Beta8.4 的共享方向策略。本次 CI、arm64e 构建和完整包检查已通过。**完整整合包与小芒适配尚未在手机上实测。** 之前原生倒置偏好工具已经生效的反馈，不能代替小芒窗口的显示和交互验收。
+当前状态：保留 Beta8.2 的小芒几何和动画实现，沿用 Beta8.4 的共享方向策略。Beta8.4.1 仅增加有限只读日志与 collector，不新增小芒修复行为。**新诊断包尚未在手机验证，本轮也没有小芒专项通过证据。** 用户已有 Beta8.4 完整用户空间重启后的媒体／启动器问题反馈；这些反馈及原生倒置偏好工具此前生效的结果，不能代替小芒窗口的显示和交互验收。
 
 ## 范围与开关
 
@@ -36,11 +36,15 @@
 - `tests/xiaomang_geometry_test.c` 调用生产几何 helper，通过独立的正向坐标模型检查主窗、偏中心通知窗、scene 缩放／平移／旋转补偿、三点和角点物理镜像、重布局以及无效／已有倒置输入。
 - `tests/xiaomang_mutation_test.m` 调用生产事务 helper，检查原函数看到真实基线、嵌套只由外层恢复／完成，及各阶段异常后计数释放。
 - `tests/xiaomang_animation_test.m` 调用生产动画清理 helper，在真实 QuartzCore layer 上检查外层几何动画与纯几何组清理，保留 fade、混合组和子层 fly-in。
-- 三项小芒 helper 已在本次 Beta8.4 CI [37058736152](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/37058736152) 执行通过。它们不模拟 iPhone 的实际触摸、窗口分发和 Core Animation 时序，不能替代手机验证。
-- 本次 CI [37058736152](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/37058736152) 的全部检查与 arm64e 构建成功，源码 commit 为 `3f6f752ebc7d49616816983174c30a84a9db6d17`。完整包 `tests/check_suite.py` 为 PASS，确认 7 个镜像、14 个载荷路径、helper 精确匹配、签名代码页、RootHide 依赖及唯一入口；真实 dpkg 惰性载荷安装／失败重试／升级保留配置检查通过。完整包 SHA256 为 `68a88575da855d688468e10ff4f1e6e222b96356f67773ed894bb935a456df86`，本次记录导出至 `delivery/1.1.0-beta8.4`。
+- 三项小芒 helper 的历史 Beta8.4 CI [37058736152](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/37058736152) 已通过；这不是本次诊断包的构建记录。它们不模拟 iPhone 的实际触摸、窗口分发和 Core Animation 时序，不能替代手机验证。
+- Beta8.4.1 本次 CI：`TODO_BETA841_CI_RUN`；源码 commit：`TODO_BETA841_SOURCE_SHA`；完整包 SHA256：`TODO_BETA841_PACKAGE_SHA256`。待本次构建与完整包检查后填写已验证值。目标成品为 7 个镜像、15 个载荷路径（新增 collector），交付目录 `delivery/1.1.0-beta8.4.1`。
 - 本次没有改动 AdaptiveColor 或最终 shader，复用 Beta8.1 CI [36913456075](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/36913456075) 的实际 Apple Metal 编译证据，不能称为本次重新编译。
 
 ## 最少真机检查
+
+Beta8.4 已完整用户空间重启后的反馈为岛还在但没有媒体内容、分屏启动器偶发回正，桌面与锁屏仍倒置。现有 shell World 日志是当前会话，rootfs World 副本是旧历史；Idle 原生 element/glass 交接存在，但不能证明标题、封面像素可见，归档也没有故障复现标记。这些记录没有确认小芒几何或动画是根因。
+
+诊断版三个模块的新会话最多记录 20 分钟，新日志每模块约 256 KiB，只读观察既有决策和视图几何、透明度、裁剪；collector 立即保存限定日志，不改变小芒窗口行为，不读取媒体标题、封面数据或授权。针对已报告媒体与分屏现象的采集顺序见 [运行时诊断说明](../../diagnostics/RUNTIME.md)。本版不要求重复未改变且已有通过证据的场景；下列小芒项目保持原验收边界。
 
 完整包安装后重新启动用户空间，启用原生倒置与“倒置方向与小芒修复”。以下项目均待测试：
 

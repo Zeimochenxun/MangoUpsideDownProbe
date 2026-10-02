@@ -1,8 +1,8 @@
 # Mango 整合补丁 Beta8
 
-版本：`1.1.0~beta8.4`。完整安装包：`MangoSuite-1.1.0-Beta8.4-RootHide-arm64e.deb`。
+版本：`1.1.0~beta8.4.1`（Diagnostics）。完整安装包：`MangoSuite-1.1.0-Beta8.4.1-Diagnostics-RootHide-arm64e.deb`。
 
-当前 Beta8.4 状态：收窄媒体玻璃交接条件并恢复分屏首次倒置的旧版施加语义。本次 CI、arm64e 构建和完整包检查已通过，手机效果待测。Beta8.3 已有用户报告的播放消失及启动器不倒置回归，详见 [REGRESSIONS.md](REGRESSIONS.md)。
+当前 Beta8.4.1 是有限只读诊断版，保留 Beta8.4 的功能语义，增加运行时日志与采集脚本。用户已安装 Beta8.4 并完整重新启动用户空间：播放时岛还在但没有媒体内容，分屏启动器偶发回正，桌面与锁屏仍倒置。现有日志确认原生 element/glass 交接存在，不能证明标题、封面像素可见。本版不宣称已修复这些问题，也尚未在手机验证，详见 [REGRESSIONS.md](REGRESSIONS.md)。
 
 一个安装包、一个“设置 → Mango 整合”入口，提供原生屏幕倒置开关及四项整合修复。需要已经正常授权的 **Mango 1.0-Beta8-1**；不包含 Mango 主插件。
 
@@ -10,7 +10,7 @@
 
 ## 安装与使用
 
-1. 使用 Sileo 等安装完整 `MangoSuite-1.1.0-Beta8.4-RootHide-arm64e.deb`。可覆盖旧 MangoSuite；包管理器会替换旧独立修复包和之前的独立倒置偏好工具。确认安装操作保留 **Mango 主插件**，不要安装构建用的 helper 中间包。
+1. 使用 Sileo 等安装完整 `MangoSuite-1.1.0-Beta8.4.1-Diagnostics-RootHide-arm64e.deb`。可覆盖旧 MangoSuite；包管理器会替换旧独立修复包和之前的独立倒置偏好工具。确认安装操作保留 **Mango 主插件**，不要安装构建用的 helper 中间包。
 2. 安装完成后，在多巴胺中执行一次 **重新启动用户空间**。
 3. 打开 **设置 → Mango 整合**，按需调整开关和两类参数。
 
@@ -39,9 +39,10 @@
 
 ## 本次适配内容
 
+- **Beta8.4.1 Diagnostics：** 保留下列修复与设置行为，仅增加 Idle、World、Split 的有限只读诊断和一个日志 collector。每个模块的新诊断会话最多 20 分钟，新日志每模块约 256 KiB；只记录现有布局／方向决策和视图几何、透明度、裁剪状态，不读取媒体标题、封面数据或授权。采集脚本立即复制限定日志并退出，不改变偏好、方向或进程；操作见 [运行时诊断说明](diagnostics/RUNTIME.md)。诊断数据用于确认现象，不代表修复已生效。
 - **本版从源码构建加载器、Idle、World、Split 和统一设置页。** 延续 Beta8 模块身份与方法校验，原 Mango 文件与授权检查保持原有机制。
 - **Beta8.4 媒体交接修正：** 删除新增的全局播放查询与 MRU 容器识别，恢复 Beta8.2 对原生 `SAUIElementView` 和 Mango 玻璃的 presentation 透明度交接。播放状态或空白媒体容器不再撤掉唯一补底；保留稳定几何减少重复 setter 的优化。该修正不创建原生媒体标题、封面或 activity，此前媒体内容缺失的根因仍待确认。
-- **Beta8.4 分屏回归修正：** 首次施加恢复 Beta8.2 的坐标验证条件，不在施加后用原本针对施加前的 eligibility 再否决；匹配自己写入的稳定变换时保留它。原生启动器旋转／布局后的调和及同回调外部 reset 恢复继续保留。World 稳定布局和实际拥有窗口的手势补偿沿用，具体手机效果待测。
+- **Beta8.4 分屏回归修正：** 首次施加恢复 Beta8.2 的坐标验证条件，不在施加后用原本针对施加前的 eligibility 再否决；匹配自己写入的稳定变换时保留它。原生启动器旋转／布局后的调和及同回调外部 reset 恢复继续保留。World 稳定布局和实际拥有窗口的手势补偿沿用；用户完整重启后的反馈仍有启动器偶发回正，不能将上述实现视作手机问题已经解决。
 - Idle 识别 Beta8 的 MangoPanda/MangoHello 原生玻璃，保留紧凑尺寸与 presentation 透明度交接；缓存偏好、合并重载，减少重复读取和诊断日志。
 - World 与 Split 针对 Beta8 重建方向、放置与手势修复，维持各自的系统窗口／分屏窗口作用范围。
 - **Beta8.2 将小芒适配加入现有 World 模块。** 同一个“倒置方向与小芒修复”开关管理系统灵动岛与小芒，没有新增模块或开关。适配覆盖悬浮球、根面板、独立通知泡／卡片以及使用相同原生窗口类的提示窗；按物理屏幕中心同时校正窗口方向和位置，保持 Mango 的局部布局、原始手势与空白透传。实现边界与待验证项见 [XIAOMANG.md](modules/orientation/XIAOMANG.md)。
@@ -54,22 +55,24 @@
 
 用户已在上述设备上确认：**原版 Beta8 配合独立偏好工具，原生倒置确实生效。** 本版整合页沿用同一原生偏好键；这项反馈不能代替此次整合包的完整真机验收。
 
-既有证据已核对 Beta8 方法 ABI、模块身份、原 AdaptiveColor 的四项精确 shader 替换、参数默认值与通知刷新链。Beta8.3 的编译与测试通过未能防止真机回归，不能作为本次效果证明。本次 CI [37058736152](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/37058736152) 的全部检查与 arm64e 构建成功，源码 commit 为 `3f6f752ebc7d49616816983174c30a84a9db6d17`。完整包 `tests/check_suite.py` 为 PASS，确认 7 个镜像、14 个载荷路径、helper 精确匹配、签名代码页、RootHide 依赖及唯一入口；真实 dpkg 惰性载荷安装／失败重试／升级保留配置检查通过。完整包 SHA256 为 `68a88575da855d688468e10ff4f1e6e222b96356f67773ed894bb935a456df86`，本次记录导出至 `delivery/1.1.0-beta8.4`。
+既有证据已核对 Beta8 方法 ABI、模块身份、原 AdaptiveColor 的四项精确 shader 替换、参数默认值与通知刷新链。Beta8.3 的编译与测试通过未能防止真机回归，不能作为效果证明。Beta8.4 的用户实测及 `build-info/runtime-20261003-044452` 日志已收到；World 的 shell 日志属于当前会话，rootfs 副本是旧历史，不能把其中旧 `NO HOOKS` 当作当前状态。归档没有填入复现时间或“本次已复现”标记；媒体活动日志不等于标题、封面已显示。
+
+Beta8.4.1 本次 CI：`TODO_BETA841_CI_RUN`；源码 commit：`TODO_BETA841_SOURCE_SHA`；完整包 SHA256：`TODO_BETA841_PACKAGE_SHA256`。这些值待本次构建及包检查后填写。目标完整包包含 7 个镜像、15 个载荷路径（新增 collector），交付目录为 `delivery/1.1.0-beta8.4.1`；旧版交付证据继续保留。
 
 | 检查 | 验证内容 | 当前状态 |
 |---|---|---|
-| 加载策略 | 512 组开关、应急标记与旧冲突组合 | 本次 CI 通过 |
-| 实际设置／存储代码 | 32 组整合选择、旧配置迁移、保存失败与损坏数据保留、原生开关独立性 | 本次 CI 通过 |
-| 实际兼容解析器 | 正常及畸形 Mach-O UUID 输入 | 本次 CI 通过 |
-| 实际 Idle helper | presentation 淡出、紧凑返场、展开排除、媒体活动状态与异常尺寸；旧回归负对照 | 本次 CI 通过 |
-| 实际方向 helper | World 数学、放置与手势纠正；正向／倒置选择及回正恢复 | 本次 CI 通过 |
-| 分屏方向刷新 | 已有分屏在方向变化后的旋转、放置与拖动恢复 | 本次 CI 通过 |
-| 三项小芒 helper | 偏中心小窗和 scene 坐标映射、重布局、原生倒置防双转、嵌套 setter 和异常恢复、外层几何动画定向清理 | 本次 CI 通过 |
+| 加载策略 | 512 组开关、应急标记与旧冲突组合 | 待本次 CI |
+| 实际设置／存储代码 | 32 组整合选择、旧配置迁移、保存失败与损坏数据保留、原生开关独立性 | 待本次 CI |
+| 实际兼容解析器 | 正常及畸形 Mach-O UUID 输入 | 待本次 CI |
+| 实际 Idle helper | presentation 淡出、紧凑返场、展开排除、媒体活动状态与异常尺寸；旧回归负对照 | 待本次 CI |
+| 实际方向 helper | World 数学、放置与手势纠正；正向／倒置选择及回正恢复 | 待本次 CI |
+| 分屏方向刷新 | 已有分屏在方向变化后的旋转、放置与拖动恢复 | 待本次 CI |
+| 三项小芒 helper | 偏中心小窗和 scene 坐标映射、重布局、原生倒置防双转、嵌套 setter 和异常恢复、外层几何动画定向清理 | 待本次 CI |
 | Apple Metal 编译 | 未改动的 Beta8 最终 shader | 复用 36913456075 的实际 Apple Metal 编译证据；本次不重新编译 |
-| 编译产物与最终安装包 | arm64e、五个新镜像及两个保留镜像代码页签名、14 个载荷路径、helper 精确匹配、唯一入口、RootHide 依赖链接与冲突声明 | 本次构建通过；完整包检查 PASS |
-| 真实 dpkg 隔离安装 | 与最终包一致的 14 个路径及权限、首次安装、失败重试与升级保留配置；使用惰性测试载荷 | 本次 CI 通过 |
+| 编译产物与最终安装包 | arm64e、五个源码构建镜像及两个保留镜像代码页签名、15 个载荷路径、helper 精确匹配、collector、唯一入口、RootHide 依赖链接与冲突声明 | 待本次构建及完整包检查 |
+| 真实 dpkg 隔离安装 | 与最终包一致的 15 个路径及权限、首次安装、失败重试与升级保留配置；使用惰性测试载荷 | 待本次 CI |
 
-这些检查不模拟 iPhone 的实际显示、触摸和动画时序。**Beta8.4 完整 MangoSuite 及本次修复均未真机验证**，需按 `ACCEPTANCE.md` 检查媒体显示、回正恢复、方向变化及既有小芒交互；不能仅凭编译通过宣称所有视觉场景完全适配。
+这些检查不模拟 iPhone 的实际显示、触摸和动画时序。**Beta8.4.1 Diagnostics 包尚未真机验证，媒体缺失与启动器回正也未确认修复。** 新包用于在已有失败场景取得限定证据，按 [ACCEPTANCE.md](ACCEPTANCE.md) 记录观察及 [诊断步骤](diagnostics/RUNTIME.md) 采集；不能仅凭编译或日志中的“activity”宣称所有视觉场景完全适配。
 
 ## 停用与恢复
 
@@ -81,16 +84,16 @@
 
 macOS CI 使用 RootHide Theos、固定校验的 iOS 16.5 SDK 与 arm64e 工具链，构建加载器、Idle、World（包含小芒）、Split 和统一设置页。原 AdaptiveColor 二进制及 UI 在本地组包时加入；Mango 原版二进制与完整 shader 不进入公开构建仓库。
 
-`helper` 为构建中间产物，不能代替完整安装包。请仅向设备安装交付的 `MangoSuite-1.1.0-Beta8.4-RootHide-arm64e.deb`。
+`helper` 为构建中间产物，不能代替完整安装包。请仅向设备安装交付的 `MangoSuite-1.1.0-Beta8.4.1-Diagnostics-RootHide-arm64e.deb`。
 
 重建三个模块和设置页后，完整组包使用：
 
 ```text
 python tools/assemble.py --helper-deb <本次helper.deb> --source-commit <本次构建的40位commit>
-python tests/check_suite.py packages/MangoSuite-1.1.0-Beta8.4-RootHide-arm64e.deb --helper-deb <本次helper.deb>
+python tests/check_suite.py packages/MangoSuite-1.1.0-Beta8.4.1-Diagnostics-RootHide-arm64e.deb --helper-deb <本次helper.deb>
 python tools/export_delivery.py --run <本次成功的CI编号>
 ```
 
-完整 shader 曾作为 Beta8.1 Metal 验证的临时私有输入传入，远端临时输入已删除。Beta8.4 没有改动 shader，复用该次编译证据；完整 shader 不进入成品或源码归档。
+完整 shader 曾作为 Beta8.1 Metal 验证的临时私有输入传入，远端临时输入已删除。Beta8.4.1 没有改动 shader，复用该次编译证据；完整 shader 不进入成品或源码归档。
 
-交付导出到 `delivery/1.1.0-beta8.4`，保留旧版交付目录。成品、manifest、SHA256、包验证报告和本次 CI 证据在同一目录中；objsee 抓取归档不进入成品或源码归档。
+本次交付目标为 `delivery/1.1.0-beta8.4.1`，保留旧版交付目录。成品、manifest、SHA256、包验证报告和本次 CI 证据应在同一目录中；既有 objsee 抓取归档不进入成品或源码归档，诊断版不使用 objsee。
