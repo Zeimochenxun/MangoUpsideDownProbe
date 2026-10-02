@@ -12,11 +12,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 DYNAMIC = "Library/MobileSubstrate/DynamicLibraries/"
 MODULES = "Library/MangoSuite/Modules/"
 PREFS = "Library/PreferenceBundles/MangoSuitePrefs.bundle/"
-VERSION = "1.1.0~beta8.1"
-OUTPUT_NAME = "MangoSuite-1.1.0-Beta8-RootHide-arm64e.deb"
+VERSION = "1.1.0~beta8.2"
+OUTPUT_NAME = "MangoSuite-1.1.0-Beta8.2-RootHide-arm64e.deb"
 COMPILED = {
     "IdleIsland": ("MangoIdleIsland", "1.1.9.3~beta8.1"),
-    "UpsideDownWorld": ("MangoUpsideDownWorld", "1.3.0~beta8.1"),
+    "UpsideDownWorld": ("MangoUpsideDownWorld", "1.3.1~beta8.2"),
     "SplitUpsideDownFix": ("MangoSplitUpsideDownFix", "0.2.0~beta8.1"),
 }
 NATIVE_PREFERENCE = {
@@ -164,8 +164,8 @@ def assemble(helper_path, output, source_commit):
     for row in expected_layout:
         blob, mode = data[row["path"]]
         assert mode == row["mode"], (row["path"], mode)
-        if "linkTarget" in row:
-            assert blob == row["linkTarget"]
+        if "link" in row:
+            assert blob == row["link"]
     output.parent.mkdir(parents=True, exist_ok=True)
     write_deb(output, {"control": (control, 0o644)}, data)
     manifest["outputSHA256"] = sha256(output.read_bytes())

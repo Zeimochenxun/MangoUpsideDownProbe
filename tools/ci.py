@@ -44,7 +44,7 @@ def main():
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             for info in archive.infolist():
                 content = archive.read(info).decode("utf-8", errors="replace")
-                if "/" in info.filename and ("error:" in content or "Traceback" in content or "FAIL" in content):
+                if "error:" in content or "Traceback" in content or "FAIL" in content:
                     print(info.filename)
                     print(content[-12000:])
         return

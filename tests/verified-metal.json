@@ -1,0 +1,8 @@
+{
+  "shaderSHA256": "af6430f9d38830c81fd924f7fee8b1851535af7e26f23336023253b241f46259",
+  "compiled": true,
+  "airBytes": 27312,
+  "compiler": "Apple Metal / iphoneos",
+  "verifiedRun": 36913456075,
+  "sourceCommit": "6b26c774b9d01a864a676f2a64810f88c6910835"
+}

@@ -49,8 +49,8 @@ def verify(filename, helper_path):
     assert len(data) == 14 and set(data) == {row["path"] for row in expected_layout}, "Unexpected payload layout"
     for row in expected_layout:
         assert data[row["path"]][1] == row["mode"]
-        if "linkTarget" in row:
-            assert data[row["path"]][0] == row["linkTarget"]
+        if "link" in row:
+            assert data[row["path"]][0] == row["link"]
     sources = load_inputs()
     manifest = json.loads(data["Library/MangoSuite/manifest.json"][0])
     assert manifest["suiteVersion"] == manifest["helperPackageVersion"] == VERSION
@@ -117,6 +117,9 @@ def verify(filename, helper_path):
         assert key.encode() in data[PREFS + "MangoSuitePrefs"][0]
     for metadata in compatibility["images"].values():
         assert metadata["uuid"].encode() in data[DYNAMIC + "AMangoSuiteLoader.dylib"][0]
+    world = data[MODULES + COMPILED["UpsideDownWorld"][0] + ".dylib"][0]
+    for identity in (b"XMFloatingWindow", b"XMPortraitVC", b"MangoSuiteXiaoMang"):
+        assert identity in world, "Missing compiled XiaoMang adapter: " + identity.decode()
     report["result"] = "PASS"
     report["checks"] = [
         "three compiled Beta8 modules exactly match the actual helper",
@@ -129,6 +132,7 @@ def verify(filename, helper_path):
         "fourteen payload paths and modes match the dpkg fixture layout",
         "source commit, helper hash, module hashes, and Beta8 image metadata recorded",
         "native upside-down domain/key remain separate from the Suite shared store",
+        "XiaoMang window adapter compiled into the existing World module",
     ]
     report["deviceTested"] = False
     report["validationScope"] = "Archive, compiled-image integrity, provenance, and dependency metadata; device behavior is not inferred."

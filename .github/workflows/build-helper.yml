@@ -58,8 +58,14 @@ jobs:
           /tmp/placement-test
           clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation -framework CoreGraphics modules/orientation/tests/pan_correction_test.m -o /tmp/pan-test
           /tmp/pan-test
+          clang -std=c11 -Wall -Wextra -Werror modules/orientation/tests/xiaomang_geometry_test.c -lm -o /tmp/xiaomang-geometry-test
+          /tmp/xiaomang-geometry-test
+          clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation -framework CoreGraphics modules/orientation/tests/xiaomang_mutation_test.m -o /tmp/xiaomang-mutation-test
+          /tmp/xiaomang-mutation-test
+          clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation -framework QuartzCore modules/orientation/tests/xiaomang_animation_test.m -o /tmp/xiaomang-animation-test
+          /tmp/xiaomang-animation-test
 
-      - name: Compile final Beta8 shader without publishing its source
+      - name: Verify unchanged Beta8 shader evidence or compile supplied shader
         env:
           BETA8_METAL_SOURCE: ${{ secrets.MANGOSUITE_BETA8_METAL_5BB839 }}
         run: python3 tests/test_metal_private.py

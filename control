@@ -1,6 +1,6 @@
 Package: com.chenxun.mangosuite.helper
 Name: Mango Suite Build Helper
-Version: 1.1.0~beta8.1
+Version: 1.1.0~beta8.2
 Architecture: iphoneos-arm64e
 Description: Build-only loader and preferences artifacts for Mango Suite. Not a complete installable suite.
 Maintainer: Chenxun
