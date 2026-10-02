@@ -8,7 +8,6 @@
 #import <math.h>
 #import <string.h>
 #import <CoreFoundation/CoreFoundation.h>
-#import <dlfcn.h>
 #import <roothide.h>
 
 // Beta8-1 runtime surface verified against the supplied Mango binaries.
@@ -22,7 +21,7 @@
 - (void)updateSpecular;
 @end
 
-static Class HostClass, WindowClass, ContentClass, ElementClass, GlassClass, ActivityMediaClass, SessionMediaClass;
+static Class HostClass, WindowClass, ContentClass, ElementClass, GlassClass;
 static void (*OriginalLayout)(id, SEL);
 static void (*OriginalContentHidden)(id, SEL, BOOL);
 static void (*OriginalElementMove)(id, SEL);
@@ -40,14 +39,6 @@ static dispatch_source_t Timer;
 static CADisplayLink *DisplayLink;
 static CFTimeInterval LastTransition;
 static uint64_t ParameterReloadGeneration;
-// Supplied Beta8 Panda 0x4567c0 resolves this exact MediaRemote export.
-// Its call at 0x4573c0 passes the main queue in x0 and the block in x1.
-// Descriptor 0x9c6218 has signature v12@?0B8 at 0x9ab904 (void / BOOL).
-typedef void (*MangoIdleGetPlaying)(dispatch_queue_t queue, void (^reply)(BOOL playing));
-static MangoIdleGetPlaying GetMediaPlaying;
-static BOOL MediaPlaying, MediaQueryPending;
-static CFTimeInterval LastMediaQuery;
-static uint64_t MediaQueryGeneration;
 static char BackgroundKey, StateKey, LastElementHostKey, GlassModeKey, LastParameterReapplyKey, EdgeAttemptKey, EdgeSeenKey;
 
 static NSString * const MangoDomain = @"com.go.mangoosprefs";
@@ -379,32 +370,8 @@ static CGFloat EffectiveOpacity(UIView *v, UIView *host) {
     return MAX(0, MIN(1, opacity));
 }
 
-static BOOL IsNativeMediaView(UIView *view) {
-    // Both names occur in the supplied Beta8 media hook registration at
-    // Panda 0x405184. Never infer activity from a generic backdrop instance.
-    return (ActivityMediaClass && [view isKindOfClass:ActivityMediaClass]) ||
-           (SessionMediaClass && [view isKindOfClass:SessionMediaClass]);
-}
-
-static BOOL NativeMediaPresent(UIView *host) {
-    if (!host.window) return NO;
-    UIView *own = objc_getAssociatedObject(host, &BackgroundKey);
-    NSMutableArray<UIView *> *todo = [host.subviews mutableCopy];
-    NSUInteger count = 0;
-    while (todo.count && count++ < 256) {
-        UIView *view = todo.lastObject;
-        [todo removeLastObject];
-        if (view == own) continue;
-        // Reserve before the native fade/layout has revealed its content.
-        // Hidden and alpha are deliberately irrelevant to ownership.
-        if (view.window == host.window && IsNativeMediaView(view)) return YES;
-        [todo addObjectsFromArray:view.subviews];
-    }
-    return NO;
-}
-
-static BOOL NeedsIdleBacking(BOOL backgroundState, BOOL blendableActivity, CGFloat activity, BOOL mediaReserved) {
-    return !mediaReserved && (backgroundState || (blendableActivity && activity < 0.995));
+static BOOL NeedsIdleBacking(BOOL backgroundState, BOOL blendableActivity, CGFloat activity) {
+    return backgroundState || (blendableActivity && activity < 0.995);
 }
 
 static void DetachBackground(UIView *host) {
@@ -424,46 +391,6 @@ static void SynchronizeBackground(UIView *host, UIView *background, CGFloat opac
     if (background.layer.cornerRadius != radius) background.layer.cornerRadius = radius;
     if (background.alpha != opacity) background.alpha = opacity;
     if (background.hidden) background.hidden = NO;
-}
-
-static void PrepareForNativeLayout(UIView *host) {
-    if (MediaPlaying || NativeMediaPresent(host)) DetachBackground(host);
-}
-
-static void ResolveMediaClasses(void) {
-    // MediaRemoteUI may be loaded after this module's initial installation.
-    // Retry missing optional classes with the throttled media query.
-    if (!ActivityMediaClass) {
-        Class cls = NSClassFromString(@"MRUActivityNowPlayingView");
-        if (cls && [cls isSubclassOfClass:UIView.class]) ActivityMediaClass = cls;
-    }
-    if (!SessionMediaClass) {
-        Class cls = NSClassFromString(@"MRUSessionNowPlayingView");
-        if (cls && [cls isSubclassOfClass:UIView.class]) SessionMediaClass = cls;
-    }
-}
-
-static void RefreshMediaState(void) {
-    if (!NSThread.isMainThread) return;
-    CFTimeInterval now = CACurrentMediaTime();
-    if (LastMediaQuery && now - LastMediaQuery < 1.0) return;
-    if (MediaQueryPending && now - LastMediaQuery < 3.0) return;
-    LastMediaQuery = now;
-    ResolveMediaClasses();
-    if (!GetMediaPlaying) return;
-    MediaQueryPending = YES;
-    uint64_t generation = ++MediaQueryGeneration;
-    GetMediaPlaying(dispatch_get_main_queue(), ^(BOOL playing) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (generation != MediaQueryGeneration) return;
-            MediaQueryPending = NO;
-            if (MediaPlaying == playing) return;
-            MediaPlaying = playing;
-            Log([NSString stringWithFormat:@"[MEDIA] playing=%d idle-backing=%@", playing, playing ? @"released-to-native" : @"eligible"]);
-            Pulse();
-            Scan();
-        });
-    });
 }
 
 static BOOL StableIdleGeometry(CGSize size) {
@@ -502,11 +429,12 @@ static NSString *Eligibility(UIView *host, CGFloat *activity, CGFloat *elementOp
     UIView *own = objc_getAssociatedObject(host, &BackgroundKey);
     NSUInteger count = 0;
     CGFloat elementOpacity = 0, glassOpacity = 0;
-    BOOL mediaReserved = MediaPlaying;
     while (todo.count && count++ < 256) {
         UIView *v = todo.lastObject; [todo removeLastObject];
         if (v == own) continue;
-        if (v.window == w && IsNativeMediaView(v)) mediaReserved = YES;
+        // Playback metadata and MRU container presence do not establish a
+        // rendered activity. Only native element/glass presentation opacity
+        // can hand this host over; hidden ancestors contribute zero.
         if (ElementClass && [v isKindOfClass:ElementClass]) elementOpacity = MAX(elementOpacity, EffectiveOpacity(v, host));
         // Keep active-Island edge/specular maintenance independent of the idle
         // geometry gate. We still observe native glass throughout transitions.
@@ -527,8 +455,6 @@ static NSString *Eligibility(UIView *host, CGFloat *activity, CGFloat *elementOp
     *glassOpacityOut = glassOpacity;
     if (todo.count) return @"scan-limit";
 
-    if (mediaReserved) return @"media";
-
     *activity = MAX(glassOpacity, elementOpacity);
     if (*activity > 0.01) return @"activity";
     // A no-content geometry such as 150x44 is a press/preview transition, not
@@ -546,13 +472,12 @@ static void Update(UIView *host) {
         BOOL backgroundState = [state isEqualToString:@"background"];
         BOOL activityState = [state isEqualToString:@"activity"];
         BOOL blendableActivity = activityState && stableGeometry;
-        BOOL mediaReserved = [state isEqualToString:@"media"];
 
         UIView *bg = objc_getAssociatedObject(host, &BackgroundKey);
         // During a compact activity fade, allow the Idle glass to exist only as
         // the inverse-opacity backing layer. Outside compact geometry it exits
         // immediately and never participates in press/preview motion.
-        BOOL needBackground = NeedsIdleBacking(backgroundState, blendableActivity, activity, mediaReserved);
+        BOOL needBackground = NeedsIdleBacking(backgroundState, blendableActivity, activity);
         BOOL constructor = needBackground && GlassConstructorVerified && !GlassConstructionFailed;
         BOOL mango = constructor && (OriginalIslandGlassSeen || MangoGlassSetting());
         BOOL upgrading = needBackground && bg && mango && ![objc_getAssociatedObject(bg, &GlassModeKey) boolValue];
@@ -611,9 +536,8 @@ static void Update(UIView *host) {
 }
 
 static void Layout(id self, SEL cmd) {
-    // Media owns this host before Mango/native performs its own layout.
-    // Do not remove/reinsert the idle copy on every ordinary idle layout.
-    if (NSThread.isMainThread) PrepareForNativeLayout(self);
+    // Observe the result of native layout before deciding whether it has
+    // produced a visible activity. Never reserve the host ahead of reveal.
     OriginalLayout(self, cmd);
     if (!NSThread.isMainThread) return;
     [Hosts addObject:self];
@@ -693,13 +617,12 @@ __attribute__((constructor)) static void Start(void) {
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=1.1.9.3~beta8.3-native-media-handoff background=Mango-glass stable-idle-only=1 inverse-native-opacity=1 presentation-opacity=1 presentation-bounds-guard=1 compact-return-handoff=1 media-detaches-idle=1 settled-background-no-rewrite=1 touch=unchanged");
+            Log(@"[SESSION] version=1.1.9.4~beta8.4-visible-native-handoff background=Mango-glass stable-idle-only=1 inverse-native-opacity=1 presentation-opacity=1 presentation-bounds-guard=1 compact-return-handoff=1 visible-activity-only=1 settled-background-no-rewrite=1 touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");
             ElementClass = NSClassFromString(@"SAUIElementView");
             GlassClass = NSClassFromString(@"MGLiveBackdropView");
-            ResolveMediaClasses();
 
             if (!HostClass || !WindowClass || !ContentClass || !ElementClass || !GlassClass ||
                 ![HostClass isSubclassOfClass:UIView.class] || ![WindowClass isSubclassOfClass:UIWindow.class] ||
@@ -723,15 +646,6 @@ __attribute__((constructor)) static void Start(void) {
 
             Hosts = [NSHashTable weakObjectsHashTable];
             Disabled = access([[LogDir stringByAppendingPathComponent:@"DISABLED"] fileSystemRepresentation], F_OK) == 0;
-            void *mediaSymbol = dlsym(RTLD_DEFAULT, "MRMediaRemoteGetNowPlayingApplicationIsPlaying");
-            if (!mediaSymbol) {
-                // This same framework path is present in Beta8 Panda's
-                // MediaRemote loading functions. Retain the handle for life.
-                void *media = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY | RTLD_LOCAL);
-                if (media) mediaSymbol = dlsym(media, "MRMediaRemoteGetNowPlayingApplicationIsPlaying");
-            }
-            GetMediaPlaying = (MangoIdleGetPlaying)mediaSymbol;
-            Log([NSString stringWithFormat:@"[MEDIA] playing-export=%d activity-view=%d session-view=%d ownership=native-only", GetMediaPlaying != NULL, ActivityMediaClass != Nil, SessionMediaClass != Nil]);
 
             MSHookMessageEx(HostClass, @selector(layoutSubviews), (IMP)Layout, (IMP *)&OriginalLayout);
             MSHookMessageEx(ContentClass, @selector(setHidden:), (IMP)ContentHidden, (IMP *)&OriginalContentHidden);
@@ -759,11 +673,10 @@ __attribute__((constructor)) static void Start(void) {
                                             CFSTR("go.mangoos/ParametersReloaded"), NULL,
                                             CFNotificationSuspensionBehaviorDeliverImmediately);
 
-            RefreshMediaState();
             Scan();
             Timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
             dispatch_source_set_timer(Timer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC/2, NSEC_PER_MSEC*100);
-            dispatch_source_set_event_handler(Timer, ^{ RefreshMediaState(); Scan(); });
+            dispatch_source_set_event_handler(Timer, ^{ Scan(); });
             dispatch_resume(Timer);
 
             static MangoIdleFrameObserver *observer;

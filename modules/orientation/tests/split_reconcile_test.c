@@ -7,7 +7,7 @@ static const MWTransform NativeTurn = {-1,0,0,-1,375,812};
 
 typedef struct {
     MWTransform model, native, launcherChild;
-    int target, safe, badBasis, wrongAfterWrite, foreignAfterWrite;
+    int target, safe, badBasis, wrongAfterWrite, foreignAfterWrite, ineligibleAfterWrite;
     unsigned reads, writes;
 } Fixture;
 
@@ -26,7 +26,8 @@ static MSSplitSnapshot readSnapshot(void *context) {
     Fixture *fixture = context;
     ++fixture->reads;
     MSSplitSnapshot sample = {.transform=fixture->model,.center={187.5,406},
-        .pivot={187.5,406},.eligible=fixture->target&&fixture->safe};
+        .pivot={187.5,406},.eligible=fixture->target&&fixture->safe&&
+            !(fixture->ineligibleAfterWrite&&fixture->writes)};
     const MWPoint local[] = {{0,0},{1,0},{0,1}};
     for (unsigned i=0; i<3; ++i) sample.points[i]=screenPoint(fixture,local[i]);
     if (fixture->badBasis) sample.points[1].y += .02;
@@ -86,26 +87,31 @@ int main(void) {
     assert(fixture.writes==1); // repeated callbacks never accumulate rotation
     mirroredScreen(&fixture);
 
-    // The scene later adds its native half-turn while our model matrix stays
-    // unchanged: the old Split applied+Near branch returned with double pi.
+    // A later UIKit fixed-coordinate mapping change is not proof that the
+    // launcher visually became upright. Preserve the verified Beta8.2 write
+    // while its model matrix remains exactly ours.
     fixture.native=NativeTurn;
     fixture.launcherChild=Identity;
     assert(!MSSplitInverted(readSnapshot(&fixture)));
-    assert(reconcile(&fixture,&state,1)==MSSplitRestored);
-    assert(fixture.writes==2 && !state.applied);
-    assert(MWNear(fixture.model,Identity) && MWNear(fixture.native,NativeTurn));
+    assert(reconcile(&fixture,&state,1)==0);
+    assert(fixture.writes==1 && state.applied);
+    assert(MWNear(fixture.model,state.after) && MWNear(fixture.native,NativeTurn));
+
+    fixture.model=Identity; // a native writer now replaces our model matrix
+    assert(reconcile(&fixture,&state,1)==MSSplitReleased);
+    assert(fixture.writes==1 && !state.applied);
     mirroredScreen(&fixture); launcherInverted(&fixture);
 
     fixture.native=Identity;
     assert(reconcile(&fixture,&state,1)==MSSplitApplied);
-    assert(state.applied && fixture.writes==3);
+    assert(state.applied && fixture.writes==2);
     fixture.model=Identity; // an external native layout reset
     assert(reconcile(&fixture,&state,1)==(MSSplitReleased|MSSplitApplied));
-    assert(state.applied && fixture.writes==4); // repairs during this same call
+    assert(state.applied && fixture.writes==3); // repairs during this same call
     mirroredScreen(&fixture); launcherInverted(&fixture);
 
     assert(reconcile(&fixture,&state,0)==MSSplitRestored);
-    assert(!state.applied && fixture.writes==5 && MWNear(fixture.model,Identity));
+    assert(!state.applied && fixture.writes==4 && MWNear(fixture.model,Identity));
     assert(reconcile(&fixture,&state,0)==0);
     assert(reconcile(&fixture,&state,1)==MSSplitApplied);
     fixture.target=0;
@@ -124,6 +130,16 @@ int main(void) {
     assert(reconcile(&fixture,&state,1)==0 && fixture.writes==0);
     fixture.badBasis=0; fixture.native.a=NAN;
     assert(reconcile(&fixture,&state,1)==0 && fixture.writes==0);
+
+    // Beta8.3 reapplied its full eligibility guard after writing the turn and
+    // rolled back an otherwise valid first correction. The initial preflight
+    // succeeds; post-write points still match even as that fresh guard fails.
+    fixture=upright(); state=(MSSplitOwnership){0}; fixture.ineligibleAfterWrite=1;
+    assert(reconcile(&fixture,&state,1)==MSSplitApplied);
+    assert(fixture.writes==1 && state.applied && !state.suspended);
+    mirroredScreen(&fixture); launcherInverted(&fixture);
+    fixture.ineligibleAfterWrite=0; // the next native layout settles
+    assert(reconcile(&fixture,&state,1)==0 && fixture.writes==1);
 
     fixture=upright(); state=(MSSplitOwnership){0}; fixture.wrongAfterWrite=1;
     assert(reconcile(&fixture,&state,1)==(MSSplitRestored|MSSplitRejected));
@@ -147,6 +163,6 @@ int main(void) {
     assert(reconcile(&fixture,&state,1)==MSSplitRestored);
     assert(!state.applied && MWNear(fixture.model,Identity));
 
-    puts("PASS: actual fixed-screen rechecks, native scene double-turn removal, same-call reset repair, portrait launcher child basis, foreign-transform ownership, unsafe/invalid guards and 10000 stable updates");
+    puts("PASS: Beta8.2 first-write guards, post-write eligibility regression, owned-matrix persistence, same-call native reset repair, foreign-transform ownership, unsafe/invalid guards and 10000 stable updates");
     return 0;
 }

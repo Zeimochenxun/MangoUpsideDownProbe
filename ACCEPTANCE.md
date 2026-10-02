@@ -1,6 +1,6 @@
 # Beta8 成品验收
 
-成品版本：`1.1.0~beta8.3`，文件：`MangoSuite-1.1.0-Beta8.3-RootHide-arm64e.deb`。本次构建、代码测试和最终包检查待完成，真机项目均待测。
+成品版本：`1.1.0~beta8.4`，文件：`MangoSuite-1.1.0-Beta8.4-RootHide-arm64e.deb`。本次构建、代码测试和最终包检查待完成，真机项目均待测。
 
 目标设备：iPhone 13 mini / iOS 16.5 / Dopamine RootHide / 已正常授权的 Mango 1.0-Beta8-1。
 
@@ -9,10 +9,10 @@
 - 用户已确认原版 Beta8 + 独立偏好工具的原生倒置生效。
 - 已静态核对 Beta8 模块与方法 ABI、原 AdaptiveColor shader 替换、参数默认值及刷新链。
 - Beta8.2 将小芒悬浮球、根面板、独立通知泡／卡片和同类提示窗适配加入 World；使用现有“倒置方向与小芒修复”开关，没有额外模块或开关。AdaptiveColor 二进制与参数 UI 保留精确 0.1.3 原件。
-- Beta8.3 针对活动媒体内容缺失、启动器局部回正及随之改变的岛手势进行源码修复。需要本次 CI 的 Idle 媒体让位、持续方向修正与分屏调和回归证明；此前媒体缺失的唯一根因及此次实际手机效果仍待确认。Beta8.2 CI [36985749665](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/36985749665) 仅是旧版记录。
+- Beta8.3 的手机反馈是播放时整岛消失、启动器从开始就不倒置，安装后只执行 Respring；已建议补一次用户空间重启，但不把重启不足当成确定原因。Beta8.4 收窄媒体交接并恢复分屏首次施加条件；此前媒体缺失的根因与本次手机效果均待确认。
 - Shader 本次没有改动，复用 Beta8.1 CI [36913456075](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/36913456075) 的实际 Apple Metal 编译证据，不能描述为本次重新编译。
-- Beta8.3 的构建 commit、CI 结果、完整包 SHA256 与 `tests/check_suite.py` 报告待生成。最终检查须确认 7 个镜像、14 个载荷路径、helper 精确匹配、RootHide 依赖及签名页，并保留本次真实 dpkg 惰性载荷安装／失败重试／升级保留设置检查。完成后以 `delivery/1.1.0-beta8.3` 的证据为准。
-- **Beta8.3 完整整合包与本次修复尚未在目标 iPhone 实测；下列真机项目均待测。** 原生倒置此前的成功反馈不代表本次所有模块已通过。
+- Beta8.4 的源码 commit、CI 和完整包 SHA256 待生成。最终检查需要核对 7 个镜像、14 个载荷路径、helper 精确匹配、RootHide 依赖、签名页和唯一入口，并保留真实 dpkg 惰性载荷安装／失败重试／升级保留配置检查。
+- **Beta8.4 完整整合包与本次修复尚未在目标 iPhone 实测；下列真机项目均待测。** 原生倒置此前的成功反馈不代表本次所有模块已通过。
 
 ## 最少真机检查
 

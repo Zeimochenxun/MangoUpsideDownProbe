@@ -76,7 +76,9 @@ static MSSplitSnapshot Snapshot(void *context) {
     UIWindow *w = (__bridge UIWindow *)context;
     MSSplitSnapshot sample = {.transform = Math(w.transform)};
     sample.eligible = ContainsMangoTarget(w) && SafeWindow(w);
-    if (!sample.eligible) return sample;
+    // Eligibility is a pre-write guard. The write can change UIKit's window
+    // footprint while it settles; Beta8.2 still sampled these points to verify
+    // the value it had just written, without another SafeWindow veto.
     id<UICoordinateSpace> fixed = w.screen.fixedCoordinateSpace;
     const CGPoint local[3] = {CGPointZero, CGPointMake(1,0), CGPointMake(0,1)};
     for (unsigned i = 0; i < 3; ++i) {

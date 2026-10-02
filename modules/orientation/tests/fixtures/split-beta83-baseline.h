@@ -1,9 +1,9 @@
 #pragma once
 #include "WorldMath.h"
 
-// These are UIKit fixedCoordinateSpace samples used for the initial write's
-// geometry check. They do not establish a launcher's visual orientation after
-// native scene/layout changes while our model transform remains unchanged.
+// UIKit supplies the three points in physical-screen coordinates. Keeping
+// this input separate from the model transform is essential: a scene can
+// introduce a native half-turn without changing UIWindow.transform.
 typedef struct {
     MWTransform transform;
     MWPoint points[3], center, pivot;
@@ -51,9 +51,7 @@ static inline int MSSplitUpright(MSSplitSnapshot sample) {
 }
 
 static inline int MSSplitMirrored(MSSplitSnapshot before, MSSplitSnapshot after) {
-    // Preserve Beta8.2's post-write check: read the points even if the new
-    // footprint fails a fresh preflight, then compare only the expected map.
-    if (!MSSplitFinitePoints(after) ||
+    if (!after.eligible || !MSSplitInverted(after) ||
         !isfinite(before.pivot.x) || !isfinite(before.pivot.y)) return 0;
     for (unsigned i = 0; i < 3; ++i)
         if (fabs(after.points[i].x - (2*before.pivot.x - before.points[i].x)) > .1 ||
@@ -101,13 +99,13 @@ static inline unsigned MSSplitReconcile(MSSplitOwnership *state, int active,
     }
     unsigned result = 0;
     if (state->applied) {
-        // Beta8.2 kept its successfully verified write until another owner
-        // replaced that exact matrix. A fixed-coordinate basis change alone
-        // must not undo it: UIKit's scene mapping is not launcher visibility.
-        if (MWOwns(current.transform, state->after, state->applied, state->suspended)) return 0;
+        // A matching model matrix cannot establish the current screen basis.
+        // Recheck it even while we still own the exact transform we wrote.
+        if (MWOwns(current.transform, state->after, state->applied, state->suspended) &&
+            MSSplitInverted(current)) return 0;
         result |= MSSplitRestore(state, current, write, context);
-        // Native layout/rotation hooks repair an external reset during this
-        // same callback, using the original first-application guards again.
+        // Re-read immediately. This both avoids double turns after a native
+        // scene rotation and repairs an external reset in this same callback.
         current = read(context);
         if (!current.eligible) return result;
     }

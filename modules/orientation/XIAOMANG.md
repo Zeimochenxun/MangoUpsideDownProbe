@@ -1,8 +1,8 @@
 # 小芒同学 Beta8 倒置适配
 
-版本：`1.1.0~beta8.3`。完整安装包：`MangoSuite-1.1.0-Beta8.3-RootHide-arm64e.deb`。目标是 iPhone 13 mini、iOS 16.5、Dopamine RootHide，以及已经正常授权的 Mango `1.0-Beta8-1`。
+版本：`1.1.0~beta8.4`。完整安装包：`MangoSuite-1.1.0-Beta8.4-RootHide-arm64e.deb`。目标是 iPhone 13 mini、iOS 16.5、Dopamine RootHide，以及已经正常授权的 Mango `1.0-Beta8-1`。
 
-当前状态：保留 Beta8.2 的小芒几何和动画实现，沿用 Beta8.3 的共享方向策略。本次 CI、arm64e 构建和完整包检查待完成。**完整整合包与小芒适配尚未在手机上实测。** 之前原生倒置偏好工具已经生效的反馈，不能代替小芒窗口的显示和交互验收。
+当前状态：保留 Beta8.2 的小芒几何和动画实现，沿用 Beta8.4 的共享方向策略。本次 CI、arm64e 构建和完整包检查待完成。**完整整合包与小芒适配尚未在手机上实测。** 之前原生倒置偏好工具已经生效的反馈，不能代替小芒窗口的显示和交互验收。
 
 ## 范围与开关
 
@@ -36,8 +36,8 @@
 - `tests/xiaomang_geometry_test.c` 调用生产几何 helper，通过独立的正向坐标模型检查主窗、偏中心通知窗、scene 缩放／平移／旋转补偿、三点和角点物理镜像、重布局以及无效／已有倒置输入。
 - `tests/xiaomang_mutation_test.m` 调用生产事务 helper，检查原函数看到真实基线、嵌套只由外层恢复／完成，及各阶段异常后计数释放。
 - `tests/xiaomang_animation_test.m` 调用生产动画清理 helper，在真实 QuartzCore layer 上检查外层几何动画与纯几何组清理，保留 fade、混合组和子层 fly-in。
-- 三项小芒测试此前在 Beta8.2 CI [36985749665](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/36985749665) 执行通过；该记录仅对应旧版。本次 CI 待完成，它们不模拟 iPhone 的实际触摸、窗口分发和 Core Animation 时序。
-- 本次最终 `tests/check_suite.py` 待完成，必须确认完整包的 7 个镜像、14 个载荷路径及小芒所在 World 精确匹配本次 helper；最终 SHA256 以交付的 `package-verification.json` 为准。
+- 三项小芒 helper 在旧版 CI 中执行过；本次 Beta8.4 CI 待完成。它们不模拟 iPhone 的实际触摸、窗口分发和 Core Animation 时序，旧版记录不能替代本次成品和手机验证。
+- 本次最终 `tests/check_suite.py` 待完成，需要核对 7 个镜像、14 个载荷路径、小芒所在 World 精确匹配本次 helper、签名代码页、RootHide 依赖及唯一入口；完成后以本次交付报告与 SHA256 为准。
 - 本次没有改动 AdaptiveColor 或最终 shader，复用 Beta8.1 CI [36913456075](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/36913456075) 的实际 Apple Metal 编译证据，不能称为本次重新编译。
 
 ## 最少真机检查

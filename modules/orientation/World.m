@@ -540,7 +540,7 @@ static void Install(void){
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
     InstallMangoPan();
     InstallOrientationLockFix();
-    Log(@"INSTALLED Beta8.3: persistent verified world, recoverable ownership, physical ended-pan and orientation lock");
+    Log(@"INSTALLED Beta8.4: persistent verified world, recoverable ownership, physical ended-pan and orientation lock");
     Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}

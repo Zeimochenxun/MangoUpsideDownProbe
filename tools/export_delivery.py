@@ -81,6 +81,7 @@ shutil.copy2(PACKAGE, output / PACKAGE.name)
     (ROOT / "README.md").read_text(encoding="utf-8").replace(
         "(modules/orientation/XIAOMANG.md)", "(小芒倒置适配.md)"), encoding="utf-8")
 shutil.copy2(ROOT / "ACCEPTANCE.md", output / "真机验收.md")
+shutil.copy2(ROOT / "REGRESSIONS.md", output / "REGRESSIONS.md")
 shutil.copy2(ROOT / "modules/orientation/XIAOMANG.md", output / "小芒倒置适配.md")
 shutil.copy2(ROOT / "packages/verification.json", output / "package-verification.json")
 shutil.copy2(PACKAGE.with_suffix(".manifest.json"), output / "module-manifest.json")

@@ -60,6 +60,7 @@ jobs:
           /tmp/world-persistence-test
           clang -std=c11 -Wall -Wextra -Werror modules/orientation/tests/split_reconcile_test.c -lm -o /tmp/split-reconcile-test
           /tmp/split-reconcile-test
+          python3 modules/orientation/tests/test_split_regression.py
           clang -std=c11 -Wall -Wextra -Werror modules/orientation/tests/placement_test.c -lm -o /tmp/placement-test
           /tmp/placement-test
           clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation -framework CoreGraphics modules/orientation/tests/pan_correction_test.m -o /tmp/pan-test
