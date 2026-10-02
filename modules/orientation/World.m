@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <string.h>
 #include "WorldMath.h"
+#include "WorldPersistence.h"
 
 static const char *Disabled="/var/mobile/Library/Preferences/MangoUpsideDownWorld.disabled";
 static Class WindowClass, PassClass, ContentClass, ContainerClass;
@@ -70,6 +71,8 @@ static void Log(NSString *s) {
 static MWTransform Math(CGAffineTransform t){return (MWTransform){t.a,t.b,t.c,t.d,t.tx,t.ty};}
 static CGAffineTransform CG(MWTransform t){return CGAffineTransformMake(t.a,t.b,t.c,t.d,t.tx,t.ty);}
 static MWWorldState *State(UIView *v){return objc_getAssociatedObject(v,&StateKey);}
+static MWTransform FixedMap(UIView *view);
+static BOOL KeepsWorld(UIView *root, MWWorldState *state, UIWindow *window);
 // The cancellation record for this content view, created on demand. Returns it
 // only while the window above this view's root is actually turned (s.outer is
 // the window's owned transform; see ApplyWorld): that turn is what makes an
@@ -79,7 +82,7 @@ static MWOwnedTransform *OwnedContent(UIView *v){
     for(UIView *p=v.superview;p;p=p.superview){
         MWWorldState *s=State(p);
         if(!s)continue;
-        if(s.suspended||!s.outer.applied)return nil;
+        if(!KeepsWorld(p,s,v.window))return nil;
         MWOwnedTransform *owned=[s.inner objectForKey:v];
         if(!owned){owned=[MWOwnedTransform new];[s.inner setObject:owned forKey:v];}
         return owned;
@@ -106,7 +109,11 @@ static void RestoreWorld(UIView *root){
     }
     for(UIView *v in s.inner.keyEnumerator.allObjects)
         if(!RestoreOne(v,[s.inner objectForKey:v]))ok=NO;
-    if(!ok&&!s.suspended){s.suspended=YES;Log(@"CONFLICT: unknown transform; world suspended until respring");}
+    // An external owner is allowed to replace its value. Relinquish our record
+    // without writing the stale baseline; future application still has to pass
+    // every physical-shape and basis guard. A routine layout reset must not
+    // permanently disable the island and its gesture compensation.
+    if(!ok)Log(@"RELEASE external transform preserved; waiting for valid world geometry");
 }
 static void SetOwned(UIView *v,MWOwnedTransform *s,CGAffineTransform t){
     s.before=v.transform;s.after=t;s.applied=YES;v.transform=t;
@@ -118,7 +125,8 @@ static void Skip(MWWorldState *s,NSString *reason){
     double now=CACurrentMediaTime();
     if([s.lastSkip isEqualToString:reason]&&now-s.lastSkipLog<=5)return;
     s.lastSkip=reason;s.lastSkipLog=now;
-    Log([NSString stringWithFormat:@"SKIP reason=%@ mangoOrientation=%ld",reason,(long)Orientation()]);
+    Log([NSString stringWithFormat:@"SKIP reason=%@ mangoOrientation=%ld systemOrientation=%ld resolvedOrientation=%ld",
+         reason,(long)B8MangoOrientation(),(long)B8SystemOrientation(),(long)Orientation()]);
 }
 static BOOL VisibleChain(UIView *v,UIView *stop){
     unsigned n=0;
@@ -154,7 +162,7 @@ static void Discover(UIWindow *window){
 static void ApplyWorld(UIView *root){
     MWWorldState *s=State(root);UIWindow *w=root.window;
     if(s.suspended||root.superview!=w||![w isKindOfClass:WindowClass]||w.screen!=UIScreen.mainScreen)return;
-    if(s.parent!=w){s.suspended=YES;return;}
+    if(s.parent!=w){RestoreWorld(root);s.parent=w;}
     NSArray<UIView *> *contents=Contents(root);if(!contents.count){Skip(s,@"contents");return;}
     if(!CATransform3DIsAffine(w.layer.transform)||!CATransform3DIsIdentity(w.layer.sublayerTransform)){Skip(s,@"window-layer");return;}
     id<UICoordinateSpace> fixed=w.screen.fixedCoordinateSpace;
@@ -236,17 +244,65 @@ static NSArray<UIWindow *> *ExistingWindows(void){
 #pragma clang diagnostic pop
     return result.array;
 }
+static MWTransform FixedMap(UIView *view) {
+    id<UICoordinateSpace> fixed=view.window.screen.fixedCoordinateSpace;
+    if([view isKindOfClass:UIWindow.class])fixed=((UIWindow *)view).screen.fixedCoordinateSpace;
+    if(!fixed)return (MWTransform){NAN,NAN,NAN,NAN,NAN,NAN};
+    CGPoint o=[view convertPoint:CGPointZero toCoordinateSpace:fixed];
+    CGPoint x=[view convertPoint:CGPointMake(1,0) toCoordinateSpace:fixed];
+    CGPoint y=[view convertPoint:CGPointMake(0,1) toCoordinateSpace:fixed];
+    return (MWTransform){x.x-o.x,x.y-o.y,y.x-o.x,y.y-o.y,o.x,o.y};
+}
+static BOOL KeepsWorld(UIView *root, MWWorldState *state, UIWindow *window) {
+    return window && state && root.superview==window && state.parent==window &&
+        MWKeepWorld(Math(window.transform),Math(state.outer.after),state.outer.applied,
+                    state.suspended,FixedMap(window),FixedMap(root));
+}
+static void ReconcileRoot(UIView *root) {
+    MWWorldState *state=State(root);UIWindow *window=root.window;
+    if(KeepsWorld(root,state,window)){
+        // Leave stable native media/notification layouts in their corrected
+        // coordinate space. Only newly attached native inverted contents need
+        // normalization; the setters already handle later animation targets.
+        NSArray<UIView *> *contents=Contents(root);
+        if(!contents){Skip(state,@"content-hierarchy-transition");return;}
+        for(UIView *view in contents)
+            for(UIView *parent=view.superview;parent && parent!=root;parent=parent.superview)
+                if([parent isKindOfClass:ContentClass]){
+                    RestoreWorld(root);Skip(state,@"nested-content");return;
+                }
+        for(UIView *view in contents){
+            MWTransform map=FixedMap(view),value=Math(view.transform);
+            if(MWInvertedBasis(-map.a,-map.d,map.c,map.b) && MWFinite(value) &&
+               MWInvertedBasis(value.a,value.d,value.c,value.b)){
+                MWOwnedTransform *owned=[state.inner objectForKey:view];
+                if(!owned){owned=[MWOwnedTransform new];[state.inner setObject:owned forKey:view];}
+                SetOwned(view,owned,CG(MWCancelTurn(value)));
+                MWTransform actual=FixedMap(view);
+                if(!MWInvertedBasis(actual.a,actual.d,actual.c,actual.b)){
+                    RestoreOne(view,owned);
+                    Skip(state,@"new-content-normalization");
+                }
+            }
+        }
+        return;
+    }
+    RestoreWorld(root);
+    ApplyWorld(root);
+}
 static void Reconcile(void) {
     if (Busy || Depth || !NSThread.isMainThread) return;
     Busy = YES;
     @try {
         [UIView performWithoutAnimation:^{
-            for (UIView *root in Roots.allObjects) RestoreWorld(root);
             if (Enabled && B8Disabled(Disabled)) { Enabled = NO; Log(@"DISABLED restored owned transforms"); }
-            if (!Enabled || Orientation() != UIInterfaceOrientationPortraitUpsideDown) return;
+            if (!Enabled || Orientation() != UIInterfaceOrientationPortraitUpsideDown) {
+                for (UIView *root in Roots.allObjects) RestoreWorld(root);
+                return;
+            }
             for (UIWindow *w in ExistingWindows()) Discover(w);
             for (UIWindow *w in Windows.allObjects) Discover(w);
-            for (UIView *root in Roots.allObjects) ApplyWorld(root);
+            for (UIView *root in Roots.allObjects) ReconcileRoot(root);
         }];
     } @finally { Busy = NO; }
 }
@@ -262,13 +318,21 @@ static BOOL Begin(UIView *v){
         @finally{Busy=NO;}}
     return YES;
 }
+static BOOL BeginLayout(UIView *view){
+    if(Busy || !NSThread.isMainThread || !Relevant(view))return NO;
+    // A pure layout pass must keep the animation's corrected model endpoint.
+    // Nested geometry setters share this transaction and defer reconciliation,
+    // rather than briefly committing the native inverted target to the model.
+    ++Depth;
+    return YES;
+}
 static void End(BOOL begun){if(begun&&--Depth==0)Reconcile();}
 
 // Public UIView methods hooked only on the three evidenced private subclasses.
 // Separate originals avoid cross-class recursion when a method is inherited.
 #define DEFINE_HOOKS(P) \
 static void (*P##Layout)(id,SEL); \
-static void P##HookLayout(id s,SEL c){BOOL b=Begin(s);@try{P##Layout(s,c);if(!Busy&&[NSThread isMainThread]&&[s isKindOfClass:WindowClass])Discover(s);}@finally{End(b);}} \
+static void P##HookLayout(id s,SEL c){BOOL b=BeginLayout(s);@try{P##Layout(s,c);if(!Busy&&[NSThread isMainThread]&&[s isKindOfClass:WindowClass])Discover(s);}@finally{End(b);}} \
 static void (*P##Frame)(id,SEL,CGRect); \
 static void P##HookFrame(id s,SEL c,CGRect v){BOOL b=Begin(s);@try{P##Frame(s,c,v);}@finally{End(b);}} \
 static void (*P##Bounds)(id,SEL,CGRect); \
@@ -317,12 +381,12 @@ static void ContentHookTransform(UIView *s,SEL c,CGAffineTransform v){
 }
 
 static UIView *WorldHit(UIWindow *w,CGPoint point,UIEvent *event){
-    if(!Enabled||Busy||Depth||![NSThread isMainThread]||HitDepth||Orientation()!=2)return nil;
+    if(!Enabled||Busy||Depth||![NSThread isMainThread]||HitDepth||B8Disabled(Disabled))return nil;
     ++HitDepth;
     @try {
     for(UIView *root in w.subviews.reverseObjectEnumerator){
         MWWorldState *s=State(root);
-        if(!s.outer.applied||s.suspended||!VisibleChain(root,w))continue;
+        if(!KeepsWorld(root,s,w)||!VisibleChain(root,w))continue;
         CGPoint local=[root convertPoint:point fromView:w];
         if(!isfinite(local.x)||!isfinite(local.y))continue;
         UIView *hit=[root hitTest:local withEvent:event];
@@ -363,21 +427,27 @@ static BOOL OwnsGestureWindow(UIView *view) {
     for (UIView *root in Roots.allObjects) {
         MWWorldState *state = State(root);
         if (root.superview == window && state.parent == window &&
-            MWOwns(Math(window.transform), Math(state.outer.after), state.outer.applied, state.suspended) &&
+            KeepsWorld(root,state,window) &&
             (view == window || view == root || [view isDescendantOfView:root])) return YES;
     }
     return NO;
 }
 static void (*OriginalMangoPan)(id, SEL, id);
 static unsigned PanDepth;
+static BOOL PanInstalled;
+static unsigned PanAttempts;
 static void HookMangoPan(id controller, SEL selector, UIPanGestureRecognizer *gesture) {
     if (!NSThread.isMainThread || PanDepth || !Enabled || Busy || Depth || B8Disabled(Disabled) ||
-        Orientation() != UIInterfaceOrientationPortraitUpsideDown ||
         ![gesture isKindOfClass:UIPanGestureRecognizer.class] ||
-        gesture.state != UIGestureRecognizerStateEnded || !OwnsGestureWindow(gesture.view)) {
+        gesture.state != UIGestureRecognizerStateEnded) {
         OriginalMangoPan(controller, selector, gesture); return;
     }
     UIView *view = gesture.view;
+    MWTransform map=FixedMap(view.window);
+    if(!MSB8PanNeedsCorrection(B8MangoOrientation(),OwnsGestureWindow(view),
+                              MWInvertedBasis(map.a,map.d,map.c,map.b))){
+        OriginalMangoPan(controller,selector,gesture);return;
+    }
     CGPoint before = [gesture translationInView:view];
     if (!isfinite(before.x) || !isfinite(before.y)) {
         OriginalMangoPan(controller, selector, gesture); return;
@@ -389,14 +459,18 @@ static void HookMangoPan(id controller, SEL selector, UIPanGestureRecognizer *ge
     }, &PanDepth);
 }
 static void InstallMangoPan(void) {
+    if(PanInstalled || !Enabled || B8Disabled(Disabled))return;
     Class controller = objc_getClass("SBSystemApertureViewController");
     SEL selector = sel_registerName("_handleResizePan:");
     if (!controller || !Signature(controller, selector, "v", @[@"@"]) ||
         !B8IMPIsHello(class_getMethodImplementation(controller, selector))) {
-        Log(@"Pan correction skipped: MangoHello resize-pan hook unavailable or wrapped");
+        if(++PanAttempts<40)
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,500*NSEC_PER_MSEC),dispatch_get_main_queue(),^{InstallMangoPan();});
+        else Log(@"Pan correction unavailable after 20s: MangoHello resize-pan hook absent or wrapped");
         return;
     }
     MSHookMessageEx(controller, selector, (IMP)HookMangoPan, (IMP *)&OriginalMangoPan);
+    PanInstalled=YES;
     Log(@"Owned-window ended-pan correction installed (vertical translation only)");
 }
 static Class OrientationLockClass;
@@ -466,7 +540,7 @@ static void Install(void){
     dispatch_source_set_event_handler(Timer,^{Reconcile();if(!Enabled)dispatch_source_cancel(Timer);});dispatch_resume(Timer);
     InstallMangoPan();
     InstallOrientationLockFix();
-    Log(@"INSTALLED Beta8: aperture window turn, owned content normalization, scoped ended-pan and orientation lock");
+    Log(@"INSTALLED Beta8.3: persistent verified world, recoverable ownership, physical ended-pan and orientation lock");
     Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}

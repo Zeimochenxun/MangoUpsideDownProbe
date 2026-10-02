@@ -21,6 +21,7 @@ proof = json.loads((ROOT / "packages/verification.json").read_text(encoding="utf
 source_commit = (ARTIFACTS / "build-info/source-commit.txt").read_text().strip()
 assert source_commit == proof["sourceCommit"]
 assert hashlib.sha256(PACKAGE.read_bytes()).hexdigest() == proof["packageSHA256"]
+assert proof["result"] == "PASS" and proof["deviceTested"] is False
 token = credential()
 
 def get(path):
@@ -69,7 +70,8 @@ summary = {
               "steps": [{"name": step["name"], "conclusion": step["conclusion"]} for step in job["steps"]]} for job in jobs],
     "testPassLines": sorted(passes), "metal": shader, "compiledSourceSHA256": compiled_sources,
     "finalPackageVerification": proof, "temporaryPrivateBuildInputRemoved": True,
-    "nativePreferenceDeviceConfirmedByUser": True, "completeSuiteDeviceTested": False,
+    "nativePreferenceHistoricalUserFeedback": "Original Mango Beta8 with the independent preference tool; not this suite build.",
+    "completeSuiteDeviceTested": False, "suiteDeviceVerificationStatus": "pending",
     "device": "iPhone 13 mini / iOS 16.5 / Dopamine RootHide / authorized Mango 1.0-Beta8-1",
 }
 output = ROOT / "delivery" / VERSION.replace("~", "-")

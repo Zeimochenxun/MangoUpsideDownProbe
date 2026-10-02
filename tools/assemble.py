@@ -12,12 +12,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 DYNAMIC = "Library/MobileSubstrate/DynamicLibraries/"
 MODULES = "Library/MangoSuite/Modules/"
 PREFS = "Library/PreferenceBundles/MangoSuitePrefs.bundle/"
-VERSION = "1.1.0~beta8.2"
-OUTPUT_NAME = "MangoSuite-1.1.0-Beta8.2-RootHide-arm64e.deb"
+VERSION = "1.1.0~beta8.3"
+OUTPUT_NAME = "MangoSuite-1.1.0-Beta8.3-RootHide-arm64e.deb"
 COMPILED = {
-    "IdleIsland": ("MangoIdleIsland", "1.1.9.3~beta8.1"),
-    "UpsideDownWorld": ("MangoUpsideDownWorld", "1.3.1~beta8.2"),
-    "SplitUpsideDownFix": ("MangoSplitUpsideDownFix", "0.2.0~beta8.1"),
+    "IdleIsland": ("MangoIdleIsland", "1.1.9.3~beta8.3"),
+    "UpsideDownWorld": ("MangoUpsideDownWorld", "1.3.0~beta8.3"),
+    "SplitUpsideDownFix": ("MangoSplitUpsideDownFix", "0.1.1~beta8.3"),
 }
 NATIVE_PREFERENCE = {
     "domain": "com.go.mangoosprefs",

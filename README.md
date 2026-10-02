@@ -1,8 +1,8 @@
 # Mango 整合补丁 Beta8
 
-版本：`1.1.0~beta8.2`。完整安装包：`MangoSuite-1.1.0-Beta8.2-RootHide-arm64e.deb`。
+版本：`1.1.0~beta8.3`。完整安装包：`MangoSuite-1.1.0-Beta8.3-RootHide-arm64e.deb`。
 
-当前 Beta8.2 状态：待构建和本次包检查。新增小芒代码与测试尚未经过本次 CI，也未在手机上实测。
+当前 Beta8.3 状态：针对媒体内容缺失、启动器局部回正及随之改变的灵动岛手势进行源码修复；本次 CI、arm64e 构建和完整安装包检查待完成，完整整合包尚未在手机上实测。
 
 一个安装包、一个“设置 → Mango 整合”入口，提供原生屏幕倒置开关及四项整合修复。需要已经正常授权的 **Mango 1.0-Beta8-1**；不包含 Mango 主插件。
 
@@ -10,7 +10,7 @@
 
 ## 安装与使用
 
-1. 使用 Sileo 等安装完整 `MangoSuite-1.1.0-Beta8.2-RootHide-arm64e.deb`。可覆盖旧 MangoSuite；包管理器会替换旧独立修复包和之前的独立倒置偏好工具。确认安装操作保留 **Mango 主插件**，不要安装构建用的 helper 中间包。
+1. 使用 Sileo 等安装完整 `MangoSuite-1.1.0-Beta8.3-RootHide-arm64e.deb`。可覆盖旧 MangoSuite；包管理器会替换旧独立修复包和之前的独立倒置偏好工具。确认安装操作保留 **Mango 主插件**，不要安装构建用的 helper 中间包。
 2. 安装完成后，在多巴胺中执行一次 **重新启动用户空间**。
 3. 打开 **设置 → Mango 整合**，按需调整开关和两类参数。
 
@@ -39,7 +39,9 @@
 
 ## 本次适配内容
 
-- **本版构建目标为加载器、Idle、World、Split 和统一设置页。** 更新 Beta8 模块身份与方法校验，原 Mango 文件与授权检查保持原有机制。
+- **本版从源码构建加载器、Idle、World、Split 和统一设置页。** 延续 Beta8 模块身份与方法校验，原 Mango 文件与授权检查保持原有机制。
+- **Beta8.3 媒体互操作修复：** 检测到真实播放或原生媒体视图已挂载时，静止补底退出，即使媒体正处于透明度为零的入场阶段也不抢占。补底几何只在值变化时更新；原生媒体内容及授权路径仍由 Mango 处理。此前媒体缺失的唯一根因尚未真机确认。
+- **Beta8.3 方向稳定性修复：** 已应用的分屏变换每次复查实际物理坐标，识别 scene 后续半转与外部重置；原生启动器旋转／布局完成后立即调和。World 保留稳定修正，纯布局期间不撤销媒体动画的正确端点；灵动岛 Ended 手势依据实际拥有的倒置窗口补偿。
 - Idle 识别 Beta8 的 MangoPanda/MangoHello 原生玻璃，保留紧凑尺寸与 presentation 透明度交接；缓存偏好、合并重载，减少重复读取和诊断日志。
 - World 与 Split 针对 Beta8 重建方向、放置与手势修复，维持各自的系统窗口／分屏窗口作用范围。
 - **Beta8.2 将小芒适配加入现有 World 模块。** 同一个“倒置方向与小芒修复”开关管理系统灵动岛与小芒，没有新增模块或开关。适配覆盖悬浮球、根面板、独立通知泡／卡片以及使用相同原生窗口类的提示窗；按物理屏幕中心同时校正窗口方向和位置，保持 Mango 的局部布局、原始手势与空白透传。实现边界与待验证项见 [XIAOMANG.md](modules/orientation/XIAOMANG.md)。
@@ -52,21 +54,22 @@
 
 用户已在上述设备上确认：**原版 Beta8 配合独立偏好工具，原生倒置确实生效。** 本版整合页沿用同一原生偏好键；这项反馈不能代替此次整合包的完整真机验收。
 
-本地已核对 Beta8 方法 ABI、模块身份、原 AdaptiveColor 的四项精确 shader 替换、参数默认值与通知刷新链。**Beta8.1** 的构建记录为 [36913456075](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/36913456075)，源码 commit 为 `6b26c774b9d01a864a676f2a64810f88c6910835`。这些已有结果不能替代 Beta8.2 的新编译和包检查：
+既有证据已核对 Beta8 方法 ABI、模块身份、原 AdaptiveColor 的四项精确 shader 替换、参数默认值与通知刷新链。Beta8.2 的实际构建记录为 [36985749665](https://github.com/Zeimochenxun/MangoUpsideDownProbe/actions/runs/36985749665)，该记录仅对应旧版。**Beta8.3 的构建 commit、CI 结果与最终 SHA256 待生成**；完成后以本次 `packages/verification.json` 和 `delivery/1.1.0-beta8.3/build-validation.json` 为准。
 
 | 检查 | 验证内容 | 当前状态 |
 |---|---|---|
-| 加载策略 | 512 组开关、应急标记与旧冲突组合 | Beta8.1 已通过；本次待运行 |
-| 实际设置／存储代码 | 32 组整合选择、旧配置迁移、保存失败与损坏数据保留、原生开关独立性 | Beta8.1 已通过；本次待运行 |
-| 实际兼容解析器 | 正常及畸形 Mach-O UUID 输入 | Beta8.1 已通过；本次待运行 |
-| 实际 Idle helper | presentation 淡出、紧凑返场、展开排除、异常尺寸；旧回归负对照 | Beta8.1 已通过；本次待运行 |
-| 实际方向 helper | World 数学、放置与手势纠正 | Beta8.1 已通过；本次待运行 |
-| 新增三项小芒 helper | 偏中心小窗和 scene 坐标映射、重布局、原生倒置防双转、嵌套 setter 和异常恢复、外层几何动画定向清理 | 已编写；待本次 CI 执行 |
+| 加载策略 | 512 组开关、应急标记与旧冲突组合 | 待本次 CI |
+| 实际设置／存储代码 | 32 组整合选择、旧配置迁移、保存失败与损坏数据保留、原生开关独立性 | 待本次 CI |
+| 实际兼容解析器 | 正常及畸形 Mach-O UUID 输入 | 待本次 CI |
+| 实际 Idle helper | presentation 淡出、紧凑返场、展开排除、媒体活动状态与异常尺寸；旧回归负对照 | 待本次 CI |
+| 实际方向 helper | World 数学、放置与手势纠正；正向／倒置选择及回正恢复 | 待本次 CI |
+| 分屏方向刷新 | 已有分屏在方向变化后的旋转、放置与拖动恢复 | 待本次 CI |
+| 三项小芒 helper | 偏中心小窗和 scene 坐标映射、重布局、原生倒置防双转、嵌套 setter 和异常恢复、外层几何动画定向清理 | 待本次 CI |
 | Apple Metal 编译 | 未改动的 Beta8 最终 shader | 复用 36913456075 的实际 Apple Metal 编译证据；本次不重新编译 |
-| 编译产物与最终安装包 | arm64e、五个新镜像及两个保留镜像代码页签名、唯一入口、依赖链接与冲突声明 | Beta8.2 待构建和最终包检查 |
-| 真实 dpkg 隔离安装 | 与最终包一致的 14 个路径及权限、首次安装、失败重试与升级保留配置；使用惰性测试载荷 | Beta8.1 已通过；本次待运行 |
+| 编译产物与最终安装包 | arm64e、五个新镜像及两个保留镜像代码页签名、唯一入口、依赖链接与冲突声明 | 待本次构建及最终包检查 |
+| 真实 dpkg 隔离安装 | 与最终包一致的 14 个路径及权限、首次安装、失败重试与升级保留配置；使用惰性测试载荷 | 待本次 CI |
 
-这些检查不模拟 iPhone 的实际显示、触摸和动画时序。**Beta8.2 完整 MangoSuite 及新增小芒适配均未真机验证**，需按 `ACCEPTANCE.md` 完成少量实际场景检查；不能仅凭编译通过宣称所有视觉场景完全适配。
+这些检查不模拟 iPhone 的实际显示、触摸和动画时序。**Beta8.3 完整 MangoSuite 及本次修复均未真机验证**，需按 `ACCEPTANCE.md` 检查媒体显示、回正恢复、方向变化及既有小芒交互；不能仅凭编译通过宣称所有视觉场景完全适配。
 
 ## 停用与恢复
 
@@ -78,13 +81,16 @@
 
 macOS CI 使用 RootHide Theos、固定校验的 iOS 16.5 SDK 与 arm64e 工具链，构建加载器、Idle、World（包含小芒）、Split 和统一设置页。原 AdaptiveColor 二进制及 UI 在本地组包时加入；Mango 原版二进制与完整 shader 不进入公开构建仓库。
 
-`helper` 为构建中间产物，不能代替完整安装包。请仅向设备安装交付的 `MangoSuite-1.1.0-Beta8.2-RootHide-arm64e.deb`。
+`helper` 为构建中间产物，不能代替完整安装包。请仅向设备安装交付的 `MangoSuite-1.1.0-Beta8.3-RootHide-arm64e.deb`。
 
 重建三个模块和设置页后，完整组包使用：
 
 ```text
 python tools/assemble.py --helper-deb <本次helper.deb> --source-commit <本次构建的40位commit>
-python tests/check_suite.py packages/MangoSuite-1.1.0-Beta8.2-RootHide-arm64e.deb --helper-deb <本次helper.deb>
+python tests/check_suite.py packages/MangoSuite-1.1.0-Beta8.3-RootHide-arm64e.deb --helper-deb <本次helper.deb>
+python tools/export_delivery.py --run <本次成功的CI编号>
 ```
 
-完整 shader 曾作为 Beta8.1 Metal 验证的临时私有输入传入，远端临时输入已删除。Beta8.2 没有改动 shader，复用该次编译证据；完整 shader 不进入成品或源码归档。
+完整 shader 曾作为 Beta8.1 Metal 验证的临时私有输入传入，远端临时输入已删除。Beta8.3 没有改动 shader，复用该次编译证据；完整 shader 不进入成品或源码归档。
+
+交付导出到 `delivery/1.1.0-beta8.3`，保留旧版交付目录。成品、manifest、SHA256、包验证报告和本次 CI 证据在同一目录中；objsee 抓取归档不进入成品或源码归档。

@@ -30,7 +30,7 @@ def main(require_clang):
         if require_clang: raise SystemExit("macOS clang is required to execute actual Objective-C helpers")
         print("SKIP: Objective-C helper execution requires macOS clang")
         return
-    helpers = "\n\n".join(extract(n) for n in ["EffectiveOpacity", "StableIdleGeometry", "StableIdleHostGeometry"])
+    helpers = "\n\n".join(extract(n) for n in ["EffectiveOpacity", "StableIdleGeometry", "StableIdleHostGeometry", "NeedsIdleBacking"])
     update = extract("Update")
     need = re.search(r"BOOL needBackground = ([^;]+);", update).group(1)
     backing = re.search(r"CGFloat backingOpacity = backgroundState \? 1\.0 : ([^;]+);", update).group(1)
@@ -40,6 +40,7 @@ def main(require_clang):
         "    BOOL activityState = activity > 0.01;",
         "    BOOL backgroundState = !activityState && stableGeometry;",
         "    BOOL blendableActivity = activityState && stableGeometry;",
+        "    BOOL mediaReserved = NO;",
         "    BOOL needBackground = " + need + ";",
         "    CGFloat backingOpacity = backgroundState ? 1.0 : " + backing + ";",
         "    return needBackground ? backingOpacity : 0.0;", "}",
@@ -56,6 +57,20 @@ def main(require_clang):
         for label, bodies, success in [("candidate", helpers, True), ("double-fade", wrong_opacity, False), ("model-only", wrong_geometry, False)]:
             source, binary = Path(temp) / (label + ".m"), Path(temp) / label
             source.write_text(template.replace("/* ACTUAL_HELPERS */", bodies), encoding="utf-8")
+            subprocess.run([clang, "-x", "objective-c", "-std=gnu11", "-Wall", "-Wextra", "-Werror", str(source), "-framework", "Foundation", "-framework", "CoreGraphics", "-o", str(binary)], check=True)
+            result = subprocess.run([str(binary)], capture_output=True, text=True)
+            assert result.returncode == (0 if success else 1), (label, result.stdout, result.stderr)
+            print("PASS:", label, "actual helper behavior" if success else "negative control detected")
+        media_helpers = "\n\n".join(extract(n) for n in ["IsNativeMediaView", "NativeMediaPresent", "NeedsIdleBacking", "DetachBackground", "SynchronizeBackground", "PrepareForNativeLayout", "Layout"])
+        media_template = (ROOT / "tests/idle_media_harness.m").read_text(encoding="utf-8")
+        # A native media root can be attached while its reveal alpha is zero.
+        wrong_reveal = media_helpers.replace("view.window == host.window && IsNativeMediaView(view)", "view.window == host.window && view.alpha > 0.01 && !view.hidden && IsNativeMediaView(view)")
+        wrong_quiet = media_helpers.replace("if (!CGRectEqualToRect(background.frame, host.bounds)) background.frame = host.bounds;", "background.frame = host.bounds;")
+        wrong_order = media_helpers.replace("if (NSThread.isMainThread) PrepareForNativeLayout(self);\n    OriginalLayout(self, cmd);", "OriginalLayout(self, cmd);\n    if (NSThread.isMainThread) PrepareForNativeLayout(self);")
+        assert all(x != media_helpers for x in [wrong_reveal, wrong_quiet, wrong_order])
+        for label, bodies, success in [("media-owner", media_helpers, True), ("media-alpha-gate", wrong_reveal, False), ("media-frame-rewrite", wrong_quiet, False), ("media-late-release", wrong_order, False)]:
+            source, binary = Path(temp) / (label + ".m"), Path(temp) / label
+            source.write_text(media_template.replace("/* ACTUAL_MEDIA_HELPERS */", bodies), encoding="utf-8")
             subprocess.run([clang, "-x", "objective-c", "-std=gnu11", "-Wall", "-Wextra", "-Werror", str(source), "-framework", "Foundation", "-framework", "CoreGraphics", "-o", str(binary)], check=True)
             result = subprocess.run([str(binary)], capture_output=True, text=True)
             assert result.returncode == (0 if success else 1), (label, result.stdout, result.stderr)

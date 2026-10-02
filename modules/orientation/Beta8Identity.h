@@ -9,6 +9,7 @@
 #import <roothide.h>
 #include <string.h>
 #include <unistd.h>
+#include "OrientationPolicy.h"
 #if __has_feature(ptrauth_calls)
 #include <ptrauth.h>
 #endif
@@ -78,13 +79,29 @@ static inline BOOL B8IMPIsHello(IMP imp) {
     return dladdr(pointer, &info) && info.dli_fbase == (const void *)B8Hello();
 }
 
-static inline NSInteger B8Orientation(void) {
+static inline NSInteger B8MangoOrientation(void) {
     Class scene = objc_getClass("DecoratedAppSceneView");
     SEL getter = sel_registerName("mango_currentInterfaceOrientation");
     Method m = scene ? class_getClassMethod(scene, getter) : NULL;
     if (!B8ClassIsHello(scene) || !m || strcmp(method_getTypeEncoding(m), "q16@0:8"))
         return UIInterfaceOrientationUnknown;
     return ((NSInteger (*)(id, SEL))objc_msgSend)((id)scene, getter);
+}
+
+static inline NSInteger B8SystemOrientation(void) {
+    if (!NSThread.isMainThread) return UIInterfaceOrientationUnknown;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    NSInteger system = UIApplication.sharedApplication.statusBarOrientation;
+#pragma clang diagnostic pop
+    return system;
+}
+
+static inline NSInteger B8Orientation(void) {
+    NSInteger mango = B8MangoOrientation();
+    if (!NSThread.isMainThread || (mango != UIInterfaceOrientationUnknown &&
+                                  mango != UIInterfaceOrientationPortrait)) return mango;
+    return MSB8ResolvedOrientation(mango, B8SystemOrientation());
 }
 
 static inline BOOL B8Disabled(const char *path) {

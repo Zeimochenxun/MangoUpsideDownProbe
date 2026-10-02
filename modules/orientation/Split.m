@@ -4,30 +4,31 @@
 #import <QuartzCore/QuartzCore.h>
 #import <substrate.h>
 #import "Beta8Identity.h"
-#include "WorldMath.h"
+#include "SplitReconcile.h"
 #include <math.h>
 
 static const char *Disabled = "/var/mobile/Library/Preferences/MangoSplitUpsideDownFix.disabled";
 static NSHashTable<UIWindow *> *Windows;
 static BOOL Ready, Enabled, Busy;
-static Class SceneClass, FloatingClass;
+static Class SceneClass, FloatingClass, LauncherClass;
 static dispatch_source_t Timer;
 static char StateKey;
 
 @interface MSB8SplitState : NSObject
-@property(nonatomic) CGAffineTransform before, after;
-@property(nonatomic) BOOL applied, suspended;
+@property(nonatomic) MSSplitOwnership ownership;
 @end
 @implementation MSB8SplitState
 @end
 
 static MWTransform Math(CGAffineTransform t) { return (MWTransform){t.a,t.b,t.c,t.d,t.tx,t.ty}; }
 static CGAffineTransform CG(MWTransform t) { return CGAffineTransformMake(t.a,t.b,t.c,t.d,t.tx,t.ty); }
-static BOOL Near(CGAffineTransform a, CGAffineTransform b) { return MWNear(Math(a), Math(b)); }
 static void Log(NSString *s) { NSLog(@"[MangoSuiteSplit] %@", s); }
 static MSB8SplitState *State(UIWindow *w) { return objc_getAssociatedObject(w, &StateKey); }
 
 static BOOL ContainsMangoTarget(UIWindow *window) {
+    // Beta8's launcher controller can exist before its DecoratedFloatingView
+    // has attached. Its class and lifecycle IMPs are verified at installation.
+    if (LauncherClass && [window.rootViewController isKindOfClass:LauncherClass]) return YES;
     NSMutableArray<UIView *> *queue = [NSMutableArray arrayWithObject:window];
     for (NSUInteger i = 0; i < queue.count; ++i) {
         if (queue.count > 2048) return NO;
@@ -53,22 +54,6 @@ static void Write(UIWindow *w, CGAffineTransform value) {
     [UIView performWithoutAnimation:^{ w.transform = value; }];
 }
 
-static void Restore(UIWindow *w, MSB8SplitState *state) {
-    if (!state.applied) return;
-    BOOL owned = MWOwns(Math(w.transform), Math(state.after), state.applied, state.suspended);
-    state.applied = NO;
-    if (owned) {
-        Write(w, state.before);
-        return;
-    }
-    // Another layout owner has changed the transform. Do not replace its
-    // value with our old baseline, and never reset a pre-existing half-turn.
-    // Relinquish ownership without suspending routine scene transitions.
-    // Mango can legitimately reset its window to identity on rotation; the
-    // next reconciliation still must pass the complete target/basis guards.
-    Log(@"Owned split transform replaced externally; ownership released");
-}
-
 static BOOL SafeWindow(UIWindow *w) {
     if (object_getClass(w) != UIWindow.class || w.screen != UIScreen.mainScreen) return NO;
     if (!CATransform3DIsAffine(w.layer.transform) || !CATransform3DIsIdentity(w.layer.sublayerTransform)) return NO;
@@ -87,54 +72,41 @@ static BOOL SafeWindow(UIWindow *w) {
         fabs(fixed.size.height - expected.size.height) < 2;
 }
 
+static MSSplitSnapshot Snapshot(void *context) {
+    UIWindow *w = (__bridge UIWindow *)context;
+    MSSplitSnapshot sample = {.transform = Math(w.transform)};
+    sample.eligible = ContainsMangoTarget(w) && SafeWindow(w);
+    if (!sample.eligible) return sample;
+    id<UICoordinateSpace> fixed = w.screen.fixedCoordinateSpace;
+    const CGPoint local[3] = {CGPointZero, CGPointMake(1,0), CGPointMake(0,1)};
+    for (unsigned i = 0; i < 3; ++i) {
+        CGPoint p = [w convertPoint:local[i] toCoordinateSpace:fixed];
+        sample.points[i] = (MWPoint){p.x,p.y};
+    }
+    CGRect screen = fixed.bounds;
+    sample.center = (MWPoint){w.center.x,w.center.y};
+    sample.pivot = (MWPoint){CGRectGetMidX(screen),CGRectGetMidY(screen)};
+    return sample;
+}
+
+static void WriteSnapshot(void *context, MWTransform transform) {
+    Write((__bridge UIWindow *)context, CG(transform));
+}
+
 static void Update(UIWindow *w, BOOL active) {
     MSB8SplitState *state = State(w);
-    BOOL isTarget = ContainsMangoTarget(w);
-    if (!active || !isTarget || !SafeWindow(w)) {
-        if (state) Restore(w, state);
-        return;
-    }
     if (!state) {
+        if (!active || !ContainsMangoTarget(w) || !SafeWindow(w)) return;
         state = [MSB8SplitState new];
         objc_setAssociatedObject(w, &StateKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    if (state.suspended) return;
-    if (state.applied) {
-        if (!Near(w.transform, state.after)) Restore(w, state);
-        return;
-    }
-
-    id<UICoordinateSpace> fixed = w.screen.fixedCoordinateSpace;
-    CGPoint old[3] = {[w convertPoint:CGPointZero toCoordinateSpace:fixed],
-                      [w convertPoint:CGPointMake(1,0) toCoordinateSpace:fixed],
-                      [w convertPoint:CGPointMake(0,1) toCoordinateSpace:fixed]};
-    double dx = old[1].x-old[0].x, dy = old[2].y-old[0].y;
-    double skewX = old[2].x-old[0].x, skewY = old[1].y-old[0].y;
-    // A Beta8 scene/window may already be inverted even when its model
-    // transform reads identity. Inspect its actual coordinate mapping first.
-    if (MWInvertedBasis(dx, dy, skewX, skewY)) return;
-    if (!isfinite(dx) || !isfinite(dy) || dx <= 0 || dy <= 0 ||
-        fabs(skewY) > fabs(dx)*.001 || fabs(skewX) > fabs(dy)*.001 ||
-        !Near(w.transform, CGAffineTransformIdentity)) return;
-
-    CGRect screen = fixed.bounds;
-    CGPoint pivot = CGPointMake(CGRectGetMidX(screen), CGRectGetMidY(screen));
-    MWTransform turn = MWTurn(Math(w.transform), (MWPoint){w.center.x,w.center.y}, (MWPoint){pivot.x,pivot.y});
-    if (!MWFinite(turn)) return;
-    state.before = w.transform; state.after = CG(turn); state.applied = YES;
-    Write(w, state.after);
-    CGPoint actual[3] = {[w convertPoint:CGPointZero toCoordinateSpace:fixed],
-                         [w convertPoint:CGPointMake(1,0) toCoordinateSpace:fixed],
-                         [w convertPoint:CGPointMake(0,1) toCoordinateSpace:fixed]};
-    for (unsigned i = 0; i < 3; ++i) {
-        if (!isfinite(actual[i].x) || !isfinite(actual[i].y) ||
-            fabs(actual[i].x - (2*pivot.x-old[i].x)) > .1 ||
-            fabs(actual[i].y - (2*pivot.y-old[i].y)) > .1) {
-            Restore(w, state); state.suspended = YES;
-            Log(@"Split coordinate verification failed; restored owned transform");
-            return;
-        }
-    }
+    MSSplitOwnership ownership = state.ownership;
+    unsigned result = 0;
+    @try {
+        result = MSSplitReconcile(&ownership, active, Snapshot, WriteSnapshot, (__bridge void *)w);
+    } @finally { state.ownership = ownership; }
+    if (result & MSSplitReleased) Log(@"Owned split transform replaced externally; ownership released");
+    if (result & MSSplitRejected) Log(@"Split coordinate verification failed; correction suspended until geometry changes");
 }
 
 static void Reconcile(void) {
@@ -156,6 +128,7 @@ static void Reconcile(void) {
 // windows not enumerated by public scene APIs; it is not an animation driver.
 static void (*SceneMove)(id,SEL), (*FloatingMove)(id,SEL);
 static void (*SceneLayout)(id,SEL), (*FloatingLayout)(id,SEL);
+static void (*LauncherRotation)(id,SEL), (*LauncherLayout)(id,SEL);
 static void AfterLifecycle(UIView *view) {
     if (!Ready || !NSThread.isMainThread) return;
     UIWindow *w = view.window;
@@ -166,6 +139,12 @@ static void HookSceneMove(id self,SEL cmd) { SceneMove(self,cmd); AfterLifecycle
 static void HookFloatingMove(id self,SEL cmd) { FloatingMove(self,cmd); AfterLifecycle(self); }
 static void HookSceneLayout(id self,SEL cmd) { SceneLayout(self,cmd); AfterLifecycle(self); }
 static void HookFloatingLayout(id self,SEL cmd) { FloatingLayout(self,cmd); AfterLifecycle(self); }
+static void AfterLauncherLifecycle(UIViewController *controller) {
+    if (!Ready || !NSThread.isMainThread) return;
+    if (controller.isViewLoaded) AfterLifecycle(controller.view);
+}
+static void HookLauncherRotation(id self,SEL cmd) { LauncherRotation(self,cmd); AfterLauncherLifecycle(self); }
+static void HookLauncherLayout(id self,SEL cmd) { LauncherLayout(self,cmd); AfterLauncherLifecycle(self); }
 
 static BOOL VoidMethod(Class cls, SEL selector) {
     Method m = class_getInstanceMethod(cls, selector);
@@ -188,11 +167,24 @@ static void Install(void) {
         if (!VoidMethod(cls, @selector(didMoveToWindow)) || !VoidMethod(cls, @selector(layoutSubviews))) {
             Log(@"Split unavailable: Mango lifecycle method ABI mismatch"); return;
         }
+    // Only the supplied Hello controller may provide these extra entry points.
+    // Its native portrait launcher update writes child transforms to identity;
+    // those local transforms inherit our window turn and remain native-owned.
+    Class launcher = objc_getClass("ViewController");
+    SEL rotation = sel_registerName("mango_updateLauncherRotation");
+    SEL layout = @selector(viewDidLayoutSubviews);
+    if (B8ClassIsHello(launcher) && VoidMethod(launcher, rotation) && VoidMethod(launcher, layout) &&
+        B8IMPIsHello(class_getMethodImplementation(launcher, rotation)) &&
+        B8IMPIsHello(class_getMethodImplementation(launcher, layout))) LauncherClass = launcher;
     Windows = [NSHashTable weakObjectsHashTable]; Enabled = YES; Ready = YES;
     MSHookMessageEx(SceneClass,@selector(didMoveToWindow),(IMP)HookSceneMove,(IMP *)&SceneMove);
     MSHookMessageEx(FloatingClass,@selector(didMoveToWindow),(IMP)HookFloatingMove,(IMP *)&FloatingMove);
     MSHookMessageEx(SceneClass,@selector(layoutSubviews),(IMP)HookSceneLayout,(IMP *)&SceneLayout);
     MSHookMessageEx(FloatingClass,@selector(layoutSubviews),(IMP)HookFloatingLayout,(IMP *)&FloatingLayout);
+    if (LauncherClass) {
+        MSHookMessageEx(LauncherClass,rotation,(IMP)HookLauncherRotation,(IMP *)&LauncherRotation);
+        MSHookMessageEx(LauncherClass,layout,(IMP)HookLauncherLayout,(IMP *)&LauncherLayout);
+    }
     [NSNotificationCenter.defaultCenter addObserverForName:@"MangoInterfaceOrientationDidChange"
         object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
             Reconcile(); dispatch_async(dispatch_get_main_queue(), ^{ Reconcile(); });
