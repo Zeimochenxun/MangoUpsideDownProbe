@@ -103,6 +103,7 @@ def helper_contents(helper_path):
     arm64e(helper["data"][PREFS + "MangoSuitePrefs"][0], (6, 8))
     info = plistlib.loads(helper["data"][PREFS + "Info.plist"][0])
     assert info.get("NSPrincipalClass") == "MangoSuitePrefsController"
+    assert info["CFBundleVersion"] == info["CFBundleShortVersionString"] == VERSION.split("~", 1)[0]
     return helper
 
 

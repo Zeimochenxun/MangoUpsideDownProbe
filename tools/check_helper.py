@@ -18,6 +18,7 @@ for filename in sys.argv[1:]:
         binaries.append(path + ".dylib")
     info = plistlib.loads(content["Library/PreferenceBundles/MangoSuitePrefs.bundle/Info.plist"][0])
     assert info.get("NSPrincipalClass") == "MangoSuitePrefsController"
+    assert info["CFBundleVersion"] == info["CFBundleShortVersionString"] == VERSION.split("~", 1)[0]
     assert "CFBundlePrincipalClass" not in info
     extracted = pathlib.Path("build-info/verified-images")
     extracted.mkdir(parents=True, exist_ok=True)

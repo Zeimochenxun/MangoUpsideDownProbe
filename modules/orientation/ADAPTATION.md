@@ -18,6 +18,8 @@ Beta9 的 aperture resize-pan replacement 位于 0xca5338–0xca8adc，仍把方
 
 ## 成品职责
 
+Beta9 新增 scene setter 和冻结卡片路径在已核对函数中操作 scene/子视图，没有新增直接改 containing UIWindow 的 transform/center 或方向2半转。Suite 继续仅修正校验过的目标 UIWindow；冻结与恢复的动画/触摸时序仍需手机检查。
+
 World 编译 `World.m WorldPlacement.m XiaoMang.m`；Split 编译 `Split.m`。仅在校验过的原生类上挂钩，保留已有原生半转，不重复旋转；恢复也只针对当前仍匹配本插件写入的变换。
 
 World 保留系统 aperture 窗口、content 和限定 container 的倒置与放置。Split 继续在 Mango scene/floating/launcher 回调后调和目标窗口。小芒按物理屏幕中心同时转换方向和位置，保持原生局部布局、手势和空白透传，范围见 [XIAOMANG.md](XIAOMANG.md)。
