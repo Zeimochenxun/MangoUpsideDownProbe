@@ -1,0 +1,128 @@
+{
+  "targetMangoVersion": "1.0-Beta9-1",
+  "suiteVersion": "1.2.0~beta9.1",
+  "sourceVersion": "1.1.9.5~beta9.1",
+  "methodABI": {
+    "MangoPanda": {
+      "initWithFrame:groupName:filterType:": {
+        "imp": "0x7f1c48",
+        "type": "@64@0:8{CGRect={CGPoint=dd}{CGSize=dd}}16@48@56"
+      },
+      "lgSpecularEnabledOverride": {
+        "imp": "0x7faf6c",
+        "type": "@16@0:8"
+      },
+      "setLgSpecularEnabledOverride:": {
+        "imp": "0x7fc75c",
+        "type": "v24@0:8@16"
+      },
+      "updateSpecular": {
+        "imp": "0x804f48",
+        "type": "v16@0:8"
+      },
+      "reapplyFilterForParameterReload": {
+        "imp": "0x82db68",
+        "type": "v16@0:8"
+      },
+      "lgFilterType": {
+        "imp": "0x82ea48",
+        "type": "@16@0:8"
+      }
+    },
+    "MangoHello": {
+      "initWithFrame:groupName:filterType:": {
+        "imp": "0xd6e2fc",
+        "type": "@64@0:8{CGRect={CGPoint=dd}{CGSize=dd}}16@48@56"
+      },
+      "lgSpecularEnabledOverride": {
+        "imp": "0xd7822c",
+        "type": "@16@0:8"
+      },
+      "setLgSpecularEnabledOverride:": {
+        "imp": "0xd796f8",
+        "type": "v24@0:8@16"
+      },
+      "updateSpecular": {
+        "imp": "0xd810bc",
+        "type": "v16@0:8"
+      },
+      "reapplyFilterForParameterReload": {
+        "imp": "0xda8838",
+        "type": "v16@0:8"
+      },
+      "lgFilterType": {
+        "imp": "0xda9d1c",
+        "type": "@16@0:8"
+      }
+    }
+  },
+  "renderingUUID": "7D067B62-6203-3D64-BE8A-3A4A7E965959",
+  "renderingSHA256": "24b868f364ff33b398daf866b8b2113e90870954160fd755ab90aa1522cd872c",
+  "renderingComparison": {
+    "comparedTo": "supplied Beta8 binary, not locally saved shader file",
+    "allFileBackedSectionsEqual": true,
+    "textSHA256": "3b02743667c00851b8ebaeeaacca334dd11e72070938c8cbd3314b4537ddc23f",
+    "cstringSHA256": "e808d92b43d42d8f5c87b55dc3ca913d87e0f1c5ad6893ce359920e32b3e7338",
+    "defaultTableAddress": "0x14ba8",
+    "defaultTableStride": "0x50"
+  },
+  "renderReload": {
+    "registration": "0x6494",
+    "callback": "0x88fc",
+    "cacheReloadCall": "0x8934 -> 0x7d00",
+    "preferenceRead": "0x7d54",
+    "parameterBroadcast": "0x89ec -> 0x89f4",
+    "request": "com.go.mangoosprefs/Reload",
+    "broadcast": "go.mangoos/ParametersReloaded",
+    "domain": "com.go.mangoosprefs",
+    "user": "CurrentUser",
+    "host": "AnyHost",
+    "changedFromBeta8": false
+  },
+  "nativeFallbackDefaults": {
+    "Island.Blur": 0.1,
+    "Island.DispersionStrength": 5.0,
+    "Island.DispersionEnabled": true,
+    "Island.LightTintColor": "#00000000",
+    "Island.DarkTintColor": "#00000000",
+    "Island.SpecularOpacity": 0.6
+  },
+  "specularDefaultEvidence": {
+    "MangoPanda": "updateSpecular 0x804fe8 loads double 0.6 from 0xa06760",
+    "MangoOSPrefs": "updateSpecular 0x57b00 / 0x57c08 loads fallback double 0.6 from 0x69418; CFSTR .SpecularOpacity at 0x84e98, clamped 0–1"
+  },
+  "suiteEdgeOptInDefault": false,
+  "suiteEdgeDefaultMeaning": "Explicit user opt-in policy; not a claim that the vendor global default is disabled.",
+  "shaderRewrite": {
+    "0x8300": {
+      "occurrences": 1,
+      "length": 57
+    },
+    "0x8320": {
+      "occurrences": 1,
+      "length": 60
+    },
+    "0x8340": {
+      "occurrences": 1,
+      "length": 58
+    },
+    "0x8360": {
+      "occurrences": 1,
+      "length": 46
+    }
+  },
+  "helperInsertionOccurrences": 1,
+  "entryOccurrences": 1,
+  "originalShaderSHA256": "448af1dc55fdb679c49ff600576b3073e5f5b3043d2db6727b670612dd093250",
+  "originalShaderBytes": 18516,
+  "originalShaderSameAsBeta8Binary": true,
+  "shaderSHA256": "37f427cbaf267d4021f7fc99086f666ef7a1261f64c7a0a9cd78a21342b93a95",
+  "shaderBytes": 23939,
+  "oldSavedSourceDifference": "Only CRLF vs LF: old Beta8 saved original and rewrite files use CRLF; actual Beta8 and Beta9 binary source strings both use LF. Rewrites are equal after line-ending normalization.",
+  "adaptiveModuleVersion": "0.1.3",
+  "adaptivePackageSHA256": "840d1d77b7d6b10a6c2959371e1abc367041ef343ba9e393c831186f39b5ba5c",
+  "idleSourceSHA256": "aa081b10818fe4eaea0ae673734ceb0d8517daa2c5313eac575030785f10124b",
+  "requiredChanges": "Refresh loader module identities and Beta9 package/version metadata; retain existing ABI-gated Idle logic, original Adaptive binary/UI, glass keys, defaults and cache reload sequence.",
+  "localStatus": "Static ABI/default/reload/shader match audit passed. Exact LF rewrite is ready for new Apple Metal compilation; current-run compile and arm64e helper/device validation are recorded separately.",
+  "deviceValidation": "Not performed; static ABI and shader checks do not demonstrate actual media pixels, edge appearance, touch or animation behavior."
+}

@@ -1,0 +1,9 @@
+Package: com.chenxun.mangoidleisland
+Name: Mango Idle Island Beta9
+Version: 1.1.9.5~beta9.1
+Architecture: iphoneos-arm64e
+Section: Tweaks
+Maintainer: Chen Xun
+Author: Chen Xun
+Description: Beta9 native compact idle Island backing for the Mango Suite.
+Depends: mobilesubstrate, firmware (= 16.5)

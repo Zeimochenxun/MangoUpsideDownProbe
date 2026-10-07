@@ -1,0 +1,23 @@
+{
+  "mangoVersion": "1.0-Beta9-1",
+  "samplePackageSHA256": "4826d2e73c59f05e0ff529da1e7db47e494ebfc89498fd3c8280917268e2dadd",
+  "images": {
+    "MangoPanda.dylib": {
+      "uuid": "2081DA7E-6C9B-30AA-9B3E-2DA9628A5B95",
+      "sha256": "dc686c4ba186fcd9872740ad8340295275892ee82c2afbfdf03624101823466f",
+      "cpuSubtype": "0x80000002"
+    },
+    "MangoHello.dylib": {
+      "uuid": "2E847FEA-97B0-3739-9097-3CEDCC5E1D1A",
+      "sha256": "3a8b0fc1af84139f5bc9b304eba65913fce40a1f01d8a6bbf653e09380568736",
+      "cpuSubtype": "0x80000002"
+    },
+    "MangoOSRendering.dylib": {
+      "uuid": "7D067B62-6203-3D64-BE8A-3A4A7E965959",
+      "sha256": "24b868f364ff33b398daf866b8b2113e90870954160fd755ab90aa1522cd872c",
+      "cpuSubtype": "0x80000002"
+    }
+  },
+  "originalShaderSHA256": "448af1dc55fdb679c49ff600576b3073e5f5b3043d2db6727b670612dd093250",
+  "adaptiveShaderSHA256": "37f427cbaf267d4021f7fc99086f666ef7a1261f64c7a0a9cd78a21342b93a95"
+}

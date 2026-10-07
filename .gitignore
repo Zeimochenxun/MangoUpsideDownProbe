@@ -1,0 +1,32 @@
+# Original modules and final combined artifacts stay on this computer.
+inputs/
+packages/
+dist/
+delivery/
+build-info/
+.theos/
+**/.theos/
+**/packages/
+__pycache__/
+*.pyc
+*.deb
+*.zip
+*.dylib
+build-artifacts/
+build-source.json
+# Decompiled vendor shader and binary audit evidence remain local.
+modules/**/evidence/
+modules/**/old-source/
+modules/visual/Beta8-adaptive-exact-rewrite.metal
+*.air
+*.metallib
+rollback/
+build-secret.json
+modules/orientation/split-old/
+modules/orientation/world-old/
+modules/orientation/world-main/
+modules/visual/*.metal
+modules/visual/*.txt
+modules/visual/adaptive-original-constants.json
+modules/visual/adaptive-rewrite-check.json
+modules/visual/Panda-specular-xor-leads.json

@@ -1,0 +1,64 @@
+[
+  {
+    "path": "Library/MangoSuite/Diagnostics/capture-runtime.sh",
+    "mode": 420
+  },
+  {
+    "path": "Library/MangoSuite/Modules/.jbroot",
+    "mode": 511,
+    "link": "../../.."
+  },
+  {
+    "path": "Library/MangoSuite/Modules/MangoIdleIsland.dylib",
+    "mode": 493
+  },
+  {
+    "path": "Library/MangoSuite/Modules/MangoIslandAdaptiveColor.dylib",
+    "mode": 493
+  },
+  {
+    "path": "Library/MangoSuite/Modules/MangoSplitUpsideDownFix.dylib",
+    "mode": 493
+  },
+  {
+    "path": "Library/MangoSuite/Modules/MangoUpsideDownWorld.dylib",
+    "mode": 493
+  },
+  {
+    "path": "Library/MangoSuite/manifest.json",
+    "mode": 420
+  },
+  {
+    "path": "Library/MobileSubstrate/DynamicLibraries/AMangoSuiteLoader.dylib",
+    "mode": 493
+  },
+  {
+    "path": "Library/MobileSubstrate/DynamicLibraries/AMangoSuiteLoader.plist",
+    "mode": 420
+  },
+  {
+    "path": "Library/PreferenceBundles/MangoIslandAdaptiveColorPrefs.bundle/Info.plist",
+    "mode": 420
+  },
+  {
+    "path": "Library/PreferenceBundles/MangoIslandAdaptiveColorPrefs.bundle/MangoIslandAdaptiveColorPrefs",
+    "mode": 493
+  },
+  {
+    "path": "Library/PreferenceBundles/MangoSuitePrefs.bundle/.jbroot",
+    "mode": 511,
+    "link": "../../.."
+  },
+  {
+    "path": "Library/PreferenceBundles/MangoSuitePrefs.bundle/Info.plist",
+    "mode": 420
+  },
+  {
+    "path": "Library/PreferenceBundles/MangoSuitePrefs.bundle/MangoSuitePrefs",
+    "mode": 493
+  },
+  {
+    "path": "Library/PreferenceLoader/Preferences/MangoSuitePrefs.plist",
+    "mode": 420
+  }
+]
