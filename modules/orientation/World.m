@@ -529,7 +529,8 @@ static void RunMangoPan(id controller,SEL selector,id gesture,void (*original)(i
             return;
         }
         if (![gesture isKindOfClass:UIPanGestureRecognizer.class]) return;
-        UIGestureRecognizerState state=[gesture state];
+        UIPanGestureRecognizer *pan=gesture;
+        UIGestureRecognizerState state=pan.state;
         if (state!=UIGestureRecognizerStateBegan && state!=UIGestureRecognizerStateEnded && state!=UIGestureRecognizerStateCancelled && state!=UIGestureRecognizerStateFailed) return;
         recordReturn=YES;
         MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN native-begin seq=%lu entry=%@ state=%ld requested=%d queryHooks=0 correction=paused",sequence,NSStringFromSelector(selector),(long)state,MSRuntimeFlag(@"SwipeDirectionEnabled")]);
