@@ -17,6 +17,10 @@ static inline unsigned MSSurfaceReconcile(MSSurfaceOwnership *state,int active,
     MSSplitSnapshot current=sample.local;
     unsigned result=0;
     if (!active || !current.eligible) return MSSplitRestore(&state->turn,current,write,context);
+    if (state->turn.suspended) {
+        if (MSSplitSameGeometry(current,state->turn.suspendedAt)) return 0;
+        state->turn.suspended=0;
+    }
     if (state->turn.applied) {
         if (!MWOwns(current.transform,state->turn.after,1,0)) {
             result|=MSSplitRestore(&state->turn,current,write,context);
@@ -42,6 +46,7 @@ static inline unsigned MSSurfaceReconcile(MSSurfaceOwnership *state,int active,
     // commutes with any affine parent map. No UIWindow-only sample is used.
     if (!MSSplitMirrored(current,after)) {
         result|=MSSplitRestore(&state->turn,after,write,context);
+        state->turn.suspendedAt=read(context).local; state->turn.suspended=1;
         return result|MSSplitRejected;
     }
     return result|MSSplitApplied;

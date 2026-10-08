@@ -72,9 +72,9 @@ int main(void) { @autoreleasepool {
     // Negative control: Beta9.3 asked the aggregate for providedView, which it
     // does not have. The current production code reaches the primary provider.
     assert(![aggregate respondsToSelector:sel_registerName("providedView")]);
-    NotificationRefresh(pill);assert(CapturedHost==host && CapturedNotification && Captures==1);
+    NotificationRefresh(pill);assert(CapturedHost==view && CapturedNotification && Captures==1);
     pill.userNotification=nil;NotificationRefresh(pill);
-    assert(CapturedHost==host && !CapturedNotification && Captures==2);
+    assert(CapturedHost==view && !CapturedNotification && Captures==2);
     pill.userNotification=[NSObject new];view.superview=nil;NotificationRefresh(pill);
     assert(!CapturedHost && CapturedNotification && Captures==3);
     pill.layoutHost=host;NotificationRefresh(pill);assert(CapturedHost==host && CapturedNotification);

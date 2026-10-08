@@ -87,7 +87,10 @@ static UIView *MenuSurface(UIViewController *controller) {
     UIWindow *window=body.window;
     if (!window) return nil;
     CGRect screen=window.screen.fixedCoordinateSpace.bounds;
-    for (UIView *view=body;view && view!=window && view!=window.rootViewController.view;view=view.superview) {
+    UIViewController *root=window.rootViewController;
+    BOOL menuRoot=root==controller || ([root isKindOfClass:UINavigationController.class] && ((UINavigationController *)root).viewControllers.firstObject==controller);
+    for (UIView *view=body;view && view!=window;view=view.superview) {
+        if (view==root.view && !menuRoot) break;
         CGRect box=[view.layer convertRect:view.bounds toLayer:window.layer];
         box=[window convertRect:box toCoordinateSpace:window.screen.fixedCoordinateSpace];
         if (fabs(box.size.width-screen.size.width)<2 && fabs(box.size.height-screen.size.height)<2 &&
@@ -105,7 +108,11 @@ void MSLauncherSurfacesUpdate(UIViewController *controller,BOOL active) {
 }
 void MSLauncherSurfacesFinish(BOOL active) {
     if (Writing || !NSThread.isMainThread) return;
-    for (UIViewController *menu in Menus.allObjects) Track(MenuSurface(menu),@"bottom-split-settings");
+    NSMutableSet *currentMenus=[NSMutableSet new];
+    for (UIViewController *menu in Menus.allObjects) {
+        UIView *surface=MenuSurface(menu);
+        if (surface) { [currentMenus addObject:surface]; Track(surface,@"bottom-split-settings"); }
+    }
     // A picker nested inside a launcher container inherits that one turn.
     // Reconcile parents before their descendants; a native double-turn is
     // handled by the picker's own measured basis on the following callback.
@@ -122,7 +129,8 @@ void MSLauncherSurfacesFinish(BOOL active) {
             MSSurfaceState *ancestor=objc_getAssociatedObject(parent,&Key);
             if (ancestor.owned.turn.applied) { inherited=YES; break; }
         }
-        unsigned result=MSSurfaceReconcile(&owned,active,Read,Write,(__bridge void *)view);
+        BOOL targetActive=active && (![state.role isEqualToString:@"bottom-split-settings"] || [currentMenus containsObject:view]);
+        unsigned result=MSSurfaceReconcile(&owned,targetActive,Read,Write,(__bridge void *)view);
         state.owned=owned;
         double now=CACurrentMediaTime(), session=[MSRuntimeSettings()[@"DebugSessionToken"] doubleValue];
         if (MSDiagnosticsActive() && (state.session!=session || result || now-state.lastLog>3)) {
@@ -143,8 +151,8 @@ static void MenuObserved(UIViewController *controller) {
 }
 static void HookMenuRotation(id self,SEL cmd) { MenuRotation(self,cmd); MenuObserved(self); }
 static void HookMenuLayout(id self,SEL cmd) { MenuLayout(self,cmd); MenuObserved(self); }
-static void HookPickerLayout(id self,SEL cmd) { PickerLayout(self,cmd); if (!Writing && Changed) Changed(); }
-static void HookPickerExpanded(id self,SEL cmd) { PickerExpanded(self,cmd); if (!Writing && Changed) Changed(); }
+static void HookPickerLayout(id self,SEL cmd) { PickerLayout(self,cmd); if (!Writing && NSThread.isMainThread && Changed) Changed(); }
+static void HookPickerExpanded(id self,SEL cmd) { PickerExpanded(self,cmd); if (!Writing && NSThread.isMainThread && Changed) Changed(); }
 void MSLauncherSurfacesInstall(void (^changed)(void)) {
     Changed=[changed copy];
     Class menu=objc_getClass("MangoMenuViewController"),picker=objc_getClass("MangoAppLibraryPickerView");

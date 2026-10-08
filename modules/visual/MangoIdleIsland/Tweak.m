@@ -798,17 +798,21 @@ static void NotificationRefresh(id element) {
     BOOL notification=VerifiedObject(element,"userNotification")!=nil;
     id layout=VerifiedObject(element,"layoutHost");
     UIView *host=[layout isKindOfClass:UIView.class] ? HostFor(layout) : nil;
+    UIView *anchor=nil;
     // viewProvider is an aggregate, not a MangoPillContentProvider. Ask its
     // individual providers for providedView, without reading notification text.
     id aggregate=VerifiedObject(element,"viewProvider");
-    const char *names[]={"leadingContentViewProvider","trailingContentViewProvider","primaryContentViewProvider",
+    const char *names[]={"primaryContentViewProvider","leadingContentViewProvider","trailingContentViewProvider",
                          "secondaryContentViewProvider","actionContentViewProvider","minimalContentViewProvider"};
-    for (unsigned i=0;i<6 && !host;i++) {
+    for (unsigned i=0;i<6 && !anchor;i++) {
         id provider=VerifiedObject(element,names[i]) ?: VerifiedObject(aggregate,names[i]);
         id view=VerifiedObject(provider,"providedView");
-        if ([view isKindOfClass:UIView.class]) host=HostFor(view);
+        if ([view isKindOfClass:UIView.class]) {
+            UIView *candidate=HostFor(view);
+            if (candidate) { host=candidate; anchor=view; }
+        }
     }
-    MSIslandNotificationState(element,host,notification);
+    MSIslandNotificationState(element,anchor ?: host,notification);
     static char recognizedKey;
     NSString *key=[NSString stringWithFormat:@"%d:%p:%.3f",notification,(__bridge void *)host,[MSRuntimeSettings()[@"DebugSessionToken"] doubleValue]];
     if (MSDiagnosticsActive() && ![objc_getAssociatedObject(element,&recognizedKey) isEqualToString:key]) {

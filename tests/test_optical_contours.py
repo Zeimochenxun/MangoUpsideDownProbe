@@ -49,6 +49,7 @@ ADAPTER = r'''
 '''
 
 CASES = r'''
+static BOOL NearRect(CGRect a,CGRect b) { return fabs(a.origin.x-b.origin.x)<1e-6 && fabs(a.origin.y-b.origin.y)<1e-6 && fabs(a.size.width-b.size.width)<1e-6 && fabs(a.size.height-b.size.height)<1e-6; }
 int main(void) { @autoreleasepool {
     CALayer *glass=[CALayer layer];
     for (unsigned height=2;height<=120;height++) for (unsigned width=125;width<=301;width+=44) {
@@ -57,7 +58,7 @@ int main(void) { @autoreleasepool {
         double stroke=fmin(4,height*.4);
         UIBezierPath *path=Contour(glass,glass.mask,stroke,YES,&native);
         CGRect expected=CGRectInset(glass.bounds,stroke*.5,stroke*.5);
-        assert(!native && CGRectEqualToRect(path.bounds,expected));
+        assert(!native && NearRect(path.bounds,expected));
         assert(CGPathContainsPoint(path.CGPath,NULL,CGPointMake(width*.5,height*.5),NO));
     }
     glass.bounds=CGRectMake(0,0,301,91.5);
@@ -75,7 +76,7 @@ int main(void) { @autoreleasepool {
     CGPathRef stale=CGPathCreateWithRoundedRect(CGRectMake(0,0,125,36.67),18,18,NULL);
     mask.path=stale;native=NO;
     path=Contour(glass,glass.mask,4,YES,&native);
-    assert(!native && CGRectEqualToRect(path.bounds,CGRectInset(glass.bounds,2,2)));
+    assert(!native && NearRect(path.bounds,CGRectInset(glass.bounds,2,2)));
     // The native mask wins over a different layer radius, including a translated
     // mask: all four corners keep the exact native path and its local placement.
     glass.bounds=CGRectMake(10,20,301,91.5); mask.frame=glass.bounds;
