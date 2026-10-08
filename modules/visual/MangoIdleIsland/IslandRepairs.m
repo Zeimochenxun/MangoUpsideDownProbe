@@ -24,13 +24,19 @@ static char OpticalStateKey;
 static NSHashTable<UIView *> *NotificationViews;
 static NSHashTable<UIView *> *OpticalHosts;
 static BOOL Sampling;
+static BOOL HostVisible(UIView *host) {
+    if (!host.window) return NO;
+    for (UIView *view=host;view;view=view.superview)
+        if (view.hidden || view.layer.hidden || (view.layer.presentationLayer ?: view.layer).opacity<.01) return NO;
+    return YES;
+}
 
 BOOL MSIslandUsesOwnedRim(void) {
     return MSRuntimeFlag(@"RimGeometryEnabled") || MSRuntimeFlag(@"GlassAnimationEnabled") || MSRuntimeFlag(@"EdgeColorEnabled");
 }
 BOOL MSIslandRepairsNeedFrames(void) {
     for (UIView *host in OpticalHosts.allObjects) {
-        if (!host.window || host.hidden || host.alpha<.01) continue;
+        if (!HostVisible(host)) continue;
         MSIslandOpticalState *state=objc_getAssociatedObject(host,&OpticalStateKey);
         if (MSRuntimeFlag(@"EdgeColorEnabled") && state.glass.window) return YES;
         if (!MSRuntimeFlag(@"GlassAnimationEnabled")) continue;
@@ -215,7 +221,7 @@ void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edgeOptIn) {
     BOOL color=MSRuntimeFlag(@"EdgeColorEnabled"), rim=MSIslandUsesOwnedRim() && (edgeOptIn || color);
     BOOL halo=MSRuntimeFlag(@"ShortHaloEnabled") && VisibleNotification(host);
     MSIslandOpticalState *state=objc_getAssociatedObject(host,&OpticalStateKey);
-    if ((!rim && !halo) || !host.window || host.hidden || host.alpha<.01) {
+    if ((!rim && !halo) || !HostVisible(host)) {
         [state.rim removeFromSuperlayer]; [state.halo removeFromSuperlayer]; return;
     }
     UIView *best=nil; CGFloat opacity=0;
@@ -248,6 +254,14 @@ void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edgeOptIn) {
     if (nativeRadius>0 && isfinite(nativeRadius)) radius=fmin(radius,nativeRadius*fmin(hypot(map.a,map.b),hypot(map.c,map.d)));
     else if (projected.size.height>50) radius=fmin(radius,28);
     UIBezierPath *path=[UIBezierPath bezierPathWithRoundedRect:CGRectInset(projected,thickness*.5,thickness*.5) cornerRadius:radius];
+    if (!MSRuntimeFlag(@"RimGeometryEnabled")) {
+        // Animation tracking and corner normalization are independent choices.
+        // With normalization off, preserve the native local corner proportions.
+        double localRadius=isfinite(nativeRadius) && nativeRadius>0 ? nativeRadius : fmin(bounds.size.height*.5,28);
+        localRadius=fmin(localRadius,MSOpticalRadius(bounds.size.width,bounds.size.height,thickness));
+        path=[UIBezierPath bezierPathWithRoundedRect:CGRectInset(bounds,thickness*.5,thickness*.5) cornerRadius:localRadius];
+        [path applyTransform:map];
+    }
     CGRect rect=CGPathGetBoundingBox(path.CGPath);
     if (!isfinite(rect.origin.x) || !isfinite(rect.origin.y) || !isfinite(rect.size.width) || !isfinite(rect.size.height)) return;
     state=State(host);

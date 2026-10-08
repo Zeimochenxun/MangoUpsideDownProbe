@@ -393,11 +393,12 @@ static void AfterLifecycle(UIView *view, NSString *source) {
     ReconcileFrom(source);
     ArmRecovery();
     // Dock/library reopen may reset the window after this native callback.
-    dispatch_async(dispatch_get_main_queue(), ^{ ReconcileFrom(@"reopen-next-turn"); });
+    if (MSRuntimeFlag(@"LauncherRecoveryEnabled"))
+        dispatch_async(dispatch_get_main_queue(), ^{ ReconcileFrom(@"reopen-next-turn"); });
 }
 static void (*FloatingHidden)(id,SEL,BOOL), (*SceneHidden)(id,SEL,BOOL);
-static void HookFloatingHidden(id self,SEL cmd,BOOL hidden) { FloatingHidden(self,cmd,hidden); if (!hidden) AfterLifecycle(self,@"floating-reveal"); }
-static void HookSceneHidden(id self,SEL cmd,BOOL hidden) { SceneHidden(self,cmd,hidden); if (!hidden) AfterLifecycle(self,@"scene-reveal"); }
+static void HookFloatingHidden(id self,SEL cmd,BOOL hidden) { FloatingHidden(self,cmd,hidden); if (!hidden && MSRuntimeFlag(@"LauncherRecoveryEnabled")) AfterLifecycle(self,@"floating-reveal"); }
+static void HookSceneHidden(id self,SEL cmd,BOOL hidden) { SceneHidden(self,cmd,hidden); if (!hidden && MSRuntimeFlag(@"LauncherRecoveryEnabled")) AfterLifecycle(self,@"scene-reveal"); }
 static void HookSceneMove(id self,SEL cmd) { SceneMove(self,cmd); AfterLifecycle(self,@"scene-move"); }
 static void HookFloatingMove(id self,SEL cmd) { FloatingMove(self,cmd); AfterLifecycle(self,@"floating-move"); }
 static void HookSceneLayout(id self,SEL cmd) { SceneLayout(self,cmd); AfterLifecycle(self,@"scene-layout"); }
