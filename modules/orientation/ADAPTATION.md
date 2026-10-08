@@ -1,6 +1,6 @@
 # Beta9 方向模块适配
 
-Suite 版本 `1.2.0~beta9.2`，目标 Mango `1.0-Beta9-1`、iOS 16.5、Dopamine RootHide、arm64e。适配依据是用户提供的安装包，SHA256 `4826d2e73c59f05e0ff529da1e7db47e494ebfc89498fd3c8280917268e2dadd`。
+Suite 版本 `1.2.0~beta9.3`，目标 Mango `1.0-Beta9-1`、iOS 16.5、Dopamine RootHide、arm64e。适配依据是用户提供的安装包，SHA256 `4826d2e73c59f05e0ff529da1e7db47e494ebfc89498fd3c8280917268e2dadd`。
 
 ## 身份与 ABI
 
@@ -18,11 +18,11 @@ Beta9 的 aperture resize-pan replacement 位于 0xca5338–0xca8adc，仍把方
 
 ## 成品职责
 
-Beta9 新增 scene setter 和冻结卡片路径在已核对函数中操作 scene/子视图，没有新增直接改 containing UIWindow 的 transform/center 或方向2半转。Suite 继续仅修正校验过的目标 UIWindow；冻结与恢复的动画/触摸时序仍需手机检查。
+Beta9 新增 scene setter 和冻结卡片路径在已核对函数中操作 scene/子视图，没有新增直接改 containing UIWindow 的 transform/center 或方向2半转。用户最新日志显示窗口写入半转时固定坐标可能不变，旧路径因此回退并长期暂停。Beta9.3 在恢复开关开启时对已验证 Hello ViewController 启动器改用内容根视图；先通过 CALayer 的子层到窗口坐标转换，再映射到固定屏幕。只允许全屏、居中、仿射的目标，初次施加仍要求单位模型矩阵与半转校验；其他目标保留旧窗口路径。冻结与恢复的动画/触摸时序仍需手机检查。
 
 World 编译 `World.m WorldPlacement.m XiaoMang.m`；Split 编译 `Split.m`。仅在校验过的原生类上挂钩，保留已有原生半转，不重复旋转；恢复也只针对当前仍匹配本插件写入的变换。
 
-World 保留系统 aperture 窗口、content 和限定 container 的倒置与放置。Split 继续在 Mango scene/floating/launcher 回调后调和目标窗口。小芒按物理屏幕中心同时转换方向和位置，保持原生局部布局、手势和空白透传，范围见 [XIAOMANG.md](XIAOMANG.md)。
+World 保留系统 aperture 窗口、content 和限定 container 的倒置与放置。Split 在 Mango scene/floating/launcher 回调后调和启动器根视图或其他目标窗口。小芒按物理屏幕中心同时转换方向和位置，保持原生局部布局、手势和空白透传，范围见 [XIAOMANG.md](XIAOMANG.md)。
 
 共享数学/helper 的部分 `MSB8*` 内部函数名表示继承的已测试策略，不代表它们仍使用 Beta8 镜像身份；全部运行时镜像调用已切为 `B9*`。
 

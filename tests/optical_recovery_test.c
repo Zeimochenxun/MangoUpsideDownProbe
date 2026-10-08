@@ -77,6 +77,12 @@ int main(void) {
     assert(!MSDiagnosticSessionActive(1,NAN,110));
     assert(!MSDiagnosticSessionActive(1,100,99));
     assert(MSDiagnosticSessionActive(1,1300,1301));
+    assert(MSDiagnosticRecordCurrent("1791434953.375 version=1.2.0~beta9.3 session=1791434953.245 pid=5582",1791434953.245062));
+    assert(!MSDiagnosticRecordCurrent("1791416607.497 version=1.2.0~beta9.1 pid=3711",1791434953.245062));
+    assert(!MSDiagnosticRecordCurrent("1791434953.375 version=1.2.0~beta9.3 session=1791434950.245 pid=5582",1791434953.245062));
+    assert(!MSDiagnosticRecordCurrent("content applied=1",1791434953.245062));
+    assert(!MSDiagnosticRecordCurrent("1791434953.375 version=x session=nan",1791434953.245062));
+    assert(!MSDiagnosticRecordCurrent("1791434953.375 version=x session=0",0));
     puts("PASS: real recovery policy handles Dock/library scene remap, no repeated turns, foreign ownership, independent off, bounded direction bridge, capsule degeneracy, area/saturation color choice and frame-rate-independent smoothing");
     return 0;
 }

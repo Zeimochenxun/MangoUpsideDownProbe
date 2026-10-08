@@ -1,7 +1,7 @@
 {
   "targetMangoVersion": "1.0-Beta9-1",
-  "suiteVersion": "1.2.0~beta9.2",
-  "sourceVersion": "1.1.9.6~beta9.2",
+  "suiteVersion": "1.2.0~beta9.3",
+  "sourceVersion": "1.1.9.6~beta9.3",
   "methodABI": {
     "MangoPanda": {
       "initWithFrame:groupName:filterType:": {

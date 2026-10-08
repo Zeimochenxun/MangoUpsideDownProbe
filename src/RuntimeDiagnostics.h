@@ -44,7 +44,7 @@ static inline void MSDiagnosticsLog(NSString *module, NSString *message) {
         if (fd < 0) return;
         if (fstat(fd, &info) || !S_ISREG(info.st_mode) || info.st_uid != getuid() || info.st_nlink != 1) return;
         if (message.length > 8192) message = [[message substringToIndex:8100] stringByAppendingString:@"\n[message-truncated]"];
-        NSData *line = [[NSString stringWithFormat:@"%.3f version=1.2.0~beta9.2 session=%.3f pid=%d module=%@ %@\n", timestamp, [MSRuntimeSettings()[@"DebugSessionToken"] doubleValue], getpid(), module, message] dataUsingEncoding:NSUTF8StringEncoding];
+        NSData *line = [[NSString stringWithFormat:@"%.3f version=1.2.0~beta9.3 session=%.3f pid=%d module=%@ %@\n", timestamp, [MSRuntimeSettings()[@"DebugSessionToken"] doubleValue], getpid(), module, message] dataUsingEncoding:NSUTF8StringEncoding];
         if (info.st_size + (off_t)line.length > 256 * 1024 && ftruncate(fd, 0)) return;
         const uint8_t *bytes = line.bytes;
         size_t remaining = line.length;

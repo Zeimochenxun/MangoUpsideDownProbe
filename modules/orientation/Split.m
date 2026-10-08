@@ -27,6 +27,7 @@ static unsigned DiagnosticSamples;
 
 @interface MSB8SplitDiagnosticState : NSObject
 @property(nonatomic) double lastSample, lastLog;
+@property(nonatomic) double session;
 @property(nonatomic) BOOL sampled, target, hasModel;
 @property(nonatomic) MWTransform model;
 @property(nonatomic,copy) NSString *windowKey, *callbackKey;
@@ -46,6 +47,8 @@ static MSSplitDiagnosticObservation *DiagnosticRead;
 
 @interface MSB8SplitState : NSObject
 @property(nonatomic) MSSplitOwnership ownership;
+@property(nonatomic) MSSplitOwnership rootOwnership;
+@property(nonatomic,weak) UIView *launcherRoot;
 @end
 @implementation MSB8SplitState
 @end
@@ -57,6 +60,13 @@ static void Log(NSString *s) {
     if (MSDiagnosticsActive()) MSDiagnosticsLog(@"Split", s);
 }
 static MSB8SplitState *State(UIWindow *w) { return objc_getAssociatedObject(w, &StateKey); }
+
+static UIView *LauncherRoot(UIWindow *w) {
+    UIViewController *controller = w.rootViewController;
+    if (!LauncherClass || ![controller isKindOfClass:LauncherClass] || !controller.isViewLoaded) return nil;
+    UIView *root = controller.view;
+    return root.window == w && root != w ? root : nil;
+}
 
 static BOOL ContainsMangoTarget(UIWindow *window) {
     // Beta8's launcher controller can exist before its DecoratedFloatingView
@@ -105,15 +115,92 @@ static BOOL SafeWindow(UIWindow *w) {
         fabs(fixed.size.height - expected.size.height) < 2;
 }
 
+// UIWindow's scene coordinate conversion can ignore a window model turn on
+// this device (the supplied log has identity before AND after that write).
+// Measure the verified launcher's actual child layer graph instead. Its root
+// turn then also transforms the descendant hit-test coordinates and controls.
+static CGPoint RootPoint(UIView *root, CGPoint point) {
+    UIWindow *w = root.window;
+    if (!w) return CGPointMake(NAN,NAN);
+    CGPoint local = [root.layer convertPoint:point toLayer:w.layer];
+    return [w convertPoint:local toCoordinateSpace:w.screen.fixedCoordinateSpace];
+}
+
+static BOOL SafeLauncherRoot(UIView *root) {
+    UIWindow *w = root.window;
+    if (!w || LauncherRoot(w) != root || !SafeWindow(w)) return NO;
+    // A native or foreign window turn must not receive another root turn.
+    if (!MWNear(Math(w.transform),(MWTransform){1,0,0,1,0,0})) return NO;
+    CGPoint anchor = root.layer.anchorPoint;
+    if (fabs(anchor.x-.5)>1e-6 || fabs(anchor.y-.5)>1e-6) return NO;
+    if (fabs(root.bounds.size.width-w.bounds.size.width)>2 ||
+        fabs(root.bounds.size.height-w.bounds.size.height)>2) return NO;
+    unsigned depth = 0;
+    for (UIView *view=root; view && view!=w; view=view.superview) {
+        if (++depth>16 || !CATransform3DIsAffine(view.layer.transform) ||
+            !CATransform3DIsIdentity(view.layer.sublayerTransform)) return NO;
+    }
+    CGRect footprint = [root.layer convertRect:root.bounds toLayer:w.layer];
+    return isfinite(footprint.origin.x) && isfinite(footprint.origin.y) &&
+        isfinite(footprint.size.width) && isfinite(footprint.size.height) &&
+        fabs(CGRectGetMidX(footprint)-CGRectGetMidX(w.bounds))<2 &&
+        fabs(CGRectGetMidY(footprint)-CGRectGetMidY(w.bounds))<2 &&
+        fabs(footprint.size.width-w.bounds.size.width)<2 &&
+        fabs(footprint.size.height-w.bounds.size.height)<2;
+}
+
+static MSSplitSnapshot RootSnapshot(void *context) {
+    UIView *root = (__bridge UIView *)context;
+    MSSplitSnapshot sample = {.transform=Math(root.transform),.eligible=SafeLauncherRoot(root)};
+    const CGPoint local[3] = {CGPointZero,CGPointMake(1,0),CGPointMake(0,1)};
+    for (unsigned i=0;i<3;++i) {
+        CGPoint point=RootPoint(root,local[i]); sample.points[i]=(MWPoint){point.x,point.y};
+    }
+    // The preflight proves that this root is centered over the physical screen.
+    // Equal center/pivot gives a local half-turn with zero extra translation;
+    // the fixed pivot is also used to verify the sampled physical point map.
+    CGRect screen=root.window.screen.fixedCoordinateSpace.bounds;
+    sample.center=sample.pivot=(MWPoint){CGRectGetMidX(screen),CGRectGetMidY(screen)};
+    if (DiagnosticRead && DiagnosticRead->enabled && MSDiagnosticsActive()) {
+        if (!DiagnosticRead->hasRead) { DiagnosticRead->first=sample; DiagnosticRead->hasRead=YES; }
+        if (DiagnosticRead->reads<4) DiagnosticRead->samples[DiagnosticRead->reads]=sample;
+        DiagnosticRead->last=sample; ++DiagnosticRead->reads;
+    }
+    return sample;
+}
+
+static void RootWrite(void *context, MWTransform transform) {
+    UIView *root = (__bridge UIView *)context;
+    [UIView performWithoutAnimation:^{ root.transform=CG(transform); }];
+}
+
+static void RestoreRoot(MSB8SplitState *state) {
+    UIView *root=state.launcherRoot;
+    MSSplitOwnership owned=state.rootOwnership;
+    if (root) {
+        MSSplitSnapshot current={.transform=Math(root.transform)};
+        MSSplitRestore(&owned,current,RootWrite,(__bridge void *)root);
+    }
+    state.rootOwnership=(MSSplitOwnership){0}; state.launcherRoot=nil;
+}
+
 // Diagnostic records never decide eligibility or write a view. At most 32
 // live windows have diagnostic state, and a pass samples at most 32 windows.
 static MSB8SplitDiagnosticState *DiagnosticState(UIWindow *w) {
     if (!w || !NSThread.isMainThread || !MSDiagnosticsActive()) return nil;
     MSB8SplitDiagnosticState *state = objc_getAssociatedObject(w, &DiagnosticKey);
-    if (state) return state;
+    double session=[MSRuntimeSettings()[@"DebugSessionToken"] doubleValue];
+    if (state) {
+        if (state.session!=session) {
+            state.session=session; state.sampled=NO; state.lastLog=0;
+            state.windowKey=nil; state.callbackKey=nil;
+        }
+        return state;
+    }
     if (!DiagnosticWindows) DiagnosticWindows = [NSHashTable weakObjectsHashTable];
     if (DiagnosticWindows.count >= 32) return nil;
     state = [MSB8SplitDiagnosticState new];
+    state.session=session;
     objc_setAssociatedObject(w, &DiagnosticKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [DiagnosticWindows addObject:w];
     return state;
@@ -181,7 +268,7 @@ static MSSplitDiagnosticObservation DiagnosticPrepare(UIWindow *w) {
     observation.due = !state.sampled || CACurrentMediaTime() - state.lastSample >= 1;
     observation.model = Math(w.transform);
     MSB8SplitState *owned = State(w);
-    if (owned) observation.ownership = owned.ownership;
+    if (owned) observation.ownership = owned.launcherRoot ? owned.rootOwnership : owned.ownership;
     return observation;
     } @catch (__unused NSException *exception) { return (MSSplitDiagnosticObservation){0}; }
 }
@@ -208,7 +295,13 @@ static void DiagnosticFinish(UIWindow *w, MSSplitDiagnosticObservation observati
         footprint = [w convertRect:w.bounds toCoordinateSpace:fixed]; screen = fixed.bounds;
     }
     MSSplitOwnership before = observation.ownership, after = {0};
-    if (owned) after = owned.ownership;
+    if (owned) after = owned.launcherRoot ? owned.rootOwnership : owned.ownership;
+    UIView *root=owned.launcherRoot;
+    MSSplitSnapshot rootSample={0};
+    if (root) rootSample=RootSnapshot((__bridge void *)root);
+    MWTransform rootBasis={rootSample.points[1].x-rootSample.points[0].x,
+        rootSample.points[1].y-rootSample.points[0].y,rootSample.points[2].x-rootSample.points[0].x,
+        rootSample.points[2].y-rootSample.points[0].y,rootSample.points[0].x,rootSample.points[0].y};
     NSString *key = [NSString stringWithFormat:
         @"enabled=%d active=%d rawMango=%ld systemStatusBar=%ld decisionResolved=%ld sampleResolved=%ld "
          "tracked=%d target=%@ safe=%@ observedEligible=%d rootVC=%@ sceneOrientation=%ld "
@@ -217,7 +310,8 @@ static void DiagnosticFinish(UIWindow *w, MSSplitDiagnosticObservation observati
          "ownershipAfter={applied:%d,suspended:%d,before:%@,after:%@} "
          "reads=%u readSamples=%@ readEligibleFirst=%d readEligibleLast=%d readModelFirst=%@ "
          "readBasisUpright=%d readBasisInverted=%d readModelIdentity=%d "
-         "result=%u restored=%d released=%d applied=%d rejected=%d",
+         "result=%u restored=%d released=%d applied=%d rejected=%d "
+         "correctionTarget=%@ root=%p rootEligible=%d rootModel=%@ rootBasis=%@ pixels-visible=unknown",
         Enabled,DiagnosticActive,(long)DiagnosticMango,(long)DiagnosticSystem,
         (long)DiagnosticResolved,(long)DiagnosticSampleResolved,[Windows containsObject:w],
         targetReason,safeReason,target && safe,NSStringFromClass(w.rootViewController.class) ?: @"nil",
@@ -233,7 +327,8 @@ static void DiagnosticFinish(UIWindow *w, MSSplitDiagnosticObservation observati
         observation.hasRead ? MSSplitInverted(observation.first) : -1,
         observation.hasRead ? MWNear(observation.first.transform,(MWTransform){1,0,0,1,0,0}) : -1,
         result,!!(result & MSSplitRestored),!!(result & MSSplitReleased),
-        !!(result & MSSplitApplied),!!(result & MSSplitRejected)];
+        !!(result & MSSplitApplied),!!(result & MSSplitRejected),root ? @"launcher-content-root" : @"window",
+        (__bridge void *)root,rootSample.eligible,DiagnosticTransform(rootSample.transform),DiagnosticTransform(rootBasis)];
     BOOL first = !state.sampled, lostTarget = state.sampled && state.target && !target;
     BOOL modelChanged = state.hasModel && !MWNear(state.model,model);
     state.lastSample = now; state.sampled = YES; state.target = target;
@@ -311,16 +406,32 @@ static void Update(UIWindow *w, BOOL active) {
         state = [MSB8SplitState new];
         objc_setAssociatedObject(w, &StateKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    MSSplitOwnership ownership = state.ownership;
     unsigned result = 0;
     MSSplitDiagnosticObservation *previousRead = DiagnosticRead;
     DiagnosticRead = observation.enabled ? &observation : NULL;
     @try {
-        result = MSSplitReconcileRecovery(&ownership, active, MSRuntimeFlag(@"LauncherRecoveryEnabled"), Snapshot, WriteSnapshot, (__bridge void *)w);
-    } @finally { state.ownership = ownership; DiagnosticRead = previousRead; }
+        BOOL recovery=MSRuntimeFlag(@"LauncherRecoveryEnabled");
+        UIView *root=recovery ? LauncherRoot(w) : nil;
+        if (root) {
+            // Retire the old window correction before entering the child graph.
+            // Its failed coordinate sample must not suspend this distinct target.
+            MSSplitOwnership old=state.ownership;
+            if (old.applied) result|=MSSplitRestore(&old,Snapshot((__bridge void *)w),WriteSnapshot,(__bridge void *)w);
+            state.ownership=(MSSplitOwnership){0};
+            if (state.launcherRoot!=root) { RestoreRoot(state); state.launcherRoot=root; }
+            MSSplitOwnership owned=state.rootOwnership;
+            @try { result|=MSSplitReconcileRecovery(&owned,active,1,RootSnapshot,RootWrite,(__bridge void *)root); }
+            @finally { state.rootOwnership=owned; }
+        } else {
+            RestoreRoot(state);
+            MSSplitOwnership owned=state.ownership;
+            @try { result=MSSplitReconcileRecovery(&owned,active,recovery,Snapshot,WriteSnapshot,(__bridge void *)w); }
+            @finally { state.ownership=owned; }
+        }
+    } @finally { DiagnosticRead = previousRead; }
     DiagnosticFinish(w, observation, state, result);
     if (result & MSSplitReleased) Log(@"Owned split transform replaced externally; ownership released");
-    if (result & MSSplitRejected) Log(@"Split coordinate verification failed; correction suspended until geometry changes");
+    if (result & MSSplitRejected) Log(@"Split target coordinate verification failed; target suspended until its geometry changes");
 }
 
 static void Reconcile(void) {
@@ -426,10 +537,11 @@ static MSSplitLauncherDiagnostic DiagnosticLauncherRead(UIViewController *contro
         if (w && !DiagnosticState(w)) return sample;
         *window = w; sample.window = (__bridge void *)w;
         if (w) {
-            sample.model = Math(w.transform);
             MSB8SplitState *state = State(w);
+            UIView *root=state.launcherRoot;
+            sample.model = Math(root ? root.transform : w.transform);
             if (state) {
-                MSSplitOwnership owned = state.ownership;
+                MSSplitOwnership owned = root ? state.rootOwnership : state.ownership;
                 sample.applied = owned.applied; sample.suspended = owned.suspended;
                 sample.owns = MWOwns(sample.model,owned.after,owned.applied,owned.suspended);
             }

@@ -2,13 +2,14 @@
 #import "Prefs.h"
 #import "../src/SuitePreferences.h"
 #import <roothide.h>
+#include "../src/DiagnosticsPolicy.h"
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
 
 // Export a bounded snapshot; never run a shell or read notification contents.
-static NSString *ReadLog(NSString *name) {
+static NSString *ReadLog(NSString *name, double session) {
     NSString *base = [NSString stringWithUTF8String:jbroot("/var/mobile/Library/Logs/MangoSuiteDiagnostics")];
     NSString *path = [base stringByAppendingPathComponent:[name stringByAppendingString:@".log"]];
     int fd = open(path.fileSystemRepresentation, O_RDONLY|O_NOFOLLOW|O_NONBLOCK);
@@ -25,7 +26,16 @@ static NSString *ReadLog(NSString *name) {
         }
     }
     close(fd);
-    return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"日志无法读取。\n";
+    NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (!text) return @"日志无法读取。\n";
+    NSMutableString *current=[NSMutableString new];
+    BOOL include=NO;
+    for (NSString *line in [text componentsSeparatedByString:@"\n"]) {
+        const char *bytes=line.UTF8String;
+        if (MSDiagnosticRecordHeader(bytes)) include=MSDiagnosticRecordCurrent(bytes,session);
+        if (include) [current appendFormat:@"%@\n",line];
+    }
+    return current.length ? current : @"本次记录尚无该模块日志，请开始记录并复现问题。\n";
 }
 
 @interface MangoSuiteDiagnosticsController : MangoSuitePrefsController
@@ -69,10 +79,11 @@ static NSString *ReadLog(NSString *name) {
     self.exporting = YES;
     NSDictionary *settings = MSReadPreferences(NULL) ?: @{};
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
-        NSMutableString *report = [NSMutableString stringWithFormat:@"Mango Suite 1.2.0~beta9.2\nMango 1.0-Beta9-1 / iOS 16.5\n导出时间：%@\n", NSDate.date];
+        NSMutableString *report = [NSMutableString stringWithFormat:@"Mango Suite 1.2.0~beta9.3\nMango 1.0-Beta9-1 / iOS 16.5\n导出时间：%@\n", NSDate.date];
         for (NSString *key in [@[@"Enabled",@"IdleEnabled",@"WorldEnabled",@"SplitEnabled",@"DebugEnabled",@"DebugSessionToken",@"EdgeThickness",@"EdgeDynamics"] arrayByAddingObjectsFromArray:MSRepairKeys()])
             [report appendFormat:@"%@=%@\n",key,settings[key] ?: @"默认"];
-        for (NSString *module in modules) [report appendFormat:@"\n========== %@ ==========\n%@",module,ReadLog(module)];
+        double session=[settings[@"DebugSessionToken"] doubleValue];
+        for (NSString *module in modules) [report appendFormat:@"\n========== %@ ==========\n%@",module,ReadLog(module,session)];
         NSString *directory = [NSTemporaryDirectory() stringByAppendingPathComponent:@"MangoSuiteExports"];
         NSFileManager *files = NSFileManager.defaultManager;
         NSError *error = nil;

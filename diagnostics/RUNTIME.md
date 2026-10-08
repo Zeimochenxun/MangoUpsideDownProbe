@@ -1,4 +1,4 @@
-# Beta9.2 调试记录与提取
+# Beta9.3 调试记录与提取
 
 在设置 → Mango 整合 → 调试日志与一键提取中点击开始记录，复现后点击提取。无需运行终端工具。
 默认关闭，记录会话持续20分钟，可再次点击开始重新计时。每模块256KB、每秒最多8条。日志保存在 RootHide 映射的 /var/mobile/Library/Logs/MangoSuiteDiagnostics，模块名为 Idle、Glass、World、Split。
