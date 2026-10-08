@@ -19,7 +19,7 @@ int main(int argc, const char *argv[]) {
             if (item.cellType == PSSwitchCell) [keys addObject:[item propertyForKey:@"key"]];
             if (item.cellType == PSLinkCell) [links addObject:NSStringFromClass(item.detailClass)];
         }
-        NSArray *required = @[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"LeXiang.UpsideDown.Enabled", @"WorldEnabled", @"SplitEnabled", @"RimGeometryEnabled", @"LauncherRecoveryEnabled", @"GlassAnimationEnabled", @"IslandLayoutEnabled", @"ShortHaloEnabled", @"EdgeColorEnabled", @"SwipeDirectionEnabled"];
+        NSArray *required = @[@"Enabled", @"CrashIsolationEnabled", @"IdleEnabled", @"AdaptiveEnabled", @"LeXiang.UpsideDown.Enabled", @"WorldEnabled", @"SplitEnabled", @"RimGeometryEnabled", @"LauncherRecoveryEnabled", @"GlassAnimationEnabled", @"IslandLayoutEnabled", @"ShortHaloEnabled", @"EdgeColorEnabled", @"SwipeDirectionEnabled"];
         NSArray *children = @[@"MangoSuiteGlassController", @"MangoIslandAdaptiveColorPrefsController", @"MangoSuiteDiagnosticsController"];
         if (![keys isEqual:required] || ![links isEqual:children]) {
             NSLog(@"FAIL switches=%@ links=%@", keys, links); return 1;

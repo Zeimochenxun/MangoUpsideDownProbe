@@ -51,11 +51,15 @@ static BOOL SuiteFlag(NSString *key) {
     _specifiers = [NSMutableArray new];
 
     PSSpecifier *notice = [PSSpecifier emptyGroupSpecifier];
-    [notice setProperty:@"本插件为mango插件的自改补丁，仅自用。Beta9.5 为回归缓解版；通知方向修复暂时停用，左右资源库位置和底部设置仍待修复。" forKey:@"footerText"];
+    [notice setProperty:@"本插件为mango插件的自改补丁，仅自用。Beta9.6 为崩溃隔离诊断版，默认停用整合补丁；此前问题和通知上滑崩溃尚未确认解决。" forKey:@"footerText"];
     [_specifiers addObject:notice];
 
     [self addSection:@"总开关"];
     [self addSwitch:@"启用整合修复" key:@"Enabled"];
+    [self addSection:@"通知崩溃隔离"];
+    PSSpecifier *isolationHelp=_specifiers.lastObject;
+    [isolationHelp setProperty:@"默认开启。重新启动用户空间后，全部整合补丁停止加载，Mango 原版继续运行；各项原有选择保留。此模式用于定位，原有问题可能继续存在。关闭隔离后会恢复补丁，当前通知上滑崩溃仍未定位。更改后务必在多巴胺中重新启动用户空间。" forKey:@"footerText"];
+    [self addSwitch:@"完全隔离整合补丁（需重启用户空间）" key:@"CrashIsolationEnabled"];
 
     [self addSection:@"灵动岛外观"];
     [self addSwitch:@"静止灵动岛与过渡修复" key:@"IdleEnabled"];
@@ -143,7 +147,7 @@ static BOOL SuiteFlag(NSString *key) {
         if (!saved) [self showMessage:error.localizedDescription ?: @"请重新打开设置后检查当前倒置开关。" title:@"保存失败"];
         return;
     }
-    NSArray *known = [@[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled", @"DebugEnabled"] arrayByAddingObjectsFromArray:MSRepairKeys()];
+    NSArray *known = [@[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled", @"DebugEnabled", @"CrashIsolationEnabled"] arrayByAddingObjectsFromArray:MSRepairKeys()];
     if (![known containsObject:key] || ![value isKindOfClass:NSNumber.class]) return;
     BOOL enabled = [value boolValue];
     NSError *saveError = nil;

@@ -878,7 +878,7 @@ __attribute__((constructor)) static void Start(void) {
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=1.1.9.6~beta9.5 background=Mango-glass stable-idle-only=1 inverse-native-opacity=1 presentation-opacity=1 presentation-bounds-guard=1 compact-return-handoff=1 visible-activity-only=1 settled-background-no-rewrite=1 touch=unchanged");
+            Log(@"[SESSION] version=1.1.9.6~beta9.6 background=Mango-glass stable-idle-only=1 inverse-native-opacity=1 presentation-opacity=1 presentation-bounds-guard=1 compact-return-handoff=1 visible-activity-only=1 settled-background-no-rewrite=1 touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");

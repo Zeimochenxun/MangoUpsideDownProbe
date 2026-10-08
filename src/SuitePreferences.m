@@ -53,6 +53,11 @@ NSDictionary *MSReadPreferences(NSError **error) {
 }
 
 BOOL MSPreferenceFlag(NSDictionary *snapshot, NSString *key) {
+    if ([key isEqualToString:@"CrashIsolationEnabled"]) {
+        id value=snapshot[key];
+        // Missing or malformed isolation settings cannot re-enable hooks.
+        return !([value isKindOfClass:NSNumber.class] && isfinite([value doubleValue]) && [value doubleValue]==0);
+    }
     if (!snapshot) return NO;
     id value = snapshot[key];
     BOOL defaultValue = ![@[@"EdgeColorEnabled", @"DebugEnabled"] containsObject:key];
@@ -72,7 +77,7 @@ BOOL MSWritePreferenceValue(NSString *key, id value, NSError **error) {
     if (error) *error = nil;
     NSString *path = MSPreferencesPath();
     NSArray *known = [@[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled",
-        @"DebugEnabled", @"DebugSessionToken", @"EdgeThickness", @"EdgeDynamics"] arrayByAddingObjectsFromArray:MSRepairKeys()];
+        @"DebugEnabled", @"DebugSessionToken", @"EdgeThickness", @"EdgeDynamics", @"CrashIsolationEnabled"] arrayByAddingObjectsFromArray:MSRepairKeys()];
     BOOL valid = [known containsObject:key] && [value isKindOfClass:NSNumber.class] && isfinite([value doubleValue]);
     if ([key isEqualToString:@"EdgeThickness"]) valid = valid && [value doubleValue] >= .5 && [value doubleValue] <= 4;
     if ([key isEqualToString:@"EdgeDynamics"]) valid = valid && [value doubleValue] >= 0 && [value doubleValue] <= 1;

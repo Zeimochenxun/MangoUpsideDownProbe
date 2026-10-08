@@ -23,4 +23,9 @@ static inline unsigned MSModulesWithOptics(MSState state,int process,int optical
     if (process==MS_SPRINGBOARD && state.enabled && optical && !state.idleEmergency) mask|=MS_IDLE;
     return mask;
 }
+// Isolation is evaluated last so optical fallback cannot reload Idle, and
+// applies to backboardd's shader module as well as SpringBoard's UI modules.
+static inline unsigned MSModulesWithIsolation(MSState state,int process,int optical,int isolation) {
+    return isolation ? 0 : MSModulesWithOptics(state,process,optical);
+}
 #endif

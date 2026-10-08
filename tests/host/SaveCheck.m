@@ -2,6 +2,7 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import "../../src/SuitePreferences.h"
 #import "../../src/NativePreferences.h"
+#include <math.h>
 
 @interface PSListController (ActualSuiteMethods)
 - (id)readValue:(PSSpecifier *)specifier;
@@ -135,6 +136,18 @@ int main(int argc, const char *argv[]) {
             CFPreferencesSetAppValue(key, NULL, domain);
             Require(CFPreferencesAppSynchronize(domain), @"native UI cleanup");
             puts("PASS: actual native UI setter, master independence, sibling Suite preservation and visible malformed-value failure");
+        } else if ([mode isEqual:@"isolation"]) {
+            Require(MSPreferenceFlag(@{},@"CrashIsolationEnabled") && MSPreferenceFlag(nil,@"CrashIsolationEnabled"), @"default and failed snapshot isolate");
+            for (id invalid in @[@"bad",NSNull.null,@(NAN)]) Require(MSPreferenceFlag(@{@"CrashIsolationEnabled":invalid},@"CrashIsolationEnabled"), @"malformed isolation fails closed");
+            NSDictionary *before=MSReadPreferences(NULL);
+            Write(controller,@"CrashIsolationEnabled",YES);
+            NSMutableDictionary *expected=[before mutableCopy];expected[@"CrashIsolationEnabled"]=@YES;
+            Require([MSReadPreferences(NULL) isEqualToDictionary:expected], @"isolation preserves all module selections");
+            Write(controller,@"CrashIsolationEnabled",NO);expected[@"CrashIsolationEnabled"]=@NO;
+            Require([MSReadPreferences(NULL) isEqualToDictionary:expected], @"explicit opt out preserves selections");
+            PSListController *reopened=[root new];
+            Require(![[reopened readValue:Item(reopened,@"CrashIsolationEnabled")] boolValue], @"isolation selection read back");
+            puts("PASS: actual isolation UI preserves sibling selections, persists explicit opt out, defaults on and fails closed for malformed values");
         } else if ([mode isEqual:@"paused-swipe"]) {
             for (NSNumber *seed in @[@NO,@YES]) {
                 Require(MSWritePreferenceFlag(@"SwipeDirectionEnabled",seed.boolValue,NULL), @"seed existing swipe selection");

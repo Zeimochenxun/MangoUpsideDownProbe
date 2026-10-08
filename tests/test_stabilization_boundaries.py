@@ -36,3 +36,13 @@ prefs=(ROOT/'prefs/Prefs.m').read_text(encoding='utf-8')
 assert '7 通知上下滑动方向修复（暂停）' in prefs
 assert 'if ([key isEqualToString:@"SwipeDirectionEnabled"]) return;' in prefs
 print('PASS: compiled-source boundaries exclude global pan rewrite, child surface writes, native glass-mask replacement and synchronous notification refresh; negative controls rejected')
+
+loader=(ROOT/'src/Loader.m').read_text(encoding='utf-8')
+assert 'MSModulesWithIsolation(state,' in loader
+assert 'MSStartStartupDiagnostics(modules,isolation)' in loader
+startup=(ROOT/'src/StartupDiagnostics.h').read_text(encoding='utf-8')
+assert not any(x in startup for x in ('MSHookMessageEx(', 'dlopen(', '#import <UIKit/'))
+recording=(ROOT/'src/RuntimeRecording.h').read_text(encoding='utf-8')
+assert 'MSRuntimeFlag(@"DebugEnabled")' not in recording
+assert '[module isEqualToString:@"Startup"]' in recording
+print('PASS: startup isolation is used by the actual loader and diagnostic recording remains independent of disabled repairs without installing hooks')

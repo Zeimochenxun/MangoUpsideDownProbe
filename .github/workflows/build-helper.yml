@@ -48,6 +48,9 @@ jobs:
       - name: Verify actual Beta9 compatibility parser
         run: python3 tests/test_compatibility.py
 
+      - name: Verify crash isolation and production report export
+        run: python3 tests/test_crash_isolation.py
+
       - name: Enforce stabilization boundaries
         run: python3 tests/test_stabilization_boundaries.py
 

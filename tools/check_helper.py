@@ -33,8 +33,10 @@ for filename in sys.argv[1:]:
                    b"IdleEnabled", b"AdaptiveEnabled", b"WorldEnabled", b"SplitEnabled",
                    b"LeXiang.UpsideDown.Enabled", b"com.go.mangoosprefs", b"MangoSuiteDiagnosticsController",
                    b"RimGeometryEnabled", b"LauncherRecoveryEnabled", b"GlassAnimationEnabled", b"IslandLayoutEnabled",
-                   b"ShortHaloEnabled", b"EdgeColorEnabled", b"SwipeDirectionEnabled", b"EdgeThickness", b"EdgeDynamics", b"DebugEnabled"]:
+                   b"ShortHaloEnabled", b"EdgeColorEnabled", b"SwipeDirectionEnabled", b"EdgeThickness", b"EdgeDynamics", b"DebugEnabled", b"CrashIsolationEnabled", b"exportCrashReports", b"MSCopyRecentSpringBoardReports"]:
         assert string in prefs, string
+    assert b"compiled-loader=1.2.0~beta9.6" in content[binaries[0]][0]
+    assert b"suiteImagesCurrently" in content[binaries[0]][0]
     optical=content["Library/MobileSubstrate/DynamicLibraries/MangoIdleIsland.dylib"][0]
     for string in (b"MangoSuiteOwnedOpticalRim",b"MangoSuiteOwnedNotificationHalo",b"UIGetScreenImage"):
         assert string in optical,string

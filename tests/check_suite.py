@@ -120,6 +120,10 @@ def verify(filename, helper_path):
     for name in (DYNAMIC + "AMangoSuiteLoader.dylib", PREFS + "MangoSuitePrefs"):
         assert store_path in data[name][0], "UI and loader must use the same shared store"
         assert roothide in report["binaries"][name]["dependencies"]
+    assert b"CrashIsolationEnabled" in data[DYNAMIC+"AMangoSuiteLoader.dylib"][0]
+    assert b"compiled-loader=1.2.0~beta9.6" in data[DYNAMIC+"AMangoSuiteLoader.dylib"][0]
+    assert b"exportCrashReports" in data[PREFS+"MangoSuitePrefs"][0]
+    assert b"MSCopyRecentSpringBoardReports" in data[PREFS+"MangoSuitePrefs"][0]
     for module, _ in COMPILED.values():
         assert roothide in report["binaries"][MODULES + module + ".dylib"]["dependencies"]
     for key in (NATIVE_PREFERENCE["domain"], NATIVE_PREFERENCE["key"]):

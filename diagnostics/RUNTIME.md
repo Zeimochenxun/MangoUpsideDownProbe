@@ -1,14 +1,15 @@
-# Beta9.5 调试日志
+# Beta9.6 日志与崩溃报告
 
-进入设置 → Mango 整合 → 调试日志与一键提取，点击开始／重新开始记录；会话20分钟，每模块最多256KB。复现后点击提取全部相关日志，系统分享页保存 `.txt`。不保存通知文字、截图或封面。
+设置 → Mango 整合 → 调试日志与一键提取。
 
-Beta9.5 是回归缓解包：通知方向补偿已停用，原偏好仅保留；左右资源库和底部设置没有新增布局挂钩或独立旋转。
+优先点击“提取最近 SpringBoard 崩溃报告与日志”，取得此前上滑时刻对应的 .ips／.crash 和已有会话。不必反复触发，也不要先重开会话。最多复制3份合格完整报告，每份2MB；只读同用户普通文件并确认 SpringBoard 进程，原文件不改。候选路径、权限、扫描和读取上限可能使导出为空，空结果不能排除崩溃。
 
-- World：`PAN install query=0 correction=paused`；`PAN native-begin/native-return` 的同一 seq 用于判断原入口是否返回。不再有 rawY/effectiveY 改写记录。记录缺失可能是速率限制或入口未安装，不能据此排除崩溃。
-- Split：`SURFACE observer=1 writes=0 hooks=0`，role 区分左／右启动器、普通资源库、watchPickerView/Right 蜂巢资源库、bottom-split-settings。记录模型位置、呈现动画位置、变换和裁剪。动画变化最多每视图4次／秒，稳定时约3秒一次，日志还有每翻译单元每秒8条限制。
-- Glass：每层轮廓、halo、实际粗细与采色来源；`clipOwned=0` 表示原生裁剪层未被本版替换。NOTIFICATION 只记录结构化存在状态和宿主。
-- Idle：原有活动／静止及玻璃交接记录。
+保存已有记录后，再开始／重新开始记录。即使整合修复停用，Foundation 启动观察器仍可记录约两秒内的实际 loaded image 状态。每会话20分钟、每模块256KB；关闭记录后停止写入。
 
-若进入安全模式，先提取已有会话；不要先重新开始记录而过滤掉前一会话。附上对应时间的 SpringBoard `.ips`／`.crash`，并注明左侧滑入、右侧蜂巢或通知上滑的触发步骤。回调未返回并不单独证明崩溃位置，需与崩溃线程和镜像信息对照。
+Startup 字段：compiled-loader 实际编译版本；plannedMask 启动加载计划；isolationAtStartup 启动时隔离状态；isolationRequested 当前保存状态；suiteImagesCurrently 当前 SpringBoard dyld 中整合目录模块位图（Idle=1、Adaptive=2、World=4、Split=8）。镜像存在不代表其挂钩已安装，列表最多64项且注明截断。
 
-附带 capture-runtime.sh 只做立即快照，不注入、不改偏好、不重启进程。日志矩阵、轮廓来源或采色可用标记都不能替代真机观察。
+成功的本次隔离记录应为 Beta9.6、plannedMask=0、isolationAtStartup=1、suiteImagesCurrently=0。开关已改但旧模块仍存在时，先核对用户空间重启；SpringBoard 记录不能证明 backboardd 旧进程已经退出。更改隔离开关后需在多巴胺中重新启动用户空间。
+
+隔离下 Idle／Glass／World／Split 模块不加载，缺少这些新记录是预期。Mango 原版和其它注入仍存在，安全模式根因需真实报告的崩溃线程与镜像对照。启动记录和没有复现均不能视为七项问题已修复。
+
+附带 shell 工具仍仅采集已有日志快照，不注入、不改偏好、不重启，也不代替设置页的崩溃报告导出。
