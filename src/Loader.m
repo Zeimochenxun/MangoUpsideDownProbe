@@ -81,7 +81,7 @@ __attribute__((constructor)) static void StartSuite(void) {
         state.legacyOrientation = HasImage("MangoUpsideDownFix.dylib") ||
                                   HasImage("MangoOrientationProbe.dylib");
         unsigned modules = MSModulesForProcess(state, springboard ? MS_SPRINGBOARD : MS_BACKBOARD);
-        NSLog(@"[MangoSuite] version=1.2.0~beta9.1 process=%@ startup-mask=%u changes=require-userspace-restart", process, modules);
+        NSLog(@"[MangoSuite] version=1.2.0~beta9.2 process=%@ startup-mask=%u changes=require-userspace-restart", process, modules);
         if (state.legacyOrientation) NSLog(@"[MangoSuite] legacy orientation hook detected; orientation modules suppressed");
 
         // The renderer process must receive the shader hook during startup.
@@ -89,6 +89,8 @@ __attribute__((constructor)) static void StartSuite(void) {
         if (modules & MS_ADAPTIVE) LoadModule(@"MangoIslandAdaptiveColor");
         if (modules & MS_WORLD) LoadModule(@"MangoUpsideDownWorld");
         if (modules & MS_SPLIT) LoadModule(@"MangoSplitUpsideDownFix");
-        if (modules & MS_IDLE) LoadModule(@"MangoIdleIsland");
+        BOOL optical = MSPreferenceFlag(snapshot,@"RimGeometryEnabled") || MSPreferenceFlag(snapshot,@"GlassAnimationEnabled") ||
+                       MSPreferenceFlag(snapshot,@"ShortHaloEnabled") || MSPreferenceFlag(snapshot,@"EdgeColorEnabled");
+        if ((modules & MS_IDLE) || (springboard && state.enabled && optical && !state.idleEmergency)) LoadModule(@"MangoIdleIsland");
     }
 }

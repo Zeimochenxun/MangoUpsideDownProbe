@@ -13,7 +13,9 @@
 #include <string.h>
 #include "WorldMath.h"
 #include "WorldPersistence.h"
+#include "RecoveryPolicy.h"
 #import "../../src/RuntimeDiagnostics.h"
+#import "../../src/RuntimeSettings.h"
 
 static const char *Disabled="/var/mobile/Library/Preferences/MangoUpsideDownWorld.disabled";
 static Class WindowClass, PassClass, ContentClass, ContainerClass;
@@ -38,6 +40,7 @@ static char StateKey;
 @property(nonatomic,strong) NSMapTable<UIView *,MWOwnedTransform *> *inner;
 @property(nonatomic,weak) UIView *parent;
 @property(nonatomic) BOOL suspended;
+@property(nonatomic) CGRect suspendedBounds;
 @property(nonatomic) double lastLog, lastSkipLog;
 @property(nonatomic,copy) NSString *lastSkip;
 @property(nonatomic,copy) NSString *diagnosticSignature, *diagnosticRestoreReason;
@@ -49,6 +52,8 @@ static char StateKey;
 
 static void Log(NSString *s) {
     NSLog(@"[MangoSuiteWorld] %@", s);
+    MSDiagnosticsLog(@"World",s);
+    if (!MSDiagnosticsActive()) return;
     const char *mappedPath = jbroot("/var/mobile/Library/Logs/MangoUpsideDownWorld.log");
     if (!mappedPath) return;
     NSString *path = [NSString stringWithUTF8String:mappedPath];
@@ -92,7 +97,12 @@ static MWOwnedTransform *OwnedContent(UIView *v){
     }
     return nil;
 }
-static NSInteger Orientation(void) { return B9Orientation(); }
+static NSInteger Orientation(void) {
+    static double lastInverted=-INFINITY;
+    NSInteger value = B9Orientation();
+    if (MSRuntimeFlag(@"IslandLayoutEnabled")) return MSRecoverOrientation(value,MSNativeInversionRequested(),CACurrentMediaTime(),&lastInverted);
+    return value;
+}
 static BOOL RestoreOne(UIView *v,MWOwnedTransform *s){
     if(!s.applied)return YES;
     s.applied=NO;
@@ -251,7 +261,7 @@ static void ApplyWorld(UIView *root){
     for(int i=0;i<3;i++)if(!isfinite(actual[i].x)||!isfinite(actual[i].y)||
         fabs(actual[i].x-(2*CGRectGetMidX(screen)-old[i].x))>.1||
         fabs(actual[i].y-(2*CGRectGetMidY(screen)-old[i].y))>.1){
-        RestoreWorldReason(root,@"post-transform-verification");s.suspended=YES;Log(@"SUSPEND post-transform verification failed");return;
+        RestoreWorldReason(root,@"post-transform-verification");s.suspended=YES;s.suspendedBounds=root.bounds;Log(@"SUSPEND post-transform verification failed");return;
     }
     s.lastSkip=nil;
     if(CACurrentMediaTime()-s.lastLog>5){s.lastLog=CACurrentMediaTime();
@@ -286,6 +296,8 @@ static BOOL KeepsWorld(UIView *root, MWWorldState *state, UIWindow *window) {
 }
 static void ReconcileRoot(UIView *root) {
     MWWorldState *state=State(root);UIWindow *window=root.window;
+    if (state.suspended && MSRuntimeFlag(@"IslandLayoutEnabled") &&
+        (!CGRectEqualToRect(root.bounds,state.suspendedBounds) || state.parent!=window)) state.suspended=NO;
     if(KeepsWorld(root,state,window)){
         // Leave stable native media/notification layouts in their corrected
         // coordinate space. Only newly attached native inverted contents need
@@ -373,7 +385,14 @@ static BOOL Relevant(UIView *v){
 }
 static BOOL Begin(UIView *v){
     if(Busy||![NSThread isMainThread]||!Relevant(v))return NO;
-    if(Depth++==0){Busy=YES;
+    if(Depth++==0){
+        // Root/content geometry is expressed inside the already turned window.
+        // Keep that space stable while Mango's position/size slider writes it.
+        if (MSRuntimeFlag(@"IslandLayoutEnabled") && ![v isKindOfClass:WindowClass]) {
+            for (UIView *root in Roots.allObjects)
+                if (root.window == v.window && KeepsWorld(root, State(root), root.window)) return YES;
+        }
+        Busy=YES;
         @try{[UIView performWithoutAnimation:^{for(UIView *root in Roots.allObjects)RestoreWorldReason(root,@"geometry-setter");}];}
         @finally{Busy=NO;}}
     return YES;
@@ -493,36 +512,52 @@ static BOOL OwnsGestureWindow(UIView *view) {
     return NO;
 }
 static void (*OriginalMangoPan)(id, SEL, id);
+static void (*OriginalPillPan)(id, SEL, id);
+static CGPoint (*OriginalTranslation)(id,SEL,UIView *), (*OriginalVelocity)(id,SEL,UIView *);
+static __weak UIPanGestureRecognizer *ScopedPan;
 static unsigned PanDepth;
 static BOOL PanInstalled;
 static unsigned PanAttempts;
-static void HookMangoPan(id controller, SEL selector, UIPanGestureRecognizer *gesture) {
-    if (!NSThread.isMainThread || PanDepth || !Enabled || Busy || Depth || B9Disabled(Disabled) ||
+static CGPoint HookTranslation(id gesture,SEL selector,UIView *view) {
+    CGPoint value=OriginalTranslation(gesture,selector,view);
+    if (PanDepth && gesture==ScopedPan && NSThread.isMainThread) value.y=-value.y;
+    return value;
+}
+static CGPoint HookVelocity(id gesture,SEL selector,UIView *view) {
+    CGPoint value=OriginalVelocity(gesture,selector,view);
+    if (PanDepth && gesture==ScopedPan && NSThread.isMainThread) value.y=-value.y;
+    return value;
+}
+static void RunMangoPan(id controller, SEL selector, UIPanGestureRecognizer *gesture, void (*original)(id,SEL,id)) {
+    if (!MSRuntimeFlag(@"SwipeDirectionEnabled") || !NSThread.isMainThread || PanDepth || !Enabled || Busy || Depth || B9Disabled(Disabled) ||
         ![gesture isKindOfClass:UIPanGestureRecognizer.class] ||
         gesture.state != UIGestureRecognizerStateEnded) {
-        OriginalMangoPan(controller, selector, gesture); return;
+        original(controller, selector, gesture); return;
     }
     UIView *view = gesture.view;
     MWTransform map=FixedMap(view.window);
     NSInteger raw=0;BOOL owned=NO,inverted=NO;
-    BOOL correction=MSB8PanNeedsCorrection(raw=B9MangoOrientation(),owned=OwnsGestureWindow(view),
+    BOOL correction=MSB8PanNeedsCorrection(raw=Orientation(),owned=OwnsGestureWindow(view),
                               inverted=MWInvertedBasis(map.a,map.d,map.c,map.b));
     if(MSDiagnosticsActive()) @try {
         MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN ended view=%p window=%p actualMango=%ld actualOwned=%d actualInverted=%d correction=%d",(__bridge void *)view,(__bridge void *)view.window,(long)raw,owned,inverted,correction]);
     } @catch (__unused NSException *exception) {}
     if(!correction){
-        OriginalMangoPan(controller,selector,gesture);return;
+        original(controller,selector,gesture);return;
     }
     CGPoint before = [gesture translationInView:view];
     if (!isfinite(before.x) || !isfinite(before.y)) {
-        OriginalMangoPan(controller, selector, gesture); return;
+        original(controller, selector, gesture); return;
     }
-    MSB8RunPanCorrection(before, ^(CGPoint value) {
-        [gesture setTranslation:value inView:view];
-    }, ^{
-        OriginalMangoPan(controller, selector, gesture);
-    }, &PanDepth);
+    // Correct both Ended queries without changing recognizer state. Native
+    // callbacks may consume velocity as well as translation. Other gestures,
+    // horizontal movement and Began/Changed drag behavior pass through.
+    ScopedPan=gesture; ++PanDepth;
+    @try { original(controller,selector,gesture); }
+    @finally { --PanDepth; ScopedPan=nil; }
 }
+static void HookMangoPan(id controller,SEL selector,UIPanGestureRecognizer *gesture) { RunMangoPan(controller,selector,gesture,OriginalMangoPan); }
+static void HookPillPan(id controller,SEL selector,UIPanGestureRecognizer *gesture) { RunMangoPan(controller,selector,gesture,OriginalPillPan); }
 static void InstallMangoPan(void) {
     if(PanInstalled || !Enabled || B9Disabled(Disabled))return;
     Class controller = objc_getClass("SBSystemApertureViewController");
@@ -534,7 +569,17 @@ static void InstallMangoPan(void) {
         else Log(@"Pan correction unavailable after 20s: MangoHello resize-pan hook absent or wrapped");
         return;
     }
+    if (!Signature(UIPanGestureRecognizer.class,@selector(translationInView:),@encode(CGPoint),@[@"@"]) ||
+        !Signature(UIPanGestureRecognizer.class,@selector(velocityInView:),@encode(CGPoint),@[@"@"])) {
+        Log(@"Pan query ABI mismatch; correction skipped"); return;
+    }
+    MSHookMessageEx(UIPanGestureRecognizer.class,@selector(translationInView:),(IMP)HookTranslation,(IMP *)&OriginalTranslation);
+    MSHookMessageEx(UIPanGestureRecognizer.class,@selector(velocityInView:),(IMP)HookVelocity,(IMP *)&OriginalVelocity);
     MSHookMessageEx(controller, selector, (IMP)HookMangoPan, (IMP *)&OriginalMangoPan);
+    Class pill=objc_getClass("MangoPillElement");
+    SEL pillPan=sel_registerName("handlePanGesture:");
+    if (B9ClassIsHello(pill) && Signature(pill,pillPan,"v",@[@"@"]) && B9IMPIsHello(class_getMethodImplementation(pill,pillPan)))
+        MSHookMessageEx(pill,pillPan,(IMP)HookPillPan,(IMP *)&OriginalPillPan);
     PanInstalled=YES;
     Log(@"Owned-window ended-pan correction installed (vertical translation only)");
 }

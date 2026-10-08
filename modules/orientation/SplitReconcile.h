@@ -128,3 +128,18 @@ static inline unsigned MSSplitReconcile(MSSplitOwnership *state, int active,
     }
     return result | MSSplitApplied;
 }
+
+static inline unsigned MSSplitReconcileRecovery(MSSplitOwnership *state,int active,int recover,
+                                               MSSplitRead read,MSSplitWrite write,void *context) {
+    unsigned result=0;
+    if (recover && active && state->applied) {
+        MSSplitSnapshot current=read(context);
+        // On Dock/library reopen UIKit can supply the scene's half-turn itself.
+        // Our old half-turn then renders upright despite an unchanged model.
+        // Relinquish only our exact write, and let the normal preflight decide
+        // whether the now-native inversion needs any additional correction.
+        if (current.eligible && MWOwns(current.transform,state->after,state->applied,state->suspended) && MSSplitUpright(current))
+            result=MSSplitRestore(state,current,write,context);
+    }
+    return result | MSSplitReconcile(state,active,read,write,context);
+}

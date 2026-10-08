@@ -3,6 +3,7 @@
 #import <Preferences/PSSpecifier.h>
 #import "../src/SuitePreferences.h"
 #import "../src/NativePreferences.h"
+#import "Prefs.h"
 
 static NSString * const NativeUpsideDownKey = @"LeXiang.UpsideDown.Enabled";
 
@@ -10,13 +11,6 @@ static BOOL SuiteFlag(NSString *key) {
     if (MSHasEmergencyMarker(key)) return NO;
     return MSPreferenceFlag(MSReadPreferences(NULL), key);
 }
-
-@interface MangoSuitePrefsController : PSListController
-- (id)readValue:(PSSpecifier *)specifier;
-- (void)writeValue:(id)value specifier:(PSSpecifier *)specifier;
-- (void)showRestartHelp;
-- (void)showMissingAdaptive;
-@end
 
 @implementation MangoSuitePrefsController
 
@@ -87,6 +81,27 @@ static BOOL SuiteFlag(NSString *key) {
     [self addSection:nil];
     [self addSwitch:@"分屏倒置修复" key:@"SplitEnabled"];
 
+    [self addSection:@"本版问题修复（可分别关闭）"];
+    [self addSwitch:@"1 椭圆轮廓与四角修复" key:@"RimGeometryEnabled"];
+    [self addSwitch:@"2 启动器重开倒置恢复" key:@"LauncherRecoveryEnabled"];
+    [self addSwitch:@"3 液态玻璃过渡动画修复" key:@"GlassAnimationEnabled"];
+    [self addSwitch:@"4 调整位置大小保持倒置" key:@"IslandLayoutEnabled"];
+    [self addSwitch:@"5 短通知黑色光晕修复" key:@"ShortHaloEnabled"];
+    [self addSwitch:@"6 灵动岛边缘实时采色" key:@"EdgeColorEnabled"];
+    for (NSDictionary *row in @[@{@"name":@"采色边缘粗细（点）", @"key":@"EdgeThickness", @"min":@.5, @"max":@4.0},
+                                @{@"name":@"采色边缘动态程度", @"key":@"EdgeDynamics", @"min":@0.0, @"max":@1.0}]) {
+        PSSpecifier *slider = [PSSpecifier preferenceSpecifierNamed:row[@"name"] target:self set:@selector(writeValue:specifier:) get:@selector(readValue:) detail:nil cell:PSSliderCell edit:nil];
+        [slider setProperty:row[@"key"] forKey:@"key"];
+        [slider setProperty:row[@"min"] forKey:@"min"];
+        [slider setProperty:row[@"max"] forKey:@"max"];
+        [slider setProperty:@YES forKey:@"showValue"];
+        [_specifiers addObject:slider];
+    }
+    [self addSwitch:@"7 通知上下滑动方向修复" key:@"SwipeDirectionEnabled"];
+    [self addSection:@"调试"];
+    PSSpecifier *diagnostics = [PSSpecifier preferenceSpecifierNamed:@"调试日志与一键提取" target:self set:nil get:nil detail:NSClassFromString(@"MangoSuiteDiagnosticsController") cell:PSLinkCell edit:nil];
+    [_specifiers addObject:diagnostics];
+
     [self addSection:@"使用"];
     PSSpecifier *help = [PSSpecifier preferenceSpecifierNamed:@"如何应用开关更改" target:self set:nil get:nil detail:nil cell:PSButtonCell edit:nil];
     [help setButtonAction:@selector(showRestartHelp)];
@@ -101,12 +116,19 @@ static BOOL SuiteFlag(NSString *key) {
 
 - (id)readValue:(PSSpecifier *)specifier {
     NSString *key = [specifier propertyForKey:@"key"];
+    if ([key isEqualToString:@"EdgeThickness"]) return MSReadPreferences(NULL)[key] ?: @1.2;
+    if ([key isEqualToString:@"EdgeDynamics"]) return MSReadPreferences(NULL)[key] ?: @.5;
     if ([key isEqualToString:NativeUpsideDownKey]) return MSReadNativeUpsideDown(NULL) ?: @NO;
     return key.length ? @(SuiteFlag(key)) : nil;
 }
 
 - (void)writeValue:(id)value specifier:(PSSpecifier *)specifier {
     NSString *key = [specifier propertyForKey:@"key"];
+    if ([key isEqualToString:@"EdgeThickness"] || [key isEqualToString:@"EdgeDynamics"]) {
+        NSError *error = nil;
+        if (!MSWritePreferenceValue(key, value, &error)) [self showMessage:error.localizedDescription title:@"保存失败"];
+        return;
+    }
     if ([key isEqualToString:NativeUpsideDownKey]) {
         if (![value isKindOfClass:NSNumber.class]) return;
         NSError *error = nil;
@@ -115,10 +137,13 @@ static BOOL SuiteFlag(NSString *key) {
         if (!saved) [self showMessage:error.localizedDescription ?: @"请重新打开设置后检查当前倒置开关。" title:@"保存失败"];
         return;
     }
-    NSArray *known = @[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled"];
+    NSArray *known = [@[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled", @"DebugEnabled"] arrayByAddingObjectsFromArray:MSRepairKeys()];
     if (![known containsObject:key] || ![value isKindOfClass:NSNumber.class]) return;
     BOOL enabled = [value boolValue];
     NSError *saveError = nil;
+    if ([key isEqualToString:@"DebugEnabled"] && enabled && !MSWritePreferenceValue(@"DebugSessionToken", @(NSDate.date.timeIntervalSince1970), &saveError)) {
+        [self showMessage:saveError.localizedDescription title:@"记录未能开始"]; return;
+    }
     if (!MSReadPreferences(&saveError)) {
         [self reloadSpecifiers];
         [self showMessage:[NSString stringWithFormat:@"%@\n%@", saveError.localizedDescription, saveError.userInfo[NSFilePathErrorKey]] title:@"保存失败"];

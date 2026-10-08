@@ -11,6 +11,8 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import <roothide.h>
 #import "../../../src/RuntimeDiagnostics.h"
+#import "IslandRepairs.h"
+#import "../../orientation/Beta9Identity.h"
 
 // Beta9-1 runtime surface verified against the supplied Mango binaries.
 // Every optional Mango method is signature-gated before it is hooked/called.
@@ -78,7 +80,7 @@ static BOOL IsIslandGlass(id object) {
 }
 
 static void EnsureActiveEdge(UIView *glass) {
-    if (Disabled || !glass.window || CGRectIsEmpty(glass.bounds) || !IslandEdgeOptIn()) return;
+    if (Disabled || !glass.window || CGRectIsEmpty(glass.bounds)) return;
     Class cls = object_getClass(glass);
     if (!ClassMethodSignature(cls, @selector(lgSpecularEnabledOverride), "@", 2, NULL) ||
         !ClassMethodSignature(cls, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) return;
@@ -88,12 +90,13 @@ static void EnsureActiveEdge(UIView *glass) {
         Log([NSString stringWithFormat:@"[EDGE-ACTIVE] observed class=%p module=%s override=%@ size=%.1fx%.1f",
              (void *)cls, class_getImageName(cls) ?: "?", value ?: @"nil", glass.bounds.size.width, glass.bounds.size.height]);
     }
-    if ([value respondsToSelector:@selector(boolValue)] && [value boolValue]) return;
+    BOOL desired = IslandEdgeOptIn() && !MSIslandUsesOwnedRim();
+    if ([value respondsToSelector:@selector(boolValue)] && [value boolValue] == desired) return;
     CFTimeInterval now = CACurrentMediaTime();
     NSNumber *last = objc_getAssociatedObject(glass, &EdgeAttemptKey);
     if (last && now - last.doubleValue < 1.0) return;
     objc_setAssociatedObject(glass, &EdgeAttemptKey, @(now), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [glass setLgSpecularEnabledOverride:(__bridge id)kCFBooleanTrue];
+    [glass setLgSpecularEnabledOverride:@(desired)];
     Log([NSString stringWithFormat:@"[EDGE-ACTIVE] corrected class=%p before=%@ after=%@",
          (void *)cls, value ?: @"nil", [glass lgSpecularEnabledOverride] ?: @"nil"]);
 }
@@ -105,7 +108,7 @@ static void SpecularOverride(id self, SEL cmd, id value) {
     // path. For Island glass only, make the user's explicit preference the
     // authoritative override: @YES when enabled, @NO when disabled.
     if (!Disabled && IsIslandGlass(self)) {
-        BOOL enabled = IslandEdgeOptIn();
+        BOOL enabled = IslandEdgeOptIn() && !MSIslandUsesOwnedRim();
         value = enabled ? (__bridge id)kCFBooleanTrue : (__bridge id)kCFBooleanFalse;
     }
     OriginalSpecularOverride(self, cmd, value);
@@ -256,12 +259,14 @@ static void Pulse(void) {
 
 @implementation MangoIdleFrameObserver
 - (void)tick:(CADisplayLink *)link {
-    if (CACurrentMediaTime() - LastTransition > 1.0) { link.paused = YES; return; }
+    if (CACurrentMediaTime() - LastTransition > 1.0 && !MSIslandRepairsNeedFrames()) { link.paused = YES; return; }
     for (UIView *host in Hosts.allObjects) Update(host);
 }
 @end
 
 static void Log(NSString *event) {
+    MSDiagnosticsLog(@"Idle",event);
+    if (!MSDiagnosticsActive()) return;
     struct stat st;
     const char *dir = LogDir.fileSystemRepresentation;
     if (mkdir(dir, 0700) && lstat(dir, &st)) return;
@@ -479,7 +484,7 @@ static void Update(UIView *host) {
         // During a compact activity fade, allow the Idle glass to exist only as
         // the inverse-opacity backing layer. Outside compact geometry it exits
         // immediately and never participates in press/preview motion.
-        BOOL needBackground = NeedsIdleBacking(backgroundState, blendableActivity, activity);
+        BOOL needBackground = MSRuntimeFlag(@"IdleEnabled") && NeedsIdleBacking(backgroundState, blendableActivity, activity);
         BOOL constructor = needBackground && GlassConstructorVerified && !GlassConstructionFailed;
         BOOL mango = constructor && (OriginalIslandGlassSeen || MangoGlassSetting());
         BOOL upgrading = needBackground && bg && mango && ![objc_getAssociatedObject(bg, &GlassModeKey) boolValue];
@@ -519,6 +524,7 @@ static void Update(UIView *host) {
             }
         }
 
+        MSIslandRepairUpdate(host, bg, IslandEdgeOptIn());
         NSString *old = objc_getAssociatedObject(host, &StateKey);
         if (![old isEqualToString:state]) {
             Pulse();
@@ -763,7 +769,24 @@ static void Scan(void) {
         }
     }
     for (UIView *host in Hosts.allObjects) Update(host);
+    if (!Disabled && Hosts.count && MSIslandRepairsNeedFrames()) DisplayLink.paused = NO;
     IdleDiagnosticsScan();
+}
+
+static void (*OriginalNotificationLayout)(id,SEL,id);
+static void NotificationLayout(id self,SEL cmd,id view) {
+    OriginalNotificationLayout(self,cmd,view);
+    SEL providerSelector=sel_registerName("viewProvider"), providedSelector=sel_registerName("providedView");
+    Class cls=object_getClass(self);
+    if (ClassMethodSignature(cls,providerSelector,"@",2,NULL)) {
+        id provider=((id (*)(id,SEL))objc_msgSend)(self,providerSelector);
+        Class providerClass=object_getClass(provider);
+        if (B9ClassIsHello(providerClass) && ClassMethodSignature(providerClass,providedSelector,"@",2,NULL)) {
+            id provided=((id (*)(id,SEL))objc_msgSend)(provider,providedSelector);
+            MSIslandNotificationLayout(provided);
+        }
+    }
+    Pulse();
 }
 
 __attribute__((constructor)) static void Start(void) {
@@ -773,7 +796,7 @@ __attribute__((constructor)) static void Start(void) {
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=1.1.9.5~beta9.1 background=Mango-glass stable-idle-only=1 inverse-native-opacity=1 presentation-opacity=1 presentation-bounds-guard=1 compact-return-handoff=1 visible-activity-only=1 settled-background-no-rewrite=1 touch=unchanged");
+            Log(@"[SESSION] version=1.1.9.6~beta9.2 background=Mango-glass stable-idle-only=1 inverse-native-opacity=1 presentation-opacity=1 presentation-bounds-guard=1 compact-return-handoff=1 visible-activity-only=1 settled-background-no-rewrite=1 touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");
@@ -802,6 +825,12 @@ __attribute__((constructor)) static void Start(void) {
 
             Hosts = [NSHashTable weakObjectsHashTable];
             Disabled = access([[LogDir stringByAppendingPathComponent:@"DISABLED"] fileSystemRepresentation], F_OK) == 0;
+
+            Class pill = NSClassFromString(@"MangoPillElement");
+            SEL notificationLayout = sel_registerName("layoutHostContainerViewDidLayoutSubviews:");
+            if (B9ClassIsHello(pill) && ClassMethodSignature(pill,notificationLayout,"v",3,"@") &&
+                B9IMPIsHello(class_getMethodImplementation(pill,notificationLayout)))
+                MSHookMessageEx(pill,notificationLayout,(IMP)NotificationLayout,(IMP *)&OriginalNotificationLayout);
 
             MSHookMessageEx(HostClass, @selector(layoutSubviews), (IMP)Layout, (IMP *)&OriginalLayout);
             MSHookMessageEx(ContentClass, @selector(setHidden:), (IMP)ContentHidden, (IMP *)&OriginalContentHidden);
@@ -840,7 +869,7 @@ __attribute__((constructor)) static void Start(void) {
             DisplayLink = [CADisplayLink displayLinkWithTarget:observer selector:@selector(tick:)];
             DisplayLink.preferredFramesPerSecond = 30;
             [DisplayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
-            DisplayLink.paused = YES;
+            DisplayLink.paused = !MSIslandRepairsNeedFrames();
 
             Log(@"[READY] hooks=layout+content-hidden+element-move+element-alpha+glass-hidden+island-reapply transition-refresh=30fps/1s fallback-scan=500ms global-Island-glass-logic=enabled");
         });

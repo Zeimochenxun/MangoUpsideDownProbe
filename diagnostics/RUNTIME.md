@@ -1,19 +1,8 @@
-# Beta9 运行时诊断
+# Beta9.2 调试记录与提取
 
-完整包 `MangoSuite-1.2.0-Beta9.1-RootHide-arm64e.deb`，版本 `1.2.0~beta9.1`。日常安装不需要运行 collector；出现异常时可选使用。
-
-每个模块的诊断会话最多 1200 秒（20 分钟），日志约 256 KiB。只记录现有方向决策、视图几何、透明度和裁剪，不读取媒体标题、封面或授权。采集不会改变偏好、方向、进程或模块时限，只立即复制限定日志末尾（每个候选文件最多 1 MiB）并退出。
-
-1. 安装完整包，在多巴胺中重新启动用户空间。
-2. 在重启后 20 分钟内复现异常，记录具体时刻、操作顺序、桌面/锁屏/启动器方向及灵动岛上下滑结果。
-3. 使用通常的 mobile 用户，在终端执行：
-
-```sh
-sh /Library/MangoSuite/Diagnostics/capture-runtime.sh
-```
-
-终端立即打印 `/var/mobile/Documents/MangoSuiteDiagnostics/runtime-日期-时间-随机值.tar.gz` 的绝对路径。用同一终端的路径或 Filza 取回文件。若打包失败则保留快照目录；日志不存在、无权限或读取失败均记入 metadata.txt，不需要 sudo。
-
-快照中的 diagnostic-idle、diagnostic-world、diagnostic-split 候选分别来自当前诊断目录。shell 和 rootfs 独立保留来源路径、时间及文件状态，不能仅凭文件存在认定来自本次进程。legacy 候选只作旧路径补充历史，不能当作新版本实时证据。
-
-没有触发异常时记录“未触发”；无需反复重启或更改开关。日志里的 activity 或 transform 不能证明标题、封面像素可见，也不能证明实际触摸效果。
+在设置 → Mango 整合 → 调试日志与一键提取中点击开始记录，复现后点击提取。无需运行终端工具。
+默认关闭，记录会话持续20分钟，可再次点击开始重新计时。每模块256KB、每秒最多8条。日志保存在 RootHide 映射的 /var/mobile/Library/Logs/MangoSuiteDiagnostics，模块名为 Idle、Glass、World、Split。
+导出通过系统分享页面生成有界文本，记录开关、会话、尺寸、物理坐标、方向、变换所有权、手势补偿和采色接口状态。不会导出通知文字、媒体内容、完整设置域或截图。
+Glass 中的 display-pixels 表示从可用的系统屏幕接口取像，springboard-window-pixels 表示窗口快照回退，不能证明前台 App 已被捕获。采集失败会记录不可用并移除采色效果。所有像素仅在一次采样的内存中使用。
+底层读写拒绝符号链接和非常规文件，文件只由手机 mobile 用户读写。现有 capture-runtime.sh 作为手动备用提取工具保留。
+日志只提供排查证据；最终显示与触摸结果仍需要手机上的观察。

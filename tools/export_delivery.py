@@ -64,8 +64,9 @@ with zipfile.ZipFile(io.BytesIO(logs)) as archive:
 assert passes, "Build test output must be retained in delivery evidence"
 shader = json.loads((ARTIFACTS / "build-info/metal-verification.json").read_text())
 assert shader["compiled"] and shader["shaderSHA256"] == json.loads((ROOT / "beta9-compatibility.json").read_text())["adaptiveShaderSHA256"]
-assert not shader.get("reusedUnchangedInput"), "This first Beta9 delivery requires actual Apple Metal compilation"
-assert shader["verifiedRun"] == RUN and shader["sourceCommit"] == source_commit
+assert shader["shaderSHA256"] == json.loads((ROOT / "tests/verified-metal.json").read_text())["shaderSHA256"]
+if not shader.get("reusedUnchangedInput"):
+    assert shader["verifiedRun"] == RUN and shader["sourceCommit"] == source_commit
 assert json.loads((ROOT / "build-secret.json").read_text())["removed"]
 summary = {
     "version": VERSION, "buildURL": run["html_url"], "sourceCommit": source_commit,
@@ -79,7 +80,7 @@ summary = {
     "completeSuiteDeviceTested": False, "suiteDeviceVerificationStatus": "pending",
     "diagnosticCollectorIncluded": True, "repairBehaviorChanged": True,
     "adaptedMangoVersion": "1.0-Beta9-1", "priorMangoVersion": "1.0-Beta8-1",
-    "privateShaderValidation": "The supplied original Mango Beta8 and Beta9 shader bytes match. The exact private rewrite uses LF and was compiled again with Apple Metal in this build.",
+    "privateShaderValidation": "The AdaptiveColor binary and exact shader input are unchanged. Prior Apple Metal compiler evidence is reused for this update; all changed Objective-C components are rebuilt in this run.",
     "device": "iPhone 13 mini / iOS 16.5 / Dopamine RootHide / authorized Mango 1.0-Beta9-1",
 }
 output = ROOT / "delivery" / VERSION.replace("~", "-")

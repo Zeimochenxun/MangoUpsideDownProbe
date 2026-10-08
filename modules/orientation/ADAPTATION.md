@@ -1,6 +1,6 @@
 # Beta9 方向模块适配
 
-Suite 版本 `1.2.0~beta9.1`，目标 Mango `1.0-Beta9-1`、iOS 16.5、Dopamine RootHide、arm64e。适配依据是用户提供的安装包，SHA256 `4826d2e73c59f05e0ff529da1e7db47e494ebfc89498fd3c8280917268e2dadd`。
+Suite 版本 `1.2.0~beta9.2`，目标 Mango `1.0-Beta9-1`、iOS 16.5、Dopamine RootHide、arm64e。适配依据是用户提供的安装包，SHA256 `4826d2e73c59f05e0ff529da1e7db47e494ebfc89498fd3c8280917268e2dadd`。
 
 ## 身份与 ABI
 

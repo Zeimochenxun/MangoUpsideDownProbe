@@ -48,6 +48,12 @@ jobs:
       - name: Verify actual Beta9 compatibility parser
         run: python3 tests/test_compatibility.py
 
+      - name: Verify optical math and minimized app reopen recovery
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror tests/optical_recovery_test.c -lm -o /tmp/optical-recovery-test
+          /tmp/optical-recovery-test
+          python3 tests/test_repair_settings.py
+
       - name: Verify idle animation handoff and direction geometry
         run: |
           set -euo pipefail

@@ -5,7 +5,9 @@
 #import <substrate.h>
 #import "Beta9Identity.h"
 #import "../../src/RuntimeDiagnostics.h"
+#import "../../src/RuntimeSettings.h"
 #include "SplitReconcile.h"
+#include "RecoveryPolicy.h"
 #include <math.h>
 
 static const char *Disabled = "/var/mobile/Library/Preferences/MangoSplitUpsideDownFix.disabled";
@@ -13,6 +15,8 @@ static NSHashTable<UIWindow *> *Windows;
 static BOOL Ready, Enabled, Busy;
 static Class SceneClass, FloatingClass, LauncherClass;
 static dispatch_source_t Timer;
+static CADisplayLink *RecoveryLink;
+static CFTimeInterval RecoveryUntil;
 static char StateKey;
 static char DiagnosticKey;
 static NSString *DiagnosticSource = @"unknown";
@@ -312,7 +316,7 @@ static void Update(UIWindow *w, BOOL active) {
     MSSplitDiagnosticObservation *previousRead = DiagnosticRead;
     DiagnosticRead = observation.enabled ? &observation : NULL;
     @try {
-        result = MSSplitReconcile(&ownership, active, Snapshot, WriteSnapshot, (__bridge void *)w);
+        result = MSSplitReconcileRecovery(&ownership, active, MSRuntimeFlag(@"LauncherRecoveryEnabled"), Snapshot, WriteSnapshot, (__bridge void *)w);
     } @finally { state.ownership = ownership; DiagnosticRead = previousRead; }
     DiagnosticFinish(w, observation, state, result);
     if (result & MSSplitReleased) Log(@"Owned split transform replaced externally; ownership released");
@@ -325,7 +329,10 @@ static void Reconcile(void) {
     @try {
         if (Enabled && B9Disabled(Disabled)) Enabled = NO;
         NSInteger resolved = UIInterfaceOrientationUnknown;
-        BOOL active = Enabled && (resolved = B9Orientation()) == UIInterfaceOrientationPortraitUpsideDown;
+        resolved = B9Orientation();
+        static double lastInverted=-INFINITY;
+        if (MSRuntimeFlag(@"LauncherRecoveryEnabled")) resolved=MSRecoverOrientation(resolved,MSNativeInversionRequested(),CACurrentMediaTime(),&lastInverted);
+        BOOL active = Enabled && resolved == UIInterfaceOrientationPortraitUpsideDown;
         NSArray<UIWindow *> *all = nil;
         if (active) {
             all = AllWindows();
@@ -356,6 +363,23 @@ static void ReconcileFrom(NSString *source) {
     @try { Reconcile(); } @finally { DiagnosticSource = previous; }
 }
 
+@interface MSSplitRecoveryObserver : NSObject
+- (void)tick:(CADisplayLink *)link;
+@end
+@implementation MSSplitRecoveryObserver
+- (void)tick:(CADisplayLink *)link {
+    if (!Enabled || !MSRuntimeFlag(@"LauncherRecoveryEnabled") || CACurrentMediaTime() > RecoveryUntil) {
+        link.paused = YES; return;
+    }
+    ReconcileFrom(@"reopen-presentation-frame");
+}
+@end
+static void ArmRecovery(void) {
+    if (!MSRuntimeFlag(@"LauncherRecoveryEnabled")) return;
+    RecoveryUntil = CACurrentMediaTime()+1.2;
+    RecoveryLink.paused = NO;
+}
+
 // Mango-owned class lifecycle callbacks give immediate updates as split
 // windows attach or relayout. A slow timer handles direction changes and
 // windows not enumerated by public scene APIs; it is not an animation driver.
@@ -363,11 +387,17 @@ static void (*SceneMove)(id,SEL), (*FloatingMove)(id,SEL);
 static void (*SceneLayout)(id,SEL), (*FloatingLayout)(id,SEL);
 static void (*LauncherRotation)(id,SEL), (*LauncherLayout)(id,SEL);
 static void AfterLifecycle(UIView *view, NSString *source) {
-    if (!Ready || !NSThread.isMainThread) return;
+    if (!Ready || Busy || !NSThread.isMainThread) return;
     UIWindow *w = view.window;
     if (object_getClass(w) == UIWindow.class) [Windows addObject:w];
     ReconcileFrom(source);
+    ArmRecovery();
+    // Dock/library reopen may reset the window after this native callback.
+    dispatch_async(dispatch_get_main_queue(), ^{ ReconcileFrom(@"reopen-next-turn"); });
 }
+static void (*FloatingHidden)(id,SEL,BOOL), (*SceneHidden)(id,SEL,BOOL);
+static void HookFloatingHidden(id self,SEL cmd,BOOL hidden) { FloatingHidden(self,cmd,hidden); if (!hidden) AfterLifecycle(self,@"floating-reveal"); }
+static void HookSceneHidden(id self,SEL cmd,BOOL hidden) { SceneHidden(self,cmd,hidden); if (!hidden) AfterLifecycle(self,@"scene-reveal"); }
 static void HookSceneMove(id self,SEL cmd) { SceneMove(self,cmd); AfterLifecycle(self,@"scene-move"); }
 static void HookFloatingMove(id self,SEL cmd) { FloatingMove(self,cmd); AfterLifecycle(self,@"floating-move"); }
 static void HookSceneLayout(id self,SEL cmd) { SceneLayout(self,cmd); AfterLifecycle(self,@"scene-layout"); }
@@ -491,10 +521,22 @@ static void Install(void) {
         B9IMPIsHello(class_getMethodImplementation(launcher, rotation)) &&
         B9IMPIsHello(class_getMethodImplementation(launcher, layout))) LauncherClass = launcher;
     Windows = [NSHashTable weakObjectsHashTable]; Enabled = YES; Ready = YES;
+    static MSSplitRecoveryObserver *observer;
+    observer = [MSSplitRecoveryObserver new];
+    RecoveryLink = [CADisplayLink displayLinkWithTarget:observer selector:@selector(tick:)];
+    RecoveryLink.preferredFramesPerSecond = 60;
+    [RecoveryLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+    RecoveryLink.paused = YES;
     MSHookMessageEx(SceneClass,@selector(didMoveToWindow),(IMP)HookSceneMove,(IMP *)&SceneMove);
     MSHookMessageEx(FloatingClass,@selector(didMoveToWindow),(IMP)HookFloatingMove,(IMP *)&FloatingMove);
     MSHookMessageEx(SceneClass,@selector(layoutSubviews),(IMP)HookSceneLayout,(IMP *)&SceneLayout);
     MSHookMessageEx(FloatingClass,@selector(layoutSubviews),(IMP)HookFloatingLayout,(IMP *)&FloatingLayout);
+    Method sceneHidden = class_getInstanceMethod(SceneClass, @selector(setHidden:));
+    Method floatingHidden = class_getInstanceMethod(FloatingClass, @selector(setHidden:));
+    if (sceneHidden && !strcmp(method_getTypeEncoding(sceneHidden), "v20@0:8B16"))
+        MSHookMessageEx(SceneClass,@selector(setHidden:),(IMP)HookSceneHidden,(IMP *)&SceneHidden);
+    if (floatingHidden && !strcmp(method_getTypeEncoding(floatingHidden), "v20@0:8B16"))
+        MSHookMessageEx(FloatingClass,@selector(setHidden:),(IMP)HookFloatingHidden,(IMP *)&FloatingHidden);
     if (LauncherClass) {
         MSHookMessageEx(LauncherClass,rotation,(IMP)HookLauncherRotation,(IMP *)&LauncherRotation);
         MSHookMessageEx(LauncherClass,layout,(IMP)HookLauncherLayout,(IMP *)&LauncherLayout);

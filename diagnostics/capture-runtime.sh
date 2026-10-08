@@ -92,9 +92,11 @@ mango_copy() {
 # Do not merge these candidates, and do not call an old rootfs file current.
 mango_copy diagnostic-idle-shell /var/mobile/Library/Logs/MangoSuiteDiagnostics/Idle.log
 mango_copy diagnostic-world-shell /var/mobile/Library/Logs/MangoSuiteDiagnostics/World.log
+mango_copy diagnostic-glass-shell /var/mobile/Library/Logs/MangoSuiteDiagnostics/Glass.log
 mango_copy diagnostic-split-shell /var/mobile/Library/Logs/MangoSuiteDiagnostics/Split.log
 mango_copy diagnostic-idle-rootfs /rootfs/var/mobile/Library/Logs/MangoSuiteDiagnostics/Idle.log
 mango_copy diagnostic-world-rootfs /rootfs/var/mobile/Library/Logs/MangoSuiteDiagnostics/World.log
+mango_copy diagnostic-glass-rootfs /rootfs/var/mobile/Library/Logs/MangoSuiteDiagnostics/Glass.log
 mango_copy diagnostic-split-rootfs /rootfs/var/mobile/Library/Logs/MangoSuiteDiagnostics/Split.log
 mango_copy legacy-idle-shell /var/mobile/Library/Logs/MangoIdleIsland/Status.log
 mango_copy legacy-idle-rootfs /rootfs/var/mobile/Library/Logs/MangoIdleIsland/Status.log

@@ -39,3 +39,6 @@
 @end
 @interface MangoIslandAdaptiveColorPrefsController : PSListController @end
 @implementation MangoIslandAdaptiveColorPrefsController @end
+
+@interface MangoSuiteDiagnosticsController : PSListController @end
+@implementation MangoSuiteDiagnosticsController @end

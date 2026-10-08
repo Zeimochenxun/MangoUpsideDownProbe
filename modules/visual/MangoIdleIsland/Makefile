@@ -4,7 +4,7 @@ THEOS_PACKAGE_SCHEME = roothide
 INSTALL_TARGET_PROCESSES = SpringBoard
 include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = MangoIdleIsland
-MangoIdleIsland_FILES = Tweak.m
+MangoIdleIsland_FILES = Tweak.m IslandRepairs.m ../../../src/SuitePreferences.m
 MangoIdleIsland_CFLAGS = -fobjc-arc -fblocks -Wall -Wextra -Werror -Wno-unused-function -Wno-deprecated-declarations
 MangoIdleIsland_FRAMEWORKS = Foundation CoreFoundation UIKit QuartzCore
 MangoIdleIsland_LIBRARIES = substrate roothide

@@ -1,5 +1,6 @@
 #import "SuitePreferences.h"
 #import <roothide.h>
+#include <math.h>
 
 static NSString * const ErrorDomain = @"com.chenxun.mangosuite.storage";
 
@@ -54,21 +55,35 @@ NSDictionary *MSReadPreferences(NSError **error) {
 BOOL MSPreferenceFlag(NSDictionary *snapshot, NSString *key) {
     if (!snapshot) return NO;
     id value = snapshot[key];
-    return value == nil ? YES : ([value isKindOfClass:NSNumber.class] && [value boolValue]);
+    BOOL defaultValue = ![@[@"EdgeColorEnabled", @"DebugEnabled"] containsObject:key];
+    return value == nil ? defaultValue : ([value isKindOfClass:NSNumber.class] && [value boolValue]);
 }
 
 BOOL MSWritePreferenceFlag(NSString *key, BOOL enabled, NSError **error) {
+    return MSWritePreferenceValue(key, @(enabled), error);
+}
+
+NSArray<NSString *> *MSRepairKeys(void) {
+    return @[@"RimGeometryEnabled", @"LauncherRecoveryEnabled", @"GlassAnimationEnabled",
+             @"IslandLayoutEnabled", @"ShortHaloEnabled", @"EdgeColorEnabled", @"SwipeDirectionEnabled"];
+}
+
+BOOL MSWritePreferenceValue(NSString *key, id value, NSError **error) {
     if (error) *error = nil;
     NSString *path = MSPreferencesPath();
-    NSArray *known = @[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled"];
-    if (![known containsObject:key]) {
+    NSArray *known = [@[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled",
+        @"DebugEnabled", @"DebugSessionToken", @"EdgeThickness", @"EdgeDynamics"] arrayByAddingObjectsFromArray:MSRepairKeys()];
+    BOOL valid = [known containsObject:key] && [value isKindOfClass:NSNumber.class] && isfinite([value doubleValue]);
+    if ([key isEqualToString:@"EdgeThickness"]) valid = valid && [value doubleValue] >= .5 && [value doubleValue] <= 4;
+    if ([key isEqualToString:@"EdgeDynamics"]) valid = valid && [value doubleValue] >= 0 && [value doubleValue] <= 1;
+    if (!valid) {
         if (error) *error = StorageError(@"未知的整合开关。", path, nil);
         return NO;
     }
     NSDictionary *current = MSReadPreferences(error);
     if (!current) return NO;
     NSMutableDictionary *next = [current mutableCopy];
-    next[key] = @(enabled);
+    next[key] = value;
     NSError *writeError = nil;
     NSData *data = [NSPropertyListSerialization dataWithPropertyList:next format:NSPropertyListBinaryFormat_v1_0 options:0 error:&writeError];
     NSFileManager *files = NSFileManager.defaultManager;
