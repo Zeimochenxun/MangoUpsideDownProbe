@@ -31,6 +31,12 @@ for filename in sys.argv[1:]:
     assert ("version=" + VERSION).encode() in content[binaries[0]][0], "Loader version was not migrated"
     for string in [b"MangoSuitePrefsController", b"MangoSuiteGlassController", b"com.chenxun.mangosuite",
                    b"IdleEnabled", b"AdaptiveEnabled", b"WorldEnabled", b"SplitEnabled",
-                   b"LeXiang.UpsideDown.Enabled", b"com.go.mangoosprefs"]:
+                   b"LeXiang.UpsideDown.Enabled", b"com.go.mangoosprefs", b"MangoSuiteDiagnosticsController",
+                   b"RimGeometryEnabled", b"LauncherRecoveryEnabled", b"GlassAnimationEnabled", b"IslandLayoutEnabled",
+                   b"ShortHaloEnabled", b"EdgeColorEnabled", b"SwipeDirectionEnabled", b"EdgeThickness", b"EdgeDynamics", b"DebugEnabled"]:
         assert string in prefs, string
+    optical=content["Library/MobileSubstrate/DynamicLibraries/MangoIdleIsland.dylib"][0]
+    for string in (b"MangoSuiteOwnedOpticalRim",b"MangoSuiteOwnedNotificationHalo",b"UIGetScreenImage",b"OpticalMath"):
+        if string==b"OpticalMath": continue  # Header helpers inline into the compiled image.
+        assert string in optical,string
     print("PASS: five compiled images, current arm64e ABI, signatures, process scopes, and native Settings integration")

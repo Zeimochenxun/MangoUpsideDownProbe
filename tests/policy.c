@@ -17,6 +17,13 @@ int main(void) {
         assert(!!(sb & MS_IDLE) == (s.enabled && s.idle && !s.idleEmergency));
         assert(!!(sb & MS_WORLD) == (s.enabled && s.world && !s.worldEmergency && !s.legacyOrientation));
         assert(!!(sb & MS_SPLIT) == (s.enabled && s.split && !s.splitEmergency && !s.legacyOrientation));
+        for (unsigned optical=0;optical<=1;optical++) {
+            unsigned actual=MSModulesWithOptics(s,MS_SPRINGBOARD,optical);
+            assert(!!(actual&MS_IDLE)==(s.enabled && !s.idleEmergency && (s.idle||optical)));
+            assert((actual&~MS_IDLE)==(sb&~MS_IDLE));
+            assert(MSModulesWithOptics(s,MS_BACKBOARD,optical)==bb);
+            assert(MSModulesWithOptics(s,MS_OTHER,optical)==0);
+        }
         ++cases;
     }
     puts("PASS: 512 switch/emergency/legacy combinations across three process scopes");

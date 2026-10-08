@@ -80,7 +80,9 @@ __attribute__((constructor)) static void StartSuite(void) {
         // hook is still present. The deb declares the same conflicts.
         state.legacyOrientation = HasImage("MangoUpsideDownFix.dylib") ||
                                   HasImage("MangoOrientationProbe.dylib");
-        unsigned modules = MSModulesForProcess(state, springboard ? MS_SPRINGBOARD : MS_BACKBOARD);
+        BOOL optical = MSPreferenceFlag(snapshot,@"RimGeometryEnabled") || MSPreferenceFlag(snapshot,@"GlassAnimationEnabled") ||
+                       MSPreferenceFlag(snapshot,@"ShortHaloEnabled") || MSPreferenceFlag(snapshot,@"EdgeColorEnabled");
+        unsigned modules = MSModulesWithOptics(state, springboard ? MS_SPRINGBOARD : MS_BACKBOARD, optical);
         NSLog(@"[MangoSuite] version=1.2.0~beta9.2 process=%@ startup-mask=%u changes=require-userspace-restart", process, modules);
         if (state.legacyOrientation) NSLog(@"[MangoSuite] legacy orientation hook detected; orientation modules suppressed");
 
@@ -89,8 +91,6 @@ __attribute__((constructor)) static void StartSuite(void) {
         if (modules & MS_ADAPTIVE) LoadModule(@"MangoIslandAdaptiveColor");
         if (modules & MS_WORLD) LoadModule(@"MangoUpsideDownWorld");
         if (modules & MS_SPLIT) LoadModule(@"MangoSplitUpsideDownFix");
-        BOOL optical = MSPreferenceFlag(snapshot,@"RimGeometryEnabled") || MSPreferenceFlag(snapshot,@"GlassAnimationEnabled") ||
-                       MSPreferenceFlag(snapshot,@"ShortHaloEnabled") || MSPreferenceFlag(snapshot,@"EdgeColorEnabled");
-        if ((modules & MS_IDLE) || (springboard && state.enabled && optical && !state.idleEmergency)) LoadModule(@"MangoIdleIsland");
+        if (modules & MS_IDLE) LoadModule(@"MangoIdleIsland");
     }
 }

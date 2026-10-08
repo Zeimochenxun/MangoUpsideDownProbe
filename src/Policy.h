@@ -18,4 +18,9 @@ static inline unsigned MSModulesForProcess(MSState state, int process) {
     if (state.split && !state.splitEmergency && !state.legacyOrientation) mask |= MS_SPLIT;
     return mask;
 }
+static inline unsigned MSModulesWithOptics(MSState state,int process,int optical) {
+    unsigned mask=MSModulesForProcess(state,process);
+    if (process==MS_SPRINGBOARD && state.enabled && optical && !state.idleEmergency) mask|=MS_IDLE;
+    return mask;
+}
 #endif

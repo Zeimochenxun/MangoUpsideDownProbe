@@ -41,7 +41,8 @@ static NSString *ReadLog(NSString *name) {
     if (_specifiers) return _specifiers;
     self.title = @"调试日志"; _specifiers = [NSMutableArray new];
     [self addSection:nil];
-    [_specifiers.lastObject setProperty:@"开启后记录20分钟；点击开始可重新计时。每个模块最多256KB。日志包含尺寸、方向、动画和开关状态，不保存通知文字或采色截图。新修复与采色参数约0.5秒内生效，主模块开关仍需重启用户空间。" forKey:@"footerText"];
+    PSSpecifier *notice=_specifiers.lastObject;
+    [notice setProperty:@"开启后记录20分钟；点击开始可重新计时。每个模块最多256KB。日志包含尺寸、方向、动画和开关状态，不保存通知文字或采色截图。新修复与采色参数约0.5秒内生效，主模块开关仍需重启用户空间。" forKey:@"footerText"];
     [self addSwitch:@"启用调试记录" key:@"DebugEnabled"];
     NSArray *rows = @[@[@"开始／重新开始记录", NSStringFromSelector(@selector(startRecording))],
         @[@"提取全部相关日志", NSStringFromSelector(@selector(exportAll))],
