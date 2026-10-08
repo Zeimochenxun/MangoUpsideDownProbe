@@ -2,6 +2,7 @@
 #include "../modules/orientation/tests/split_reconcile_test.c"
 #undef main
 #include "../modules/orientation/RecoveryPolicy.h"
+#include "../modules/orientation/OrientationPolicy.h"
 #include "../modules/visual/MangoIdleIsland/OpticalMath.h"
 #include "../src/DiagnosticsPolicy.h"
 
@@ -40,6 +41,9 @@ int main(void) {
     assert(MSRecoverOrientation(1,1,14.2,&last)==1);
     assert(MSRecoverOrientation(2,1,15,&last)==2);
     assert(MSRecoverOrientation(1,0,15.1,&last)==1);
+    assert(MSB9PanNeedsCorrection(1,1,1) && MSB9PanNeedsCorrection(2,1,1));
+    assert(!MSB9PanNeedsCorrection(3,1,1) && !MSB9PanNeedsCorrection(4,1,1));
+    assert(!MSB9PanNeedsCorrection(1,0,1) && !MSB9PanNeedsCorrection(2,1,0));
 
     for (unsigned h=1;h<=300;h++) for (unsigned w=1;w<=400;w+=7) {
         double radius=MSOpticalRadius(w,h,1.2);

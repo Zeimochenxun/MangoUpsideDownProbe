@@ -533,12 +533,14 @@ static void RunMangoPan(id controller, SEL selector, UIPanGestureRecognizer *ges
         original(controller, selector, gesture); return;
     }
     UIView *view = gesture.view;
-    MWTransform map=FixedMap(view.window);
+    MWTransform map=FixedMap(view);
     NSInteger raw=0;BOOL owned=NO,inverted=NO;
-    BOOL correction=MSB8PanNeedsCorrection(raw=Orientation(),owned=OwnsGestureWindow(view),
+    owned=OwnsGestureWindow(view);
+    BOOL target=[view.window isKindOfClass:WindowClass] && !view.window.hidden;
+    BOOL correction=MSB9PanNeedsCorrection(raw=Orientation(),target,
                               inverted=MWInvertedBasis(map.a,map.d,map.c,map.b));
     if(MSDiagnosticsActive()) @try {
-        MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN ended view=%p window=%p actualMango=%ld actualOwned=%d actualInverted=%d correction=%d",(__bridge void *)view,(__bridge void *)view.window,(long)raw,owned,inverted,correction]);
+        MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN ended entry=%@ view=%p window=%p resolvedDirection=%ld apertureTarget=%d actualOwned=%d actualViewInverted=%d correction=%d",NSStringFromSelector(selector),(__bridge void *)view,(__bridge void *)view.window,(long)raw,target,owned,inverted,correction]);
     } @catch (__unused NSException *exception) {}
     if(!correction){
         original(controller,selector,gesture);return;

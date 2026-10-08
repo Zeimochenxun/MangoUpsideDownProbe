@@ -36,7 +36,6 @@ for filename in sys.argv[1:]:
                    b"ShortHaloEnabled", b"EdgeColorEnabled", b"SwipeDirectionEnabled", b"EdgeThickness", b"EdgeDynamics", b"DebugEnabled"]:
         assert string in prefs, string
     optical=content["Library/MobileSubstrate/DynamicLibraries/MangoIdleIsland.dylib"][0]
-    for string in (b"MangoSuiteOwnedOpticalRim",b"MangoSuiteOwnedNotificationHalo",b"UIGetScreenImage",b"OpticalMath"):
-        if string==b"OpticalMath": continue  # Header helpers inline into the compiled image.
+    for string in (b"MangoSuiteOwnedOpticalRim",b"MangoSuiteOwnedNotificationHalo",b"UIGetScreenImage"):
         assert string in optical,string
     print("PASS: five compiled images, current arm64e ABI, signatures, process scopes, and native Settings integration")

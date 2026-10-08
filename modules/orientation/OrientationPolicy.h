@@ -13,3 +13,6 @@ static inline long MSB8ResolvedOrientation(long mango, long system) {
 static inline int MSB8PanNeedsCorrection(long mango, int owned, int inverted) {
     return (mango == 1 || mango == 2) && owned && inverted;
 }
+static inline int MSB9PanNeedsCorrection(long direction,int apertureTarget,int inverted) {
+    return (direction==1 || direction==2) && apertureTarget && inverted;
+}
