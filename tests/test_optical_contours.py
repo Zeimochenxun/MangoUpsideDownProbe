@@ -56,7 +56,7 @@ int main(void) { @autoreleasepool {
         glass.bounds=CGRectMake(0,0,width,height);glass.cornerRadius=0;glass.mask=nil;
         BOOL native=NO;
         double stroke=fmin(4,height*.4);
-        UIBezierPath *path=Contour(glass,glass.mask,stroke,YES,&native);
+        UIBezierPath *path=Contour(glass,glass.mask,stroke,&native);
         CGRect expected=CGRectInset(glass.bounds,stroke*.5,stroke*.5);
         assert(!native && NearRect(path.bounds,expected));
         assert(CGPathContainsPoint(path.CGPath,NULL,CGPointMake(width*.5,height*.5),NO));
@@ -66,7 +66,7 @@ int main(void) { @autoreleasepool {
     CGPathRef original=CGPathCreateWithRoundedRect(glass.bounds,28,28,NULL);
     mask.path=original;glass.mask=mask;
     BOOL native=NO;
-    UIBezierPath *path=Contour(glass,glass.mask,4,YES,&native);
+    UIBezierPath *path=Contour(glass,glass.mask,4,&native);
     assert(native && CGPathEqualToPath(path.CGPath,original));
     for (unsigned i=0;i<4;i++) {
         CGPoint corner=CGPointMake(i&1 ? 300 : 1,i&2 ? 90.5 : 1);
@@ -75,13 +75,13 @@ int main(void) { @autoreleasepool {
     // A compact mask lingering during an expanded layout is rejected.
     CGPathRef stale=CGPathCreateWithRoundedRect(CGRectMake(0,0,125,36.67),18,18,NULL);
     mask.path=stale;native=NO;
-    path=Contour(glass,glass.mask,4,YES,&native);
+    path=Contour(glass,glass.mask,4,&native);
     assert(!native && NearRect(path.bounds,CGRectInset(glass.bounds,2,2)));
     // The native mask wins over a different layer radius, including a translated
     // mask: all four corners keep the exact native path and its local placement.
     glass.bounds=CGRectMake(10,20,301,91.5); mask.frame=glass.bounds;
     glass.cornerRadius=45;mask.path=original;
-    native=NO; path=Contour(glass,glass.mask,1.2,YES,&native);
+    native=NO; path=Contour(glass,glass.mask,1.2,&native);
     CGAffineTransform offset=CGAffineTransformMakeTranslation(10,20);
     CGPathRef moved=CGPathCreateCopyByTransformingPath(original,&offset);
     assert(native && CGPathEqualToPath(path.CGPath,moved));

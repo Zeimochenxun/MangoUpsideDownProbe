@@ -232,7 +232,7 @@ static MSIslandOpticalState *State(UIView *glass) {
 
 // Keep the contour in the glass's own layer space. Ancestor transforms and
 // spring scale/position animations are then inherited exactly once.
-static UIBezierPath *Contour(CALayer *source,CALayer *mask,CGFloat thickness,BOOL normalize,BOOL *nativeOut) {
+static UIBezierPath *Contour(CALayer *source,CALayer *mask,CGFloat thickness,BOOL *nativeOut) {
     CALayer *shown=mask.presentationLayer ?: mask;
     if ([shown isKindOfClass:CAShapeLayer.class] && ((CAShapeLayer *)shown).path && CATransform3DIsAffine(shown.transform)) {
         CGPathRef raw=((CAShapeLayer *)shown).path;
@@ -254,7 +254,7 @@ static UIBezierPath *Contour(CALayer *source,CALayer *mask,CGFloat thickness,BOO
         }
     }
     CGFloat radius=source.cornerRadius;
-    if (normalize && (!isfinite(radius) || radius<=0)) radius=fmin(source.bounds.size.width,source.bounds.size.height)*.5;
+    if (!isfinite(radius) || radius<=0) radius=fmin(source.bounds.size.width,source.bounds.size.height)*.5;
     if (!isfinite(radius) || radius<0) radius=0;
     radius=fmin(radius, fmin(source.bounds.size.width,source.bounds.size.height)*.5);
     CGRect inset=CGRectInset(source.bounds,thickness*.5,thickness*.5);
@@ -276,9 +276,9 @@ static void UpdateGlass(UIView *host,UIView *glass,BOOL rim,BOOL halo,BOOL edgeO
     BOOL native=NO;
     BOOL normalize=MSRuntimeFlag(@"RimGeometryEnabled");
     CALayer *originalMask=source.mask==state.clip || [source.mask.name isEqualToString:state.clip.name] ? state.nativeClip : source.mask;
-    UIBezierPath *path=Contour(source,originalMask,thickness,normalize,&native);
+    UIBezierPath *path=Contour(source,originalMask,thickness,&native);
     BOOL nativeFill=NO;
-    UIBezierPath *fillPath=Contour(source,originalMask,0,normalize,&nativeFill);
+    UIBezierPath *fillPath=Contour(source,originalMask,0,&nativeFill);
     CGRect rect=path.bounds;
     if (!isfinite(rect.origin.x) || !isfinite(rect.origin.y)) { Detach(state); return; }
     CFTimeInterval now=CACurrentMediaTime(); double elapsed=state.lastTick ? now-state.lastTick : 1.0/60; state.lastTick=now;
@@ -343,8 +343,8 @@ static void UpdateGlass(UIView *host,UIView *glass,BOOL rim,BOOL halo,BOOL edgeO
     [CATransaction commit];
     if (MSDiagnosticsActive() && now-state.lastLog>=1) {
         state.lastLog=now;
-        MSDiagnosticsLog(@"Glass",[NSString stringWithFormat:@"glass=%p host=%p localContour=1 contour=%@ rim=%d geometry=%d presentation=%d halo=%d haloParent=window h=%.2f thickness=%.2f dynamics=%.2f color=%d valid=%d capture=%@ opacity=%.3f path=(%.1f,%.1f,%.1f,%.1f)",
-            (__bridge void *)glass,(__bridge void *)host,native ? @"native-mask" : @"local-rounded",rim,MSRuntimeFlag(@"RimGeometryEnabled"),source!=glass.layer,halo,bounds.size.height,thickness,dynamics,color,state.colorsValid,state.sampleResult ?: @"off",VisibleOpacity(glass,host),rect.origin.x,rect.origin.y,rect.size.width,rect.size.height]);
+        MSDiagnosticsLog(@"Glass",[NSString stringWithFormat:@"glass=%p host=%p localContour=1 contour=%@ rim=%d geometry=%d presentation=%d clipOwned=%d nativeMask=%@ nativeRadius=%.2f halo=%d haloParent=window h=%.2f thickness=%.2f dynamics=%.2f color=%d valid=%d capture=%@ opacity=%.3f path=(%.1f,%.1f,%.1f,%.1f)",
+            (__bridge void *)glass,(__bridge void *)host,native ? @"native-mask" : @"local-rounded",rim,MSRuntimeFlag(@"RimGeometryEnabled"),source!=glass.layer,glass.layer.mask==state.clip,NSStringFromClass(state.nativeClip.class) ?: @"none",source.cornerRadius,halo,bounds.size.height,thickness,dynamics,color,state.colorsValid,state.sampleResult ?: @"off",VisibleOpacity(glass,host),rect.origin.x,rect.origin.y,rect.size.width,rect.size.height]);
     }
 }
 void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edgeOptIn) {

@@ -9,6 +9,7 @@ static NSHashTable<UIView *> *Surfaces;
 static NSHashTable<UIViewController *> *Menus;
 static void (^Changed)(void);
 static BOOL Writing;
+static unsigned InstalledHooks;
 static char Key;
 @interface MSSurfaceState : NSObject
 @property(nonatomic) MSSurfaceOwnership owned;
@@ -117,10 +118,17 @@ void MSLauncherSurfacesFinish(BOOL active) {
     // Reconcile parents before their descendants; a native double-turn is
     // handled by the picker's own measured basis on the following callback.
     NSArray<UIView *> *ordered=[Surfaces.allObjects sortedArrayUsingComparator:^NSComparisonResult(UIView *a,UIView *b) {
-        if ([b isDescendantOfView:a]) return NSOrderedAscending;
-        if ([a isDescendantOfView:b]) return NSOrderedDescending;
-        return NSOrderedSame;
+        unsigned ad=0,bd=0;
+        for (UIView *v=a;v && ad<32;v=v.superview) ++ad;
+        for (UIView *v=b;v && bd<32;v=v.superview) ++bd;
+        return ad<bd ? NSOrderedAscending : (ad>bd ? NSOrderedDescending : NSOrderedSame);
     }];
+    static double recordedSession;
+    double currentSession=[MSRuntimeSettings()[@"DebugSessionToken"] doubleValue];
+    if (MSDiagnosticsActive() && recordedSession!=currentSession) {
+        recordedSession=currentSession;
+        MSDiagnosticsLog(@"Split",[NSString stringWithFormat:@"SURFACE install hooks=%u menus=%lu currentMenuContainers=%lu targets=%lu",InstalledHooks,(unsigned long)Menus.count,(unsigned long)currentMenus.count,(unsigned long)Surfaces.count]);
+    }
     for (UIView *view in ordered) {
         MSSurfaceState *state=objc_getAssociatedObject(view,&Key);
         MSSurfaceOwnership owned=state.owned;
@@ -163,7 +171,8 @@ void MSLauncherSurfacesInstall(void (^changed)(void)) {
         {picker,"updateExpandedFrame",(IMP)HookPickerExpanded,(IMP *)&PickerExpanded}};
     for (unsigned i=0;i<4;i++) {
         SEL sel=sel_registerName(entries[i].name);
-        if (B9ClassIsHello(entries[i].cls) && Signature(entries[i].cls,sel,"v16@0:8") && B9IMPIsHello(class_getMethodImplementation(entries[i].cls,sel)))
-            MSHookMessageEx(entries[i].cls,sel,entries[i].hook,entries[i].original);
+        if (B9ClassIsHello(entries[i].cls) && Signature(entries[i].cls,sel,"v16@0:8") && B9IMPIsHello(class_getMethodImplementation(entries[i].cls,sel))) {
+            MSHookMessageEx(entries[i].cls,sel,entries[i].hook,entries[i].original); InstalledHooks|=1u<<i;
+        }
     }
 }
