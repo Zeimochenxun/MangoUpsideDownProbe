@@ -79,7 +79,7 @@ static NSString *ReadLog(NSString *name, double session) {
     self.exporting = YES;
     NSDictionary *settings = MSReadPreferences(NULL) ?: @{};
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
-        NSMutableString *report = [NSMutableString stringWithFormat:@"Mango Suite 1.2.0~beta9.3\nMango 1.0-Beta9-1 / iOS 16.5\n导出时间：%@\n", NSDate.date];
+        NSMutableString *report = [NSMutableString stringWithFormat:@"Mango Suite 1.2.0~beta9.4\nMango 1.0-Beta9-1 / iOS 16.5\n导出时间：%@\n", NSDate.date];
         for (NSString *key in [@[@"Enabled",@"IdleEnabled",@"WorldEnabled",@"SplitEnabled",@"DebugEnabled",@"DebugSessionToken",@"EdgeThickness",@"EdgeDynamics"] arrayByAddingObjectsFromArray:MSRepairKeys()])
             [report appendFormat:@"%@=%@\n",key,settings[key] ?: @"默认"];
         double session=[settings[@"DebugSessionToken"] doubleValue];

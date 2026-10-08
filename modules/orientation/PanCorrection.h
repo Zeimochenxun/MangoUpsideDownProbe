@@ -6,6 +6,10 @@ static inline CGPoint MSB9PanQueryValue(CGPoint value,id queried,id scoped,unsig
     if (depth && mainThread && queried && queried==scoped) value.y=-value.y;
     return value;
 }
+
+static inline CGPoint MSB9PanQueryValueInSpace(CGPoint value,id queried,id scoped,unsigned depth,BOOL mainThread,BOOL invertedSpace) {
+    return invertedSpace ? MSB9PanQueryValue(value,queried,scoped,depth,mainThread) : value;
+}
 static inline void MSB9RunPanQueries(id gesture,void (^originalCall)(void),id __weak *scoped,unsigned *depth) {
     id previous=*scoped; unsigned priorDepth=*depth;
     *scoped=gesture; ++*depth;

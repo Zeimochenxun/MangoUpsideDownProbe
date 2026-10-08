@@ -10,20 +10,27 @@
 @interface MSIslandOpticalState : NSObject
 @property(nonatomic,strong) CAGradientLayer *rim;
 @property(nonatomic,strong) CAShapeLayer *mask, *halo;
+@property(nonatomic,strong) CAShapeLayer *clip;
+@property(nonatomic,strong) CALayer *nativeClip;
 @property(nonatomic) double lastSample,lastTick,lastLog;
 @property(nonatomic) double sampleCost;
 @property(nonatomic,weak) UIView *glass;
+@property(nonatomic,weak) UIView *host;
 @property(nonatomic) BOOL colorsValid;
 @property(nonatomic,copy) NSArray<UIColor *> *colors, *targets;
 @property(nonatomic,copy) NSString *sampleResult;
 @end
 @implementation MSIslandOpticalState
-- (void)dealloc { [self.rim removeFromSuperlayer]; [self.halo removeFromSuperlayer]; }
+- (void)dealloc {
+    if (self.glass.layer.mask==self.clip) self.glass.layer.mask=self.nativeClip;
+    [self.rim removeFromSuperlayer]; [self.halo removeFromSuperlayer];
+}
 @end
 static char OpticalStateKey;
-static NSHashTable<UIView *> *NotificationViews;
+static NSMapTable<id,UIView *> *NotificationHosts;
 static NSHashTable<UIView *> *OpticalHosts;
 static BOOL Sampling;
+static void Detach(MSIslandOpticalState *state);
 static BOOL HostVisible(UIView *host) {
     if (!host.window) return NO;
     for (UIView *view=host;view;view=view.superview)
@@ -36,27 +43,30 @@ BOOL MSIslandUsesOwnedRim(void) {
 }
 BOOL MSIslandRepairsNeedFrames(void) {
     for (UIView *host in OpticalHosts.allObjects) {
-        if (!HostVisible(host)) continue;
         MSIslandOpticalState *state=objc_getAssociatedObject(host,&OpticalStateKey);
-        if (MSRuntimeFlag(@"EdgeColorEnabled") && state.glass.window) return YES;
+        if (!HostVisible(host)) { Detach(state); continue; }
+        if (MSRuntimeFlag(@"EdgeColorEnabled")) return YES;
         if (!MSRuntimeFlag(@"GlassAnimationEnabled")) continue;
+        if (host.layer.mask.animationKeys.count) return YES;
         for (UIView *view=state.glass;view;view=view.superview) {
             CALayer *layer=view.layer,*presentation=layer.presentationLayer;
             if (layer.animationKeys.count || (presentation &&
                 (!CGRectEqualToRect(layer.bounds,presentation.bounds) ||
                  !CATransform3DEqualToTransform(layer.transform,presentation.transform) ||
+                 !CGPointEqualToPoint(layer.position,presentation.position) ||
                  fabs(layer.opacity-presentation.opacity)>.001))) return YES;
         }
     }
     return NO;
 }
-void MSIslandNotificationLayout(UIView *view) {
-    if (![view isKindOfClass:UIView.class] || !NSThread.isMainThread) return;
-    if (!NotificationViews) NotificationViews=[NSHashTable weakObjectsHashTable];
-    if (NotificationViews.count<32) [NotificationViews addObject:view];
+void MSIslandNotificationState(id element,UIView *host,BOOL notification) {
+    if (!element || !NSThread.isMainThread) return;
+    if (!NotificationHosts) NotificationHosts=[NSMapTable weakToWeakObjectsMapTable];
+    if (!notification || ![host isKindOfClass:UIView.class]) [NotificationHosts removeObjectForKey:element];
+    else if (NotificationHosts.count<32 || [NotificationHosts objectForKey:element]) [NotificationHosts setObject:host forKey:element];
 }
 static BOOL VisibleNotification(UIView *host) {
-    for (UIView *view in NotificationViews.allObjects) {
+    for (UIView *view in NotificationHosts.objectEnumerator.allObjects) {
         if (!view.window || view.window!=host.window || view.hidden) continue;
         if (view!=host && ![view isDescendantOfView:host] && ![host isDescendantOfView:view]) continue;
         double opacity=1;
@@ -199,8 +209,8 @@ static NSArray<UIColor *> *SampleEdge(UIView *glass,CGRect local,NSString **resu
     *result=[NSString stringWithFormat:@"%@ sampled=%u sectors=4 screenshot-retained=0",*result ?: @"springboard-window-pixels",samples];
     return colors;
 }
-static MSIslandOpticalState *State(UIView *host) {
-    MSIslandOpticalState *state=objc_getAssociatedObject(host,&OpticalStateKey);
+static MSIslandOpticalState *State(UIView *glass) {
+    MSIslandOpticalState *state=objc_getAssociatedObject(glass,&OpticalStateKey);
     if (state) return state;
     state=[MSIslandOpticalState new];
     state.rim=[CAGradientLayer layer]; state.rim.type=kCAGradientLayerConic;
@@ -208,74 +218,78 @@ static MSIslandOpticalState *State(UIView *host) {
     state.mask=[CAShapeLayer layer]; state.mask.fillColor=UIColor.clearColor.CGColor; state.mask.strokeColor=UIColor.whiteColor.CGColor;
     state.mask.lineCap=kCALineCapRound; state.mask.lineJoin=kCALineJoinRound;
     state.rim.mask=state.mask;
+    state.clip=[CAShapeLayer layer]; state.clip.fillColor=UIColor.whiteColor.CGColor;
+    state.clip.name=@"MangoSuiteOwnedGlassClip";
     state.halo=[CAShapeLayer layer]; state.halo.fillColor=[UIColor colorWithWhite:0 alpha:.001].CGColor;
     state.halo.shadowColor=UIColor.blackColor.CGColor; state.halo.shadowOffset=CGSizeZero;
     state.rim.name=@"MangoSuiteOwnedOpticalRim"; state.halo.name=@"MangoSuiteOwnedNotificationHalo";
-    objc_setAssociatedObject(host,&OpticalStateKey,state,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    state.glass=glass;
+    objc_setAssociatedObject(glass,&OpticalStateKey,state,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     if (!OpticalHosts) OpticalHosts=[NSHashTable weakObjectsHashTable];
-    [OpticalHosts addObject:host];
+    [OpticalHosts addObject:glass];
     return state;
 }
-void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edgeOptIn) {
-    if (!NSThread.isMainThread || Sampling) return;
-    BOOL color=MSRuntimeFlag(@"EdgeColorEnabled"), rim=MSIslandUsesOwnedRim() && (edgeOptIn || color);
-    BOOL halo=MSRuntimeFlag(@"ShortHaloEnabled") && VisibleNotification(host);
-    MSIslandOpticalState *state=objc_getAssociatedObject(host,&OpticalStateKey);
-    if ((!rim && !halo) || !HostVisible(host)) {
-        [state.rim removeFromSuperlayer]; [state.halo removeFromSuperlayer]; return;
-    }
-    UIView *best=nil; CGFloat opacity=0;
-    NSMutableArray *todo=[host.subviews mutableCopy]; unsigned count=0;
-    while (todo.count && count++<256) {
-        UIView *view=todo.lastObject; [todo removeLastObject];
-        if ((view==idle || IsGlass(view)) && view.window && !CGRectIsEmpty(view.bounds)) {
-            CGFloat visible=VisibleOpacity(view,host);
-            if (visible>opacity) { best=view; opacity=visible; }
+
+// Keep the contour in the glass's own layer space. Ancestor transforms and
+// spring scale/position animations are then inherited exactly once.
+static UIBezierPath *Contour(CALayer *source,CALayer *mask,CGFloat thickness,BOOL normalize,BOOL *nativeOut) {
+    CALayer *shown=mask.presentationLayer ?: mask;
+    if ([shown isKindOfClass:CAShapeLayer.class] && ((CAShapeLayer *)shown).path && CATransform3DIsAffine(shown.transform)) {
+        CGPathRef raw=((CAShapeLayer *)shown).path;
+        CGRect box=CGPathGetBoundingBox(raw);
+        if (!CGRectIsEmpty(box) && isfinite(box.size.width) && isfinite(box.size.height)) {
+            UIBezierPath *path=[UIBezierPath bezierPathWithCGPath:raw];
+            CGAffineTransform t=CATransform3DGetAffineTransform(shown.transform);
+            CGPoint anchor=CGPointMake(shown.bounds.origin.x+shown.anchorPoint.x*shown.bounds.size.width,
+                                       shown.bounds.origin.y+shown.anchorPoint.y*shown.bounds.size.height);
+            CGAffineTransform map=CGAffineTransformConcat(CGAffineTransformMakeTranslation(-anchor.x,-anchor.y),t);
+            map.tx+=shown.position.x; map.ty+=shown.position.y;
+            [path applyTransform:map];
+            CGRect mapped=path.bounds;
+            // A stale mask from the previous layout must not clip a new contour.
+            if (FiniteMap(map) && CGRectContainsRect(CGRectInset(source.bounds,-1,-1),mapped) &&
+                mapped.size.width>=source.bounds.size.width*.8 && mapped.size.height>=source.bounds.size.height*.8) {
+                *nativeOut=YES; return path;
+            }
         }
-        [todo addObjectsFromArray:view.subviews];
     }
-    if (!best || opacity<.01 || todo.count) { [state.rim removeFromSuperlayer]; [state.halo removeFromSuperlayer]; return; }
-    BOOL animated=MSRuntimeFlag(@"GlassAnimationEnabled");
-    BOOL hasPair=animated && best.layer.presentationLayer && host.layer.presentationLayer;
-    CALayer *source=hasPair ? best.layer.presentationLayer : best.layer;
-    CALayer *target=hasPair ? host.layer.presentationLayer : host.layer;
+    CGFloat radius=source.cornerRadius;
+    if (normalize && (!isfinite(radius) || radius<=0)) radius=fmin(source.bounds.size.width,source.bounds.size.height)*.5;
+    if (!isfinite(radius) || radius<0) radius=0;
+    radius=fmin(radius, fmin(source.bounds.size.width,source.bounds.size.height)*.5);
+    CGRect inset=CGRectInset(source.bounds,thickness*.5,thickness*.5);
+    return [UIBezierPath bezierPathWithRoundedRect:inset cornerRadius:fmax(0,radius-thickness*.5)];
+}
+static void Detach(MSIslandOpticalState *state) {
+    if (state.glass.layer.mask==state.clip) state.glass.layer.mask=state.nativeClip;
+    state.nativeClip=nil;
+    [state.rim removeFromSuperlayer]; [state.halo removeFromSuperlayer];
+}
+static void UpdateGlass(UIView *host,UIView *glass,BOOL rim,BOOL halo,BOOL edgeOptIn) {
+    MSIslandOpticalState *state=State(glass); state.host=host;
+    BOOL color=MSRuntimeFlag(@"EdgeColorEnabled"), animated=MSRuntimeFlag(@"GlassAnimationEnabled");
+    CALayer *source=(animated ? glass.layer.presentationLayer : nil) ?: glass.layer;
     CGRect bounds=source.bounds;
-    CGAffineTransform map=LayerMap(source,target);
-    if (!FiniteMap(map) || !isfinite(bounds.size.width) || !isfinite(bounds.size.height) || bounds.size.width<1 || bounds.size.height<1) {
-        [state.rim removeFromSuperlayer]; [state.halo removeFromSuperlayer]; return;
-    }
-    // Geometry is projected as a path, not by scaling separate left/right
-    // caps. A single contour drives specular, color and halo every frame.
-    double thickness=color ? MSRuntimeNumber(@"EdgeThickness",1.2,.5,4) : .7;
-    CGRect projected=CGRectApplyAffineTransform(bounds,map);
-    thickness=fmin(thickness,fmin(projected.size.width,projected.size.height)*.4);
-    double radius=MSOpticalRadius(projected.size.width,projected.size.height,thickness);
-    double nativeRadius=source.cornerRadius;
-    if (nativeRadius>0 && isfinite(nativeRadius)) radius=fmin(radius,nativeRadius*fmin(hypot(map.a,map.b),hypot(map.c,map.d)));
-    else if (projected.size.height>50) radius=fmin(radius,28);
-    UIBezierPath *path=[UIBezierPath bezierPathWithRoundedRect:CGRectInset(projected,thickness*.5,thickness*.5) cornerRadius:radius];
-    if (!MSRuntimeFlag(@"RimGeometryEnabled")) {
-        // Animation tracking and corner normalization are independent choices.
-        // With normalization off, preserve the native local corner proportions.
-        double localRadius=isfinite(nativeRadius) && nativeRadius>0 ? nativeRadius : fmin(bounds.size.height*.5,28);
-        localRadius=fmin(localRadius,MSOpticalRadius(bounds.size.width,bounds.size.height,thickness));
-        path=[UIBezierPath bezierPathWithRoundedRect:CGRectInset(bounds,thickness*.5,thickness*.5) cornerRadius:localRadius];
-        [path applyTransform:map];
-    }
-    CGRect rect=CGPathGetBoundingBox(path.CGPath);
-    if (!isfinite(rect.origin.x) || !isfinite(rect.origin.y) || !isfinite(rect.size.width) || !isfinite(rect.size.height)) return;
-    state=State(host);
-    state.glass=best;
-    CFTimeInterval now=CACurrentMediaTime(); double elapsed=state.lastTick ? now-state.lastTick : 1.0/30; state.lastTick=now;
+    if (!isfinite(bounds.size.width) || !isfinite(bounds.size.height) || bounds.size.width<1 || bounds.size.height<1) { Detach(state); return; }
+    double thickness=fmin(MSRuntimeNumber(@"EdgeThickness",1.2,.5,4),fmin(bounds.size.width,bounds.size.height)*.4);
+    if (glass.layer.mask!=state.clip) state.nativeClip=glass.layer.mask;
+    BOOL native=NO;
+    BOOL normalize=MSRuntimeFlag(@"RimGeometryEnabled");
+    CALayer *originalMask=source.mask==state.clip || [source.mask.name isEqualToString:state.clip.name] ? state.nativeClip : source.mask;
+    UIBezierPath *path=Contour(source,originalMask,thickness,normalize,&native);
+    BOOL nativeFill=NO;
+    UIBezierPath *fillPath=Contour(source,originalMask,0,normalize,&nativeFill);
+    CGRect rect=path.bounds;
+    if (!isfinite(rect.origin.x) || !isfinite(rect.origin.y)) { Detach(state); return; }
+    CFTimeInterval now=CACurrentMediaTime(); double elapsed=state.lastTick ? now-state.lastTick : 1.0/60; state.lastTick=now;
     double dynamics=MSRuntimeNumber(@"EdgeDynamics",.5,0,1);
     double sampleInterval=fmax(1.0/(4+4*dynamics),state.sampleCost>.02 ? .5 : 0);
-    if (color && now-state.lastSample >= sampleInterval) {
-        NSString *result=nil;
-        NSArray *sample=SampleEdge(best,bounds,&result);
-        state.sampleCost=CACurrentMediaTime()-now;
-        state.lastSample=now; state.sampleResult=result;
-        if (sample) { state.targets=sample; if (!state.colorsValid) state.colors=sample; state.colorsValid=YES; }
-        else { state.colorsValid=NO; state.targets=nil; state.colors=nil; }
+    if (color && now-state.lastSample>=sampleInterval) {
+        NSString *result=nil; NSArray *sample=SampleEdge(glass,bounds,&result);
+        state.sampleCost=CACurrentMediaTime()-now; state.lastSample=now; state.sampleResult=result;
+        state.colorsValid=sample!=nil; state.targets=sample;
+        if (sample && !state.colors) state.colors=sample;
+        if (!sample) state.colors=nil;
     }
     NSMutableArray *colors=[NSMutableArray new];
     if (color && state.colorsValid) {
@@ -283,52 +297,72 @@ void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edgeOptIn) {
         for (unsigned side=0;side<4;side++) {
             CGFloat r,g,b,a,nr,ng,nb,na;
             [state.colors[side] getRed:&r green:&g blue:&b alpha:&a];
-            // Explicit RGB channels keep interpolation in one color space.
             [state.targets[side] getRed:&nr green:&ng blue:&nb alpha:&na];
             MSRGB c=MSColorSmooth((MSRGB){r,g,b},(MSRGB){nr,ng,nb},elapsed,dynamics);
             UIColor *value=[UIColor colorWithRed:c.r green:c.g blue:c.b alpha:.45+.25*dynamics];
             [smoothed addObject:value]; [colors addObject:(__bridge id)value.CGColor];
         }
-        state.colors=smoothed;
-        [colors addObject:colors.firstObject];
+        state.colors=smoothed; [colors addObject:colors.firstObject];
     } else {
         for (NSNumber *alpha in @[@.40,@.12,@.26,@.10,@.40]) [colors addObject:(__bridge id)[UIColor colorWithWhite:1 alpha:alpha.doubleValue].CGColor];
-        if (!edgeOptIn) rim=NO; // Capture failure does not invent background colors.
+        if (!edgeOptIn) rim=NO;
     }
     [CATransaction begin]; [CATransaction setDisableActions:YES];
-    CGRect canvas=host.bounds;
-    if (canvas.size.width>0 && canvas.size.height>0) {
-        CGPoint center=CGPointMake((CGRectGetMidX(rect)-canvas.origin.x)/canvas.size.width,(CGRectGetMidY(rect)-canvas.origin.y)/canvas.size.height);
-        double shimmer=(color && state.colorsValid) ? .12*dynamics*sin(now*.8) : 0;
-        state.rim.startPoint=center;
-        state.rim.endPoint=CGPointMake(center.x+sin(shimmer)*.5,center.y-cos(shimmer)*.5);
-    }
-    state.rim.bounds=canvas; state.rim.position=CGPointMake(CGRectGetMidX(canvas),CGRectGetMidY(canvas));
-    state.mask.bounds=canvas; state.mask.position=CGPointMake(CGRectGetMidX(canvas),CGRectGetMidY(canvas));
-    state.mask.path=path.CGPath; state.mask.lineWidth=thickness;
-    state.rim.colors=colors;
-    state.rim.opacity=opacity;
-    if (rim) { if (state.rim.superlayer!=host.layer) [host.layer addSublayer:state.rim]; }
+    state.rim.bounds=bounds; state.rim.position=CGPointMake(CGRectGetMidX(bounds),CGRectGetMidY(bounds));
+    state.mask.bounds=bounds; state.mask.position=CGPointMake(CGRectGetMidX(bounds),CGRectGetMidY(bounds));
+    state.mask.path=path.CGPath; state.mask.lineWidth=native ? thickness*2 : thickness;
+    // Align the actual glass clip as well as its edge. A lingering compact
+    // native mask cannot cut away four corners of the expanded notification.
+    if (normalize && rim) {
+        state.clip.bounds=bounds; state.clip.position=CGPointMake(CGRectGetMidX(bounds),CGRectGetMidY(bounds));
+        state.clip.path=fillPath.CGPath; glass.layer.mask=state.clip;
+    } else if (glass.layer.mask==state.clip) glass.layer.mask=state.nativeClip;
+    state.rim.colors=colors; state.rim.opacity=1; state.rim.masksToBounds=YES;
+    double shimmer=(color && state.colorsValid) ? .12*dynamics*sin(now*.8) : 0;
+    state.rim.startPoint=CGPointMake(.5,.5); state.rim.endPoint=CGPointMake(.5+sin(shimmer)*.5,.5-cos(shimmer)*.5);
+    if (rim) { if (state.rim.superlayer!=glass.layer) [glass.layer addSublayer:state.rim]; }
     else [state.rim removeFromSuperlayer];
-    // Explicit shadowPath and minimum blur remove dependence on content height.
-    UIView *haloParent=host.superview;
-    CALayer *haloTarget=hasPair ? haloParent.layer.presentationLayer : haloParent.layer;
+    // Host ancestors often clip. Put only the shadow in the aperture window;
+    // the island remains its native view and retains normal hit testing.
+    UIWindow *window=glass.window;
+    CALayer *target=(animated ? window.layer.presentationLayer : nil) ?: window.layer;
     CALayer *haloSource=source;
-    if (!haloTarget) { haloTarget=haloParent.layer; haloSource=best.layer; }
-    CGAffineTransform haloMap=haloTarget ? LayerMap(haloSource,haloTarget) : CGAffineTransformIdentity;
-    CGRect haloRect=CGRectApplyAffineTransform(bounds,haloMap);
-    double haloRadius=fmin(radius,MSOpticalRadius(haloRect.size.width,haloRect.size.height,0));
-    UIBezierPath *haloPath=[UIBezierPath bezierPathWithRoundedRect:haloRect cornerRadius:haloRadius];
-    CGRect haloCanvas=haloParent.bounds;
-    state.halo.bounds=haloCanvas; state.halo.position=CGPointMake(CGRectGetMidX(haloCanvas),CGRectGetMidY(haloCanvas));
+    if ((source!=glass.layer)!=(target!=window.layer)) { target=window.layer; haloSource=glass.layer; }
+    CGAffineTransform map=LayerMap(haloSource,target);
+    UIBezierPath *haloPath=[path copy]; [haloPath applyTransform:map];
+    CGRect canvas=target.bounds;
+    state.halo.bounds=canvas; state.halo.position=CGPointMake(CGRectGetMidX(canvas),CGRectGetMidY(canvas));
     state.halo.path=haloPath.CGPath; state.halo.shadowPath=haloPath.CGPath;
     state.halo.shadowRadius=fmax(8,fmin(16,bounds.size.height*.16));
-    state.halo.shadowOpacity=halo ? .32*opacity*(host.layer.presentationLayer ?: host.layer).opacity : 0;
-    if (halo && haloParent && FiniteMap(haloMap)) { if (state.halo.superlayer!=haloParent.layer) [haloParent.layer insertSublayer:state.halo below:host.layer]; }
-    else [state.halo removeFromSuperlayer];
+    state.halo.shadowOpacity=.32*VisibleOpacity(glass,window);
+    UIView *branch=glass;
+    while (branch.superview && branch.superview!=window) branch=branch.superview;
+    if (halo && window && branch.superview==window && FiniteMap(map)) {
+        if (state.halo.superlayer!=window.layer) [window.layer insertSublayer:state.halo below:branch.layer];
+    } else [state.halo removeFromSuperlayer];
     [CATransaction commit];
-    if (MSDiagnosticsActive() && now-state.lastLog >= 1) {
+    if (MSDiagnosticsActive() && now-state.lastLog>=1) {
         state.lastLog=now;
-        MSDiagnosticsLog(@"Glass",[NSString stringWithFormat:@"rim=%d geometry=%d presentation=%d halo=%d h=%.2f radius=%.2f thickness=%.2f dynamics=%.2f color=%d valid=%d capture=%@ sampleMs=%.1f intervalMs=%.1f opacity=%.3f path=(%.1f,%.1f,%.1f,%.1f)",rim,MSRuntimeFlag(@"RimGeometryEnabled"),hasPair,halo,bounds.size.height,radius,thickness,dynamics,color,state.colorsValid,state.sampleResult ?: @"off",state.sampleCost*1000,sampleInterval*1000,opacity,rect.origin.x,rect.origin.y,rect.size.width,rect.size.height]);
+        MSDiagnosticsLog(@"Glass",[NSString stringWithFormat:@"glass=%p host=%p localContour=1 contour=%@ rim=%d geometry=%d presentation=%d halo=%d haloParent=window h=%.2f thickness=%.2f dynamics=%.2f color=%d valid=%d capture=%@ opacity=%.3f path=(%.1f,%.1f,%.1f,%.1f)",
+            (__bridge void *)glass,(__bridge void *)host,native ? @"native-mask" : @"local-rounded",rim,MSRuntimeFlag(@"RimGeometryEnabled"),source!=glass.layer,halo,bounds.size.height,thickness,dynamics,color,state.colorsValid,state.sampleResult ?: @"off",VisibleOpacity(glass,host),rect.origin.x,rect.origin.y,rect.size.width,rect.size.height]);
     }
+}
+void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edgeOptIn) {
+    if (!NSThread.isMainThread || Sampling) return;
+    BOOL rim=MSIslandUsesOwnedRim() && (edgeOptIn || MSRuntimeFlag(@"EdgeColorEnabled"));
+    BOOL halo=MSRuntimeFlag(@"ShortHaloEnabled") && VisibleNotification(host);
+    NSMutableArray<UIView *> *glasses=[NSMutableArray new],*todo=[host.subviews mutableCopy]; unsigned count=0;
+    while (todo.count && count++<256) {
+        UIView *view=todo.lastObject; [todo removeLastObject];
+        if ((view==idle || IsGlass(view)) && view.window && !CGRectIsEmpty(view.bounds) && VisibleOpacity(view,host)>.001) [glasses addObject:view];
+        [todo addObjectsFromArray:view.subviews];
+    }
+    if (todo.count || !HostVisible(host) || (!rim && !halo)) [glasses removeAllObjects];
+    for (UIView *glass in OpticalHosts.allObjects) {
+        MSIslandOpticalState *state=objc_getAssociatedObject(glass,&OpticalStateKey);
+        if (state.host==host && ![glasses containsObject:glass]) Detach(state);
+    }
+    // Track every visible active/idle layer across overlap; never jump between
+    // the maximum-opacity candidates. Each rim inherits its own native fade.
+    for (UIView *glass in glasses) UpdateGlass(host,glass,rim,halo && glass!=idle,edgeOptIn);
 }

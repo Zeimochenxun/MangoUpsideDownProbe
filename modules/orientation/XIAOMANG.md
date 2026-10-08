@@ -1,6 +1,6 @@
 # 小芒 Beta9 倒置适配
 
-完整包 `MangoSuite-1.2.0-Beta9.3-RootHide-arm64e.deb`，Suite 版本 `1.2.0~beta9.3`。目标 Mango 1.0-Beta9-1、iOS 16.5、Dopamine RootHide、arm64e。
+完整包 `MangoSuite-1.2.0-Beta9.4-RootHide-arm64e.deb`，Suite 版本 `1.2.0~beta9.4`。目标 Mango 1.0-Beta9-1、iOS 16.5、Dopamine RootHide、arm64e。
 
 Beta9 Panda 的 XMFloatingWindow 和 XMPortraitVC 方法 ABI 已重新核对，身份守卫使用 Beta9 实际 UUID。沿用现有几何、变换所有权、嵌套 setter 事务和外层动画处理。本次完整包尚未连接手机验收。
 

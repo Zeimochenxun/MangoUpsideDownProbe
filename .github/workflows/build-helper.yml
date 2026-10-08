@@ -50,6 +50,8 @@ jobs:
 
       - name: Verify optical math and minimized app reopen recovery
         run: |
+          python3 tests/test_optical_contours.py
+          python3 tests/test_notification_routing.py
           clang -std=c11 -Wall -Wextra -Werror tests/optical_recovery_test.c -lm -o /tmp/optical-recovery-test
           /tmp/optical-recovery-test
           python3 tests/test_repair_settings.py
@@ -68,6 +70,8 @@ jobs:
           /tmp/split-reconcile-test
           clang -std=c11 -Wall -Wextra -Werror modules/orientation/tests/launcher_root_test.c -lm -o /tmp/launcher-root-test
           /tmp/launcher-root-test
+          clang -std=c11 -Wall -Wextra -Werror modules/orientation/tests/surface_reconcile_test.c -lm -o /tmp/surface-test
+          /tmp/surface-test
           python3 modules/orientation/tests/test_split_regression.py
           clang -std=c11 -Wall -Wextra -Werror modules/orientation/tests/placement_test.c -lm -o /tmp/placement-test
           /tmp/placement-test

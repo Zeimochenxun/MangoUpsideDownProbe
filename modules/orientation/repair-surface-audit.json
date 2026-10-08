@@ -1,0 +1,116 @@
+{
+  "version": "1.2.0~beta9.4",
+  "image": "MangoHello.dylib",
+  "methods": [
+    {
+      "class": "ViewController",
+      "selector": "launcherContainerView",
+      "ABI": "@16@0:8",
+      "IMP": "0xc1189c"
+    },
+    {
+      "class": "ViewController",
+      "selector": "launcherContainerViewRight",
+      "ABI": "@16@0:8",
+      "IMP": "0xc11e94"
+    },
+    {
+      "class": "ViewController",
+      "selector": "appLibraryPickerLeft",
+      "ABI": "@16@0:8",
+      "IMP": "0xc13fd0"
+    },
+    {
+      "class": "ViewController",
+      "selector": "appLibraryPickerRight",
+      "ABI": "@16@0:8",
+      "IMP": "0xc145b4"
+    },
+    {
+      "class": "MangoMenuViewController",
+      "selector": "mango_updateMenuRotation",
+      "ABI": "v16@0:8",
+      "IMP": "0x3941d8"
+    },
+    {
+      "class": "MangoMenuViewController",
+      "selector": "viewDidLayoutSubviews",
+      "ABI": "v16@0:8",
+      "IMP": "0x39484c"
+    },
+    {
+      "class": "MangoAppLibraryPickerView",
+      "selector": "layoutSubviews",
+      "ABI": "v16@0:8",
+      "IMP": "0xa19c4c"
+    },
+    {
+      "class": "MangoAppLibraryPickerView",
+      "selector": "updateExpandedFrame",
+      "ABI": "v16@0:8",
+      "IMP": "0xa46eb8"
+    },
+    {
+      "class": "MangoPillElement",
+      "selector": "userNotification",
+      "ABI": "@16@0:8",
+      "IMP": "0xc91370"
+    },
+    {
+      "class": "MangoPillElement",
+      "selector": "setUserNotification:",
+      "ABI": "v24@0:8@16",
+      "IMP": "0xc916a8"
+    },
+    {
+      "class": "MangoPillElement",
+      "selector": "layoutHost",
+      "ABI": "@16@0:8",
+      "IMP": "0xc870b4"
+    },
+    {
+      "class": "MangoPillElement",
+      "selector": "setLayoutHost:",
+      "ABI": "v24@0:8@16",
+      "IMP": "0xc8730c"
+    },
+    {
+      "class": "MangoPillElement",
+      "selector": "updateLayout",
+      "ABI": "v16@0:8",
+      "IMP": "0xc61520"
+    },
+    {
+      "class": "MangoPillElement",
+      "selector": "viewProvider",
+      "ABI": "@16@0:8",
+      "IMP": "0xc4adb4"
+    },
+    {
+      "class": "MangoPillElement",
+      "selector": "primaryContentViewProvider",
+      "ABI": "@16@0:8",
+      "IMP": "0xc4f6d8"
+    },
+    {
+      "class": "MangoPillElement",
+      "selector": "handlePanGesture:",
+      "ABI": "v24@0:8@16",
+      "IMP": "0xc813a0"
+    },
+    {
+      "class": "MangoPillContentProviders",
+      "selector": "primaryContentViewProvider",
+      "ABI": "@16@0:8",
+      "IMP": "0xc40698"
+    },
+    {
+      "class": "MangoPillContentProvider",
+      "selector": "providedView",
+      "ABI": "@16@0:8",
+      "IMP": "0xc3f694"
+    }
+  ],
+  "readOnly": true,
+  "deviceBehaviorVerified": false
+}

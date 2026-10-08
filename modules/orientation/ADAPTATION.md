@@ -1,6 +1,6 @@
 # Beta9 方向模块适配
 
-Suite 版本 `1.2.0~beta9.3`，目标 Mango `1.0-Beta9-1`、iOS 16.5、Dopamine RootHide、arm64e。适配依据是用户提供的安装包，SHA256 `4826d2e73c59f05e0ff529da1e7db47e494ebfc89498fd3c8280917268e2dadd`。
+Suite 版本 `1.2.0~beta9.4`，目标 Mango `1.0-Beta9-1`、iOS 16.5、Dopamine RootHide、arm64e。适配依据是用户提供的安装包，SHA256 `4826d2e73c59f05e0ff529da1e7db47e494ebfc89498fd3c8280917268e2dadd`。
 
 ## 身份与 ABI
 
@@ -18,7 +18,7 @@ Beta9 的 aperture resize-pan replacement 位于 0xca5338–0xca8adc，仍把方
 
 ## 成品职责
 
-Beta9 新增 scene setter 和冻结卡片路径在已核对函数中操作 scene/子视图，没有新增直接改 containing UIWindow 的 transform/center 或方向2半转。用户最新日志显示窗口写入半转时固定坐标可能不变，旧路径因此回退并长期暂停。Beta9.3 在恢复开关开启时对已验证 Hello ViewController 启动器改用内容根视图；先通过 CALayer 的子层到窗口坐标转换，再映射到固定屏幕。只允许全屏、居中、仿射的目标，初次施加仍要求单位模型矩阵与半转校验；其他目标保留旧窗口路径。冻结与恢复的动画/触摸时序仍需手机检查。
+Beta9 新增 scene setter 和冻结卡片路径在已核对函数中操作 scene／子视图。Beta9.3 根视图路径修正了启动器方向，但用户确认底部设置面板仍错误、左下资源库位置异常。Beta9.4 停用该整根半转，改为 ViewController 的 launcherContainerView／Right 与 appLibraryPickerLeft／Right，各自使用层图及父坐标屏幕中心校验。MangoMenuViewController 的 mango_updateMenuRotation 和 viewDidLayoutSubviews 观察菜单的全屏呈现容器；MangoAppLibraryPickerView 的 layoutSubviews 和 updateExpandedFrame 触发即时核对。全部 class 来源、方法 ABI 和原实现均核对后安装，不挂钩全局 UIView／UIWindow 布局。
 
 World 编译 `World.m WorldPlacement.m XiaoMang.m`；Split 编译 `Split.m`。仅在校验过的原生类上挂钩，保留已有原生半转，不重复旋转；恢复也只针对当前仍匹配本插件写入的变换。
 

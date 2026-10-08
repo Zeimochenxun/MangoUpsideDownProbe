@@ -63,6 +63,14 @@ int main(void) {
                     assert(Same(MSB9PanQueryValue(velocity,gesture,scope,depth,YES),CGPointMake(12,80)));
                     assert(Same(MSB9PanQueryValue(translation,other,scope,depth,YES),translation));
                     assert(Same(MSB9PanQueryValue(translation,gesture,scope,depth,NO),translation));
+                    assert(Same(MSB9PanQueryValueInSpace(translation,gesture,scope,depth,YES,NO),translation));
+                    assert(Same(MSB9PanQueryValueInSpace(translation,gesture,scope,depth,YES,YES),CGPointMake(15,-40)));
+                    // The native +/-30 final-action threshold changes branches
+                    // for both signs, while queries in an upright space stay raw.
+                    for (int y=-50;y<=50;y+=100) {
+                        CGPoint final=MSB9PanQueryValueInSpace(CGPointMake(7,y),gesture,scope,depth,YES,YES);
+                        assert(final.x==7 && ((y>30 && final.y< -30) || (y< -30 && final.y>30)));
+                    }
                     MSB9RunPanQueries(other,^{ assert(scope==other && depth==2); },&scope,&depth);
                     assert(scope==gesture && depth==1);
                     if (throws) [NSException raise:@"QueryCallback" format:@"expected"];

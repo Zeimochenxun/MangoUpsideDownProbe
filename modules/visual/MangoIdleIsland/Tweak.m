@@ -39,6 +39,9 @@ static BOOL ParameterReapplyHookInstalled;
 static CFTimeInterval LastPreferenceRead, LastEdgePreferenceRead;
 static BOOL CachedEdgePreference;
 static NSHashTable<UIView *> *Hosts;
+static NSHashTable<id> *Pills;
+static unsigned NotificationHooks;
+static void NotificationRefresh(id element);
 static dispatch_source_t Timer;
 static CADisplayLink *DisplayLink;
 static CFTimeInterval LastTransition;
@@ -768,25 +771,77 @@ static void Scan(void) {
             [todo addObjectsFromArray:v.subviews];
         }
     }
+    for (id element in Pills.allObjects) NotificationRefresh(element);
+    static double notificationSession;
+    double session=[MSRuntimeSettings()[@"DebugSessionToken"] doubleValue];
+    if (MSDiagnosticsActive() && notificationSession!=session) {
+        notificationSession=session;
+        MSDiagnosticsLog(@"Glass",[NSString stringWithFormat:@"NOTIFICATION hooks=%u tracked=%lu identification=userNotification+content-provider no-content-recorded=1",NotificationHooks,(unsigned long)Pills.count]);
+    }
     for (UIView *host in Hosts.allObjects) Update(host);
-    if (!Disabled && Hosts.count && MSIslandRepairsNeedFrames()) DisplayLink.paused = NO;
+    if (MSIslandRepairsNeedFrames() && !Disabled) DisplayLink.paused = NO;
     IdleDiagnosticsScan();
 }
 
-static void (*OriginalNotificationLayout)(id,SEL,id);
+
+static void (*OriginalNotificationLayout)(id,SEL,id), (*OriginalNotificationSet)(id,SEL,id), (*OriginalLayoutHostSet)(id,SEL,id);
+static void (*OriginalPillUpdate)(id,SEL);
+static id VerifiedObject(id object,const char *name) {
+    SEL selector=sel_registerName(name);
+    return object && B9ClassIsHello(object_getClass(object)) && ClassMethodSignature(object_getClass(object),selector,"@",2,NULL)
+        ? ((id (*)(id,SEL))objc_msgSend)(object,selector) : nil;
+}
+static void NotificationRefresh(id element) {
+    if (!NSThread.isMainThread || !element) return;
+    if (!Pills) Pills=[NSHashTable weakObjectsHashTable];
+    if (Pills.count<32 || [Pills containsObject:element]) [Pills addObject:element];
+    BOOL notification=VerifiedObject(element,"userNotification")!=nil;
+    id layout=VerifiedObject(element,"layoutHost");
+    UIView *host=[layout isKindOfClass:UIView.class] ? HostFor(layout) : nil;
+    // viewProvider is an aggregate, not a MangoPillContentProvider. Ask its
+    // individual providers for providedView, without reading notification text.
+    id aggregate=VerifiedObject(element,"viewProvider");
+    const char *names[]={"leadingContentViewProvider","trailingContentViewProvider","primaryContentViewProvider",
+                         "secondaryContentViewProvider","actionContentViewProvider","minimalContentViewProvider"};
+    for (unsigned i=0;i<6 && !host;i++) {
+        id provider=VerifiedObject(element,names[i]) ?: VerifiedObject(aggregate,names[i]);
+        id view=VerifiedObject(provider,"providedView");
+        if ([view isKindOfClass:UIView.class]) host=HostFor(view);
+    }
+    MSIslandNotificationState(element,host,notification);
+    static char recognizedKey;
+    NSString *key=[NSString stringWithFormat:@"%d:%p:%.3f",notification,(__bridge void *)host,[MSRuntimeSettings()[@"DebugSessionToken"] doubleValue]];
+    if (MSDiagnosticsActive() && ![objc_getAssociatedObject(element,&recognizedKey) isEqualToString:key]) {
+        objc_setAssociatedObject(element,&recognizedKey,key,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        MSDiagnosticsLog(@"Glass",[NSString stringWithFormat:@"NOTIFICATION element=%p notification=%d host=%p hooks=%u",(__bridge void *)element,notification,(__bridge void *)host,NotificationHooks]);
+    }
+}
 static void NotificationLayout(id self,SEL cmd,id view) {
-    OriginalNotificationLayout(self,cmd,view);
-    SEL providerSelector=sel_registerName("viewProvider"), providedSelector=sel_registerName("providedView");
-    Class cls=object_getClass(self);
-    if (ClassMethodSignature(cls,providerSelector,"@",2,NULL)) {
-        id provider=((id (*)(id,SEL))objc_msgSend)(self,providerSelector);
-        Class providerClass=object_getClass(provider);
-        if (B9ClassIsHello(providerClass) && ClassMethodSignature(providerClass,providedSelector,"@",2,NULL)) {
-            id provided=((id (*)(id,SEL))objc_msgSend)(provider,providedSelector);
-            MSIslandNotificationLayout(provided);
+    OriginalNotificationLayout(self,cmd,view); NotificationRefresh(self); Pulse();
+}
+static void NotificationSet(id self,SEL cmd,id notification) {
+    OriginalNotificationSet(self,cmd,notification); NotificationRefresh(self); Pulse();
+}
+static void LayoutHostSet(id self,SEL cmd,id host) {
+    OriginalLayoutHostSet(self,cmd,host); NotificationRefresh(self); Pulse();
+}
+static void PillUpdate(id self,SEL cmd) {
+    OriginalPillUpdate(self,cmd); NotificationRefresh(self); Pulse();
+}
+static void InstallNotificationHooks(Class pill) {
+    if (!B9ClassIsHello(pill)) return;
+    struct { const char *name; IMP replacement; IMP *original; unsigned argc; const char *arg; } hooks[]={
+        {"layoutHostContainerViewDidLayoutSubviews:",(IMP)NotificationLayout,(IMP *)&OriginalNotificationLayout,3,"@"},
+        {"setUserNotification:",(IMP)NotificationSet,(IMP *)&OriginalNotificationSet,3,"@"},
+        {"setLayoutHost:",(IMP)LayoutHostSet,(IMP *)&OriginalLayoutHostSet,3,"@"},
+        {"updateLayout",(IMP)PillUpdate,(IMP *)&OriginalPillUpdate,2,NULL}};
+    for (unsigned i=0;i<4;i++) {
+        SEL selector=sel_registerName(hooks[i].name);
+        if (ClassMethodSignature(pill,selector,"v",hooks[i].argc,hooks[i].arg) &&
+            B9IMPIsHello(class_getMethodImplementation(pill,selector))) {
+            MSHookMessageEx(pill,selector,hooks[i].replacement,hooks[i].original); NotificationHooks|=1u<<i;
         }
     }
-    Pulse();
 }
 
 __attribute__((constructor)) static void Start(void) {
@@ -796,7 +851,7 @@ __attribute__((constructor)) static void Start(void) {
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=1.1.9.6~beta9.3 background=Mango-glass stable-idle-only=1 inverse-native-opacity=1 presentation-opacity=1 presentation-bounds-guard=1 compact-return-handoff=1 visible-activity-only=1 settled-background-no-rewrite=1 touch=unchanged");
+            Log(@"[SESSION] version=1.1.9.6~beta9.4 background=Mango-glass stable-idle-only=1 inverse-native-opacity=1 presentation-opacity=1 presentation-bounds-guard=1 compact-return-handoff=1 visible-activity-only=1 settled-background-no-rewrite=1 touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");
@@ -826,11 +881,7 @@ __attribute__((constructor)) static void Start(void) {
             Hosts = [NSHashTable weakObjectsHashTable];
             Disabled = access([[LogDir stringByAppendingPathComponent:@"DISABLED"] fileSystemRepresentation], F_OK) == 0;
 
-            Class pill = NSClassFromString(@"MangoPillElement");
-            SEL notificationLayout = sel_registerName("layoutHostContainerViewDidLayoutSubviews:");
-            if (B9ClassIsHello(pill) && ClassMethodSignature(pill,notificationLayout,"v",3,"@") &&
-                B9IMPIsHello(class_getMethodImplementation(pill,notificationLayout)))
-                MSHookMessageEx(pill,notificationLayout,(IMP)NotificationLayout,(IMP *)&OriginalNotificationLayout);
+            InstallNotificationHooks(NSClassFromString(@"MangoPillElement"));
 
             MSHookMessageEx(HostClass, @selector(layoutSubviews), (IMP)Layout, (IMP *)&OriginalLayout);
             MSHookMessageEx(ContentClass, @selector(setHidden:), (IMP)ContentHidden, (IMP *)&OriginalContentHidden);
@@ -867,11 +918,11 @@ __attribute__((constructor)) static void Start(void) {
             static MangoIdleFrameObserver *observer;
             observer = [MangoIdleFrameObserver new];
             DisplayLink = [CADisplayLink displayLinkWithTarget:observer selector:@selector(tick:)];
-            DisplayLink.preferredFramesPerSecond = 30;
+            DisplayLink.preferredFramesPerSecond = 60;
             [DisplayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
             DisplayLink.paused = !MSIslandRepairsNeedFrames();
 
-            Log(@"[READY] hooks=layout+content-hidden+element-move+element-alpha+glass-hidden+island-reapply transition-refresh=30fps/1s fallback-scan=500ms global-Island-glass-logic=enabled");
+            Log(@"[READY] hooks=layout+content-hidden+element-move+element-alpha+glass-hidden+island-reapply transition-refresh=60fps/1s fallback-scan=500ms global-Island-glass-logic=enabled");
         });
     }
 }

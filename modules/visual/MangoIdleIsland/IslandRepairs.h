@@ -3,4 +3,4 @@
 BOOL MSIslandUsesOwnedRim(void);
 BOOL MSIslandRepairsNeedFrames(void);
 void MSIslandRepairUpdate(UIView *host, UIView *idle, BOOL edgeOptIn);
-void MSIslandNotificationLayout(UIView *view);
+void MSIslandNotificationState(id element, UIView *host, BOOL notification);

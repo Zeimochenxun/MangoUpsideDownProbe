@@ -88,7 +88,7 @@ static BOOL SuiteFlag(NSString *key) {
     [self addSwitch:@"4 调整位置大小保持倒置" key:@"IslandLayoutEnabled"];
     [self addSwitch:@"5 短通知黑色光晕修复" key:@"ShortHaloEnabled"];
     [self addSwitch:@"6 灵动岛边缘实时采色" key:@"EdgeColorEnabled"];
-    for (NSDictionary *row in @[@{@"name":@"采色边缘粗细（点）", @"key":@"EdgeThickness", @"min":@.5, @"max":@4.0},
+    for (NSDictionary *row in @[@{@"name":@"灵动岛边缘粗细（点）", @"key":@"EdgeThickness", @"min":@.5, @"max":@4.0},
                                 @{@"name":@"采色边缘动态程度", @"key":@"EdgeDynamics", @"min":@0.0, @"max":@1.0}]) {
         PSSpecifier *slider = [PSSpecifier preferenceSpecifierNamed:row[@"name"] target:self set:@selector(writeValue:specifier:) get:@selector(readValue:) detail:nil cell:PSSliderCell edit:nil];
         [slider setProperty:row[@"key"] forKey:@"key"];

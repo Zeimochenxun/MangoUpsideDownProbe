@@ -24,6 +24,7 @@
 #include <string.h>
 #include <errno.h>
 #include "Geometry.h"
+#include "RecoveryPolicy.h"
 #import "Beta9Identity.h"
 #import "../../src/RuntimeDiagnostics.h"
 
@@ -122,7 +123,11 @@ static void WPStateLog(MWPState *s, NSString *message) {
     WPLog(message);
 }
 
-static NSInteger WPOrientation(void) { return B9Orientation(); }
+static NSInteger WPOrientation(void) {
+    static double lastInverted=-INFINITY;
+    NSInteger value=B9Orientation();
+    return MSRuntimeFlag(@"IslandLayoutEnabled") ? MSRecoverOrientation(value,MSNativeInversionRequested(),CACurrentMediaTime(),&lastInverted) : value;
+}
 
 static UIView *WPFindAncestor(UIView *host, Class cls) {
     UIView *v = host;
