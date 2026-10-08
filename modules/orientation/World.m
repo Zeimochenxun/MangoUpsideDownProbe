@@ -27,7 +27,6 @@ static void PanStatus(void);
 static dispatch_source_t Timer;
 static char StateKey;
 #import "Beta9Identity.h"
-#import "PanCorrection.h"
 #include <errno.h>
 // Patch-owned state classes, NOT names extracted from Mango.
 @interface MWOwnedTransform : NSObject
@@ -389,9 +388,9 @@ static BOOL Begin(UIView *v){
     if(Depth++==0){
         // Root/content geometry is expressed inside the already turned window.
         // Keep that space stable while Mango's position/size slider writes it.
-        if (MSRuntimeFlag(@"IslandLayoutEnabled")) {
+        if (MSRuntimeFlag(@"IslandLayoutEnabled") && ![v isKindOfClass:WindowClass]) {
             for (UIView *root in Roots.allObjects)
-                if ((root.window == v.window || root.window == v) && KeepsWorld(root, State(root), root.window)) return YES;
+                if (root.window == v.window && KeepsWorld(root, State(root), root.window)) return YES;
         }
         Busy=YES;
         @try{[UIView performWithoutAnimation:^{for(UIView *root in Roots.allObjects)RestoreWorldReason(root,@"geometry-setter");}];}
@@ -426,29 +425,7 @@ DEFINE_HOOKS(Pass)
 DEFINE_HOOKS(Content)
 DEFINE_HOOKS(Window)
 DEFINE_TRANSFORM_HOOK(Pass)
-
-static void (*WindowTransform)(id,SEL,CGAffineTransform);
-static void WindowHookTransform(UIView *window,SEL cmd,CGAffineTransform value) {
-    if (!Busy && NSThread.isMainThread && MSRuntimeFlag(@"IslandLayoutEnabled") && Enabled && Orientation()==2) {
-        for (UIView *root in Roots.allObjects) {
-            MWWorldState *state=State(root);
-            if (root.window!=window || !KeepsWorld(root,state,root.window)) continue;
-            MWTransform raw=Math(value);
-            // Parameter reloads write an upright scale to the aperture window.
-            // Substitute its turned endpoint before UIKit builds the animation.
-            CGRect screen=root.window.screen.fixedCoordinateSpace.bounds;
-            MWTransform turned;
-            if (MWWindowLayoutTarget(raw,(MWPoint){window.center.x,window.center.y},(MWPoint){CGRectGetMidX(screen),CGRectGetMidY(screen)},&turned)) {
-                WindowTransform(window,cmd,CG(turned));
-                state.outer.before=value; state.outer.after=CG(turned); state.outer.applied=YES;
-                return;
-            }
-        }
-    }
-    BOOL begun=Begin(window);
-    @try { WindowTransform(window,cmd,value); } @finally { End(begun); }
-}
-
+DEFINE_TRANSFORM_HOOK(Window)
 
 // Content transforms are the one value Mango animates. Correcting one after
 // the original setter cannot retarget an animation UIKit has already built
@@ -534,77 +511,52 @@ static BOOL OwnsGestureWindow(UIView *view) {
     }
     return NO;
 }
-static void (*OriginalMangoPan)(id, SEL, id);
-static void (*OriginalPillPan)(id, SEL, id);
-static CGPoint (*OriginalTranslation)(id,SEL,UIView *), (*OriginalVelocity)(id,SEL,UIView *);
-static __weak id ScopedPan;
-static unsigned PanDepth;
-
-static BOOL PanQueriesInstalled, ResizePanInstalled, PillPanInstalled;
-static unsigned PanAttempts, PanQueries;
-static BOOL QueryNeedsFlip(UIView *view) {
-    if (!view) view=[ScopedPan view];
-    if (![view.window isKindOfClass:WindowClass] && ![view isKindOfClass:WindowClass]) return NO;
-    MWTransform map=FixedMap(view);
-    return MWInvertedBasis(map.a,map.d,map.c,map.b);
+// Beta9.5 mitigation: preserve Mango's recognizer and action selection.
+// No UIPanGestureRecognizer query hooks are installed by this build.
+#import "ObservedPan.h"
+static void (*OriginalMangoPan)(id,SEL,id), (*OriginalPillPan)(id,SEL,id);
+static BOOL ResizePanInstalled, PillPanInstalled;
+static unsigned PanAttempts;
+static unsigned long PanSequence;
+static void RunMangoPan(id controller,SEL selector,id gesture,void (*original)(id,SEL,id)) {
+    unsigned long sequence=NSThread.isMainThread ? ++PanSequence : 0;
+    __block BOOL recordReturn=NO;
+    MSRunObservedPan(controller,selector,gesture,original,^(BOOL returned) {
+        if (!MSDiagnosticsActive()) return;
+        if (returned) {
+            if (!recordReturn) return;
+            MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN native-return seq=%lu entry=%@ correction=paused",sequence,NSStringFromSelector(selector)]);
+            return;
+        }
+        if (![gesture isKindOfClass:UIPanGestureRecognizer.class]) return;
+        UIGestureRecognizerState state=[gesture state];
+        if (state!=UIGestureRecognizerStateBegan && state!=UIGestureRecognizerStateEnded && state!=UIGestureRecognizerStateCancelled && state!=UIGestureRecognizerStateFailed) return;
+        recordReturn=YES;
+        MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN native-begin seq=%lu entry=%@ state=%ld requested=%d queryHooks=0 correction=paused",sequence,NSStringFromSelector(selector),(long)state,MSRuntimeFlag(@"SwipeDirectionEnabled")]);
+    });
 }
-static CGPoint PanValue(CGPoint raw,id gesture,UIView *view,NSString *kind) {
-    BOOL flip=PanDepth && NSThread.isMainThread && gesture==ScopedPan && QueryNeedsFlip(view);
-    CGPoint value=MSB9PanQueryValueInSpace(raw,gesture,ScopedPan,PanDepth,NSThread.isMainThread,flip);
-    if (gesture==ScopedPan && PanDepth && MSDiagnosticsActive() && PanQueries++<8)
-        MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN query=%@ view=%p flip=%d rawY=%.2f effectiveY=%.2f",kind,(__bridge void *)view,flip,raw.y,value.y]);
-    return value;
-}
-static CGPoint HookTranslation(id gesture,SEL selector,UIView *view) {
-    return PanValue(OriginalTranslation(gesture,selector,view),gesture,view,@"translation");
-}
-static CGPoint HookVelocity(id gesture,SEL selector,UIView *view) {
-    return PanValue(OriginalVelocity(gesture,selector,view),gesture,view,@"velocity");
-}
-static void RunMangoPan(id controller,SEL selector,UIPanGestureRecognizer *gesture,void (*original)(id,SEL,id)) {
-    if (!NSThread.isMainThread || PanDepth || ![gesture isKindOfClass:UIPanGestureRecognizer.class] ||
-        gesture.state!=UIGestureRecognizerStateEnded) { original(controller,selector,gesture); return; }
-    UIView *view=gesture.view;
-    NSInteger direction=Orientation();
-    BOOL enabled=MSRuntimeFlag(@"SwipeDirectionEnabled") && Enabled && !B9Disabled(Disabled);
-    BOOL target=[view.window isKindOfClass:WindowClass] && !view.window.hidden;
-    BOOL correction=enabled && target && (direction==1 || direction==2) && QueryNeedsFlip(view);
-    // Report every final callback, including a skipped one, in the new session.
-    if (MSDiagnosticsActive()) MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN ended entry=%@ view=%p window=%p direction=%ld enabled=%d target=%d correction=%d resizeInstalled=%d pillInstalled=%d",NSStringFromSelector(selector),(__bridge void *)view,(__bridge void *)view.window,(long)direction,enabled,target,correction,ResizePanInstalled,PillPanInstalled]);
-    if (!correction) { original(controller,selector,gesture); return; }
-    PanQueries=0;
-    MSB9RunPanQueries(gesture,^{ original(controller,selector,gesture); },&ScopedPan,&PanDepth);
-}
-static void HookMangoPan(id controller,SEL selector,UIPanGestureRecognizer *gesture) { RunMangoPan(controller,selector,gesture,OriginalMangoPan); }
-static void HookPillPan(id controller,SEL selector,UIPanGestureRecognizer *gesture) { RunMangoPan(controller,selector,gesture,OriginalPillPan); }
+static void HookMangoPan(id controller,SEL selector,id gesture) { RunMangoPan(controller,selector,gesture,OriginalMangoPan); }
+static void HookPillPan(id controller,SEL selector,id gesture) { RunMangoPan(controller,selector,gesture,OriginalPillPan); }
 static void PanStatus(void) {
     static double session;
     double current=[MSRuntimeSettings()[@"DebugSessionToken"] doubleValue];
     if (!MSDiagnosticsActive() || session==current) return;
     session=current;
-    MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN install query=%d resize=%d pill=%d attempts=%u correction=Ended-only-per-query-view",PanQueriesInstalled,ResizePanInstalled,PillPanInstalled,PanAttempts]);
+    MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN install query=0 resize=%d pill=%d attempts=%u correction=paused native-recognizer-preserved=1",ResizePanInstalled,PillPanInstalled,PanAttempts]);
 }
 static void InstallMangoPan(void) {
     if ((ResizePanInstalled && PillPanInstalled) || !Enabled || B9Disabled(Disabled)) return;
-    if (!PanQueriesInstalled) {
-        if (!Signature(UIPanGestureRecognizer.class,@selector(translationInView:),@encode(CGPoint),@[@"@"]) ||
-            !Signature(UIPanGestureRecognizer.class,@selector(velocityInView:),@encode(CGPoint),@[@"@"])) { Log(@"Pan query ABI mismatch"); return; }
-        MSHookMessageEx(UIPanGestureRecognizer.class,@selector(translationInView:),(IMP)HookTranslation,(IMP *)&OriginalTranslation);
-        MSHookMessageEx(UIPanGestureRecognizer.class,@selector(velocityInView:),(IMP)HookVelocity,(IMP *)&OriginalVelocity);
-        PanQueriesInstalled=YES;
-    }
     Class controller=objc_getClass("SBSystemApertureViewController"); SEL resize=sel_registerName("_handleResizePan:");
     if (!ResizePanInstalled && Signature(controller,resize,"v",@[@"@"]) && B9IMPIsHello(class_getMethodImplementation(controller,resize))) {
         MSHookMessageEx(controller,resize,(IMP)HookMangoPan,(IMP *)&OriginalMangoPan); ResizePanInstalled=YES;
     }
-    // Pill notification actions remain available if resize is absent/wrapped.
     Class pill=objc_getClass("MangoPillElement"); SEL pan=sel_registerName("handlePanGesture:");
-    if (!PillPanInstalled && B9ClassIsHello(pill) && Signature(pill,pan,"v",@[@"@"])) {
+    if (!PillPanInstalled && B9ClassIsHello(pill) && Signature(pill,pan,"v",@[@"@"]) && B9IMPIsHello(class_getMethodImplementation(pill,pan))) {
         MSHookMessageEx(pill,pan,(IMP)HookPillPan,(IMP *)&OriginalPillPan); PillPanInstalled=YES;
     }
     if (++PanAttempts<40 && (!ResizePanInstalled || !PillPanInstalled))
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,500*NSEC_PER_MSEC),dispatch_get_main_queue(),^{ InstallMangoPan(); });
-    Log([NSString stringWithFormat:@"Pan entries query=%d resize=%d pill=%d attempt=%u",PanQueriesInstalled,ResizePanInstalled,PillPanInstalled,PanAttempts]);
+    Log([NSString stringWithFormat:@"Native pan observer resize=%d pill=%d attempt=%u queryHooks=0",ResizePanInstalled,PillPanInstalled,PanAttempts]);
 }
 static Class OrientationLockClass;
 static BOOL OrientationLockFixOK=YES;

@@ -48,6 +48,9 @@ jobs:
       - name: Verify actual Beta9 compatibility parser
         run: python3 tests/test_compatibility.py
 
+      - name: Enforce stabilization boundaries
+        run: python3 tests/test_stabilization_boundaries.py
+
       - name: Verify optical math and minimized app reopen recovery
         run: |
           python3 tests/test_optical_contours.py
@@ -70,12 +73,10 @@ jobs:
           /tmp/split-reconcile-test
           clang -std=c11 -Wall -Wextra -Werror modules/orientation/tests/launcher_root_test.c -lm -o /tmp/launcher-root-test
           /tmp/launcher-root-test
-          clang -std=c11 -Wall -Wextra -Werror modules/orientation/tests/surface_reconcile_test.c -lm -o /tmp/surface-test
-          /tmp/surface-test
           python3 modules/orientation/tests/test_split_regression.py
           clang -std=c11 -Wall -Wextra -Werror modules/orientation/tests/placement_test.c -lm -o /tmp/placement-test
           /tmp/placement-test
-          clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation -framework CoreGraphics modules/orientation/tests/pan_correction_test.m -o /tmp/pan-test
+          clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation -framework CoreGraphics modules/orientation/tests/observed_pan_test.m -o /tmp/pan-test
           /tmp/pan-test
           clang -std=c11 -Wall -Wextra -Werror modules/orientation/tests/xiaomang_geometry_test.c -lm -o /tmp/xiaomang-geometry-test
           /tmp/xiaomang-geometry-test

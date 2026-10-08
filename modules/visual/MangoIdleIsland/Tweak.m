@@ -820,17 +820,40 @@ static void NotificationRefresh(id element) {
         MSDiagnosticsLog(@"Glass",[NSString stringWithFormat:@"NOTIFICATION element=%p notification=%d host=%p hooks=%u",(__bridge void *)element,notification,(__bridge void *)host,NotificationHooks]);
     }
 }
+// Coalesce observation after Mango's native layout/dismiss stack unwinds.
+// Weak membership never keeps a dismissed notification element alive.
+static BOOL NotificationRefreshPending;
+static void QueueNotificationRefresh(id element) {
+    if (!NSThread.isMainThread) {
+        __weak id weakElement=element;
+        dispatch_async(dispatch_get_main_queue(),^{ QueueNotificationRefresh(weakElement); });
+        return;
+    }
+    if (!element) return;
+    if (!Pills) Pills=[NSHashTable weakObjectsHashTable];
+    if (Pills.count<32 || [Pills containsObject:element]) [Pills addObject:element];
+    if (NotificationRefreshPending) return;
+    NotificationRefreshPending=YES;
+    dispatch_async(dispatch_get_main_queue(),^{
+        NotificationRefreshPending=NO;
+        for (id current in Pills.allObjects) {
+            @try { NotificationRefresh(current); }
+            @catch (__unused NSException *exception) {}
+        }
+        Pulse();
+    });
+}
 static void NotificationLayout(id self,SEL cmd,id view) {
-    OriginalNotificationLayout(self,cmd,view); NotificationRefresh(self); Pulse();
+    OriginalNotificationLayout(self,cmd,view); QueueNotificationRefresh(self);
 }
 static void NotificationSet(id self,SEL cmd,id notification) {
-    OriginalNotificationSet(self,cmd,notification); NotificationRefresh(self); Pulse();
+    OriginalNotificationSet(self,cmd,notification); QueueNotificationRefresh(self);
 }
 static void LayoutHostSet(id self,SEL cmd,id host) {
-    OriginalLayoutHostSet(self,cmd,host); NotificationRefresh(self); Pulse();
+    OriginalLayoutHostSet(self,cmd,host); QueueNotificationRefresh(self);
 }
 static void PillUpdate(id self,SEL cmd) {
-    OriginalPillUpdate(self,cmd); NotificationRefresh(self); Pulse();
+    OriginalPillUpdate(self,cmd); QueueNotificationRefresh(self);
 }
 static void InstallNotificationHooks(Class pill) {
     if (!B9ClassIsHello(pill)) return;
@@ -855,7 +878,7 @@ __attribute__((constructor)) static void Start(void) {
         if (os.majorVersion != 16 || os.minorVersion != 5 || os.patchVersion != 0) return;
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            Log(@"[SESSION] version=1.1.9.6~beta9.4 background=Mango-glass stable-idle-only=1 inverse-native-opacity=1 presentation-opacity=1 presentation-bounds-guard=1 compact-return-handoff=1 visible-activity-only=1 settled-background-no-rewrite=1 touch=unchanged");
+            Log(@"[SESSION] version=1.1.9.6~beta9.5 background=Mango-glass stable-idle-only=1 inverse-native-opacity=1 presentation-opacity=1 presentation-bounds-guard=1 compact-return-handoff=1 visible-activity-only=1 settled-background-no-rewrite=1 touch=unchanged");
             HostClass = NSClassFromString(@"SBSystemApertureContainerView");
             WindowClass = NSClassFromString(@"SBSystemApertureWindow");
             ContentClass = NSClassFromString(@"_SBSystemApertureContainerViewContentView");

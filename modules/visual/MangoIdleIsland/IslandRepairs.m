@@ -10,8 +10,6 @@
 @interface MSIslandOpticalState : NSObject
 @property(nonatomic,strong) CAGradientLayer *rim;
 @property(nonatomic,strong) CAShapeLayer *mask, *halo;
-@property(nonatomic,strong) CAShapeLayer *clip;
-@property(nonatomic,strong) CALayer *nativeClip;
 @property(nonatomic) double lastSample,lastTick,lastLog;
 @property(nonatomic) double sampleCost;
 @property(nonatomic,weak) UIView *glass;
@@ -22,7 +20,6 @@
 @end
 @implementation MSIslandOpticalState
 - (void)dealloc {
-    if (self.glass.layer.mask==self.clip) self.glass.layer.mask=self.nativeClip;
     [self.rim removeFromSuperlayer]; [self.halo removeFromSuperlayer];
 }
 @end
@@ -218,8 +215,6 @@ static MSIslandOpticalState *State(UIView *glass) {
     state.mask=[CAShapeLayer layer]; state.mask.fillColor=UIColor.clearColor.CGColor; state.mask.strokeColor=UIColor.whiteColor.CGColor;
     state.mask.lineCap=kCALineCapRound; state.mask.lineJoin=kCALineJoinRound;
     state.rim.mask=state.mask;
-    state.clip=[CAShapeLayer layer]; state.clip.fillColor=UIColor.whiteColor.CGColor;
-    state.clip.name=@"MangoSuiteOwnedGlassClip";
     state.halo=[CAShapeLayer layer]; state.halo.fillColor=[UIColor colorWithWhite:0 alpha:.001].CGColor;
     state.halo.shadowColor=UIColor.blackColor.CGColor; state.halo.shadowOffset=CGSizeZero;
     state.rim.name=@"MangoSuiteOwnedOpticalRim"; state.halo.name=@"MangoSuiteOwnedNotificationHalo";
@@ -261,8 +256,6 @@ static UIBezierPath *Contour(CALayer *source,CALayer *mask,CGFloat thickness,BOO
     return [UIBezierPath bezierPathWithRoundedRect:inset cornerRadius:fmax(0,radius-thickness*.5)];
 }
 static void Detach(MSIslandOpticalState *state) {
-    if (state.glass.layer.mask==state.clip) state.glass.layer.mask=state.nativeClip;
-    state.nativeClip=nil;
     [state.rim removeFromSuperlayer]; [state.halo removeFromSuperlayer];
 }
 static void UpdateGlass(UIView *host,UIView *glass,BOOL rim,BOOL halo,BOOL edgeOptIn) {
@@ -272,13 +265,9 @@ static void UpdateGlass(UIView *host,UIView *glass,BOOL rim,BOOL halo,BOOL edgeO
     CGRect bounds=source.bounds;
     if (!isfinite(bounds.size.width) || !isfinite(bounds.size.height) || bounds.size.width<1 || bounds.size.height<1) { Detach(state); return; }
     double thickness=fmin(MSRuntimeNumber(@"EdgeThickness",1.2,.5,4),fmin(bounds.size.width,bounds.size.height)*.4);
-    if (glass.layer.mask!=state.clip) state.nativeClip=glass.layer.mask;
     BOOL native=NO;
-    BOOL normalize=MSRuntimeFlag(@"RimGeometryEnabled");
-    CALayer *originalMask=source.mask==state.clip || [source.mask.name isEqualToString:state.clip.name] ? state.nativeClip : source.mask;
+    CALayer *originalMask=source.mask;
     UIBezierPath *path=Contour(source,originalMask,thickness,&native);
-    BOOL nativeFill=NO;
-    UIBezierPath *fillPath=Contour(source,originalMask,0,&nativeFill);
     CGRect rect=path.bounds;
     if (!isfinite(rect.origin.x) || !isfinite(rect.origin.y)) { Detach(state); return; }
     CFTimeInterval now=CACurrentMediaTime(); double elapsed=state.lastTick ? now-state.lastTick : 1.0/60; state.lastTick=now;
@@ -311,12 +300,7 @@ static void UpdateGlass(UIView *host,UIView *glass,BOOL rim,BOOL halo,BOOL edgeO
     state.rim.bounds=bounds; state.rim.position=CGPointMake(CGRectGetMidX(bounds),CGRectGetMidY(bounds));
     state.mask.bounds=bounds; state.mask.position=CGPointMake(CGRectGetMidX(bounds),CGRectGetMidY(bounds));
     state.mask.path=path.CGPath; state.mask.lineWidth=native ? thickness*2 : thickness;
-    // Align the actual glass clip as well as its edge. A lingering compact
-    // native mask cannot cut away four corners of the expanded notification.
-    if (normalize && rim) {
-        state.clip.bounds=bounds; state.clip.position=CGPointMake(CGRectGetMidX(bounds),CGRectGetMidY(bounds));
-        state.clip.path=fillPath.CGPath; glass.layer.mask=state.clip;
-    } else if (glass.layer.mask==state.clip) glass.layer.mask=state.nativeClip;
+    // The original glass mask belongs to Mango throughout dismissal.
     state.rim.colors=colors; state.rim.opacity=1; state.rim.masksToBounds=YES;
     double shimmer=(color && state.colorsValid) ? .12*dynamics*sin(now*.8) : 0;
     state.rim.startPoint=CGPointMake(.5,.5); state.rim.endPoint=CGPointMake(.5+sin(shimmer)*.5,.5-cos(shimmer)*.5);
@@ -343,8 +327,8 @@ static void UpdateGlass(UIView *host,UIView *glass,BOOL rim,BOOL halo,BOOL edgeO
     [CATransaction commit];
     if (MSDiagnosticsActive() && now-state.lastLog>=1) {
         state.lastLog=now;
-        MSDiagnosticsLog(@"Glass",[NSString stringWithFormat:@"glass=%p host=%p localContour=1 contour=%@ rim=%d geometry=%d presentation=%d clipOwned=%d nativeMask=%@ nativeRadius=%.2f halo=%d haloParent=window h=%.2f thickness=%.2f dynamics=%.2f color=%d valid=%d capture=%@ opacity=%.3f path=(%.1f,%.1f,%.1f,%.1f)",
-            (__bridge void *)glass,(__bridge void *)host,native ? @"native-mask" : @"local-rounded",rim,MSRuntimeFlag(@"RimGeometryEnabled"),source!=glass.layer,glass.layer.mask==state.clip,NSStringFromClass(state.nativeClip.class) ?: @"none",source.cornerRadius,halo,bounds.size.height,thickness,dynamics,color,state.colorsValid,state.sampleResult ?: @"off",VisibleOpacity(glass,host),rect.origin.x,rect.origin.y,rect.size.width,rect.size.height]);
+        MSDiagnosticsLog(@"Glass",[NSString stringWithFormat:@"glass=%p host=%p localContour=1 contour=%@ rim=%d geometry=%d presentation=%d clipOwned=0 nativeMask=%@ nativeRadius=%.2f halo=%d haloParent=window h=%.2f thickness=%.2f dynamics=%.2f color=%d valid=%d capture=%@ opacity=%.3f path=(%.1f,%.1f,%.1f,%.1f)",
+            (__bridge void *)glass,(__bridge void *)host,native ? @"native-mask" : @"local-rounded",rim,MSRuntimeFlag(@"RimGeometryEnabled"),source!=glass.layer,NSStringFromClass(originalMask.class) ?: @"none",source.cornerRadius,halo,bounds.size.height,thickness,dynamics,color,state.colorsValid,state.sampleResult ?: @"off",VisibleOpacity(glass,host),rect.origin.x,rect.origin.y,rect.size.width,rect.size.height]);
     }
 }
 void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edgeOptIn) {

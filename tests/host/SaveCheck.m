@@ -135,6 +135,17 @@ int main(int argc, const char *argv[]) {
             CFPreferencesSetAppValue(key, NULL, domain);
             Require(CFPreferencesAppSynchronize(domain), @"native UI cleanup");
             puts("PASS: actual native UI setter, master independence, sibling Suite preservation and visible malformed-value failure");
+        } else if ([mode isEqual:@"paused-swipe"]) {
+            for (NSNumber *seed in @[@NO,@YES]) {
+                Require(MSWritePreferenceFlag(@"SwipeDirectionEnabled",seed.boolValue,NULL), @"seed existing swipe selection");
+                NSDictionary *before=MSReadPreferences(NULL);
+                PSListController *reopened=[root new];
+                Require(![[Item(reopened,@"SwipeDirectionEnabled") propertyForKey:@"enabled"] boolValue], @"paused control visibly disabled");
+                Write(reopened,@"SwipeDirectionEnabled",!seed.boolValue);
+                Require([MSReadPreferences(NULL) isEqualToDictionary:before], @"paused setter preserves all preferences including prior swipe value");
+                Require([[reopened readValue:Item(reopened,@"SwipeDirectionEnabled")] boolValue]==seed.boolValue, @"prior selection remains visible");
+            }
+            puts("PASS: actual paused swipe UI disables action and preserves both prior values and sibling preferences");
         } else if ([mode isEqual:@"failure"]) {
             unsigned before = ReadMask(controller);
             Write(controller, @"Enabled", !(before & 1));

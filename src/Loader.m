@@ -83,7 +83,7 @@ __attribute__((constructor)) static void StartSuite(void) {
         BOOL optical = MSPreferenceFlag(snapshot,@"RimGeometryEnabled") || MSPreferenceFlag(snapshot,@"GlassAnimationEnabled") ||
                        MSPreferenceFlag(snapshot,@"ShortHaloEnabled") || MSPreferenceFlag(snapshot,@"EdgeColorEnabled");
         unsigned modules = MSModulesWithOptics(state, springboard ? MS_SPRINGBOARD : MS_BACKBOARD, optical);
-        NSLog(@"[MangoSuite] version=1.2.0~beta9.4 process=%@ startup-mask=%u changes=require-userspace-restart", process, modules);
+        NSLog(@"[MangoSuite] version=1.2.0~beta9.5 process=%@ startup-mask=%u changes=require-userspace-restart", process, modules);
         if (state.legacyOrientation) NSLog(@"[MangoSuite] legacy orientation hook detected; orientation modules suppressed");
 
         // The renderer process must receive the shader hook during startup.

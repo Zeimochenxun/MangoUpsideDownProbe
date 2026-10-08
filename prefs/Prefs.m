@@ -51,7 +51,7 @@ static BOOL SuiteFlag(NSString *key) {
     _specifiers = [NSMutableArray new];
 
     PSSpecifier *notice = [PSSpecifier emptyGroupSpecifier];
-    [notice setProperty:@"本插件为mango插件的自改补丁，仅自用" forKey:@"footerText"];
+    [notice setProperty:@"本插件为mango插件的自改补丁，仅自用。Beta9.5 为回归缓解版；通知方向修复暂时停用，左右资源库位置和底部设置仍待修复。" forKey:@"footerText"];
     [_specifiers addObject:notice];
 
     [self addSection:@"总开关"];
@@ -97,7 +97,10 @@ static BOOL SuiteFlag(NSString *key) {
         [slider setProperty:@YES forKey:@"showValue"];
         [_specifiers addObject:slider];
     }
-    [self addSwitch:@"7 通知上下滑动方向修复" key:@"SwipeDirectionEnabled"];
+    [self addSwitch:@"7 通知上下滑动方向修复（暂停）" key:@"SwipeDirectionEnabled"];
+    [_specifiers.lastObject setProperty:@NO forKey:@"enabled"];
+    [self addSection:nil];
+    [_specifiers.lastObject setProperty:@"上一版通知上滑后进入安全模式，本版已停用方向改写并保留原有选择。通知动作暂由 Mango 原版处理；保留的开关值不会启用这项改写。" forKey:@"footerText"];
     [self addSection:@"调试"];
     PSSpecifier *diagnostics = [PSSpecifier preferenceSpecifierNamed:@"调试日志与一键提取" target:self set:nil get:nil detail:NSClassFromString(@"MangoSuiteDiagnosticsController") cell:PSLinkCell edit:nil];
     [_specifiers addObject:diagnostics];
@@ -124,6 +127,7 @@ static BOOL SuiteFlag(NSString *key) {
 
 - (void)writeValue:(id)value specifier:(PSSpecifier *)specifier {
     NSString *key = [specifier propertyForKey:@"key"];
+    if ([key isEqualToString:@"SwipeDirectionEnabled"]) return;
     if ([key isEqualToString:@"EdgeThickness"] || [key isEqualToString:@"EdgeDynamics"]) {
         NSError *error = nil;
         if (!MSWritePreferenceValue(key, value, &error)) [self showMessage:error.localizedDescription title:@"保存失败"];

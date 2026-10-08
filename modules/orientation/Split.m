@@ -419,8 +419,10 @@ static void Update(UIWindow *w, BOOL active) {
             MSSplitOwnership old=state.ownership;
             if (old.applied) result|=MSSplitRestore(&old,Snapshot((__bridge void *)w),WriteSnapshot,(__bridge void *)w);
             state.ownership=(MSSplitOwnership){0};
-            RestoreRoot(state);
-            MSLauncherSurfacesUpdate(w.rootViewController,active);
+            if (state.launcherRoot!=root) { RestoreRoot(state); state.launcherRoot=root; }
+            MSSplitOwnership owned=state.rootOwnership;
+            @try { result|=MSSplitReconcileRecovery(&owned,active,1,RootSnapshot,RootWrite,(__bridge void *)root); }
+            @finally { state.rootOwnership=owned; }
         } else {
             RestoreRoot(state);
             MSSplitOwnership owned=state.ownership;
@@ -455,8 +457,10 @@ static void Reconcile(void) {
                 DiagnosticBegin(active, resolved, all);
             } @catch (__unused NSException *exception) { DiagnosticPass = NO; }
         }
-        for (UIWindow *w in Windows.allObjects) Update(w, active);
-        MSLauncherSurfacesFinish(active && MSRuntimeFlag(@"LauncherRecoveryEnabled"));
+        for (UIWindow *w in Windows.allObjects) {
+            Update(w, active);
+            MSLauncherSurfacesObserve(w.rootViewController);
+        }
         // Inactive windows can lack patch ownership. The fallback observes
         // exact plain UIWindows only; it never adds them to the real Windows.
         if (DiagnosticPass && MSDiagnosticsActive())
@@ -634,7 +638,6 @@ static void Install(void) {
         B9IMPIsHello(class_getMethodImplementation(launcher, rotation)) &&
         B9IMPIsHello(class_getMethodImplementation(launcher, layout))) LauncherClass = launcher;
     Windows = [NSHashTable weakObjectsHashTable]; Enabled = YES; Ready = YES;
-    MSLauncherSurfacesInstall(^{ ReconcileFrom(@"launcher-panel-layout"); ArmRecovery(); });
     static MSSplitRecoveryObserver *observer;
     observer = [MSSplitRecoveryObserver new];
     RecoveryLink = [CADisplayLink displayLinkWithTarget:observer selector:@selector(tick:)];

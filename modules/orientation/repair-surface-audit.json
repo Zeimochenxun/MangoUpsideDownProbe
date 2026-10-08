@@ -1,5 +1,5 @@
 {
-  "version": "1.2.0~beta9.4",
+  "version": "1.2.0~beta9.5",
   "image": "MangoHello.dylib",
   "methods": [
     {
@@ -109,8 +109,23 @@
       "selector": "providedView",
       "ABI": "@16@0:8",
       "IMP": "0xc3f694"
+    },
+    {
+      "class": "ViewController",
+      "selector": "watchPickerView",
+      "ABI": "@16@0:8",
+      "IMP": "0xc19ce0",
+      "usage": "read-only observation; no picker layout hooks"
+    },
+    {
+      "class": "ViewController",
+      "selector": "watchPickerViewRight",
+      "ABI": "@16@0:8",
+      "IMP": "0xc1a264",
+      "usage": "read-only observation; no picker layout hooks"
     }
   ],
   "readOnly": true,
-  "deviceBehaviorVerified": false
+  "deviceBehaviorVerified": false,
+  "purpose": "Beta9.5 observers; Beta9.4 surface mutation hooks removed"
 }

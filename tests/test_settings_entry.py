@@ -67,6 +67,8 @@ with tempfile.TemporaryDirectory(prefix="mangosuite-entry-") as directory:
     subprocess.run([str(work / "save-check"), str(fixed), "emergency-marker"], env=env, check=True)
     subprocess.run([str(work / "save-check"), str(fixed), "native-ui"], env=env, check=True)
 
+    subprocess.run([str(work / "save-check"), str(fixed), "paused-swipe"], env=env, check=True)
+
     before = store.read_bytes()
     store.parent.chmod(0o555)
     try:

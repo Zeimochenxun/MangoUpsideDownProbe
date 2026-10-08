@@ -1,4 +1,4 @@
+#pragma once
 #import <UIKit/UIKit.h>
-void MSLauncherSurfacesInstall(void (^changed)(void));
-void MSLauncherSurfacesUpdate(UIViewController *controller,BOOL active);
-void MSLauncherSurfacesFinish(BOOL active);
+// Only samples verified native surfaces; no layout hooks or geometry writes.
+void MSLauncherSurfacesObserve(UIViewController *controller);
