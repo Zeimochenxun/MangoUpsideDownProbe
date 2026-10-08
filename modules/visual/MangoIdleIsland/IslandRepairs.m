@@ -11,6 +11,8 @@
 @property(nonatomic,strong) CAGradientLayer *rim;
 @property(nonatomic,strong) CAShapeLayer *mask, *halo;
 @property(nonatomic) double lastSample,lastTick,lastLog;
+@property(nonatomic) double sampleCost;
+@property(nonatomic,weak) UIView *glass;
 @property(nonatomic) BOOL colorsValid;
 @property(nonatomic,copy) NSArray<UIColor *> *colors, *targets;
 @property(nonatomic,copy) NSString *sampleResult;
@@ -20,13 +22,27 @@
 @end
 static char OpticalStateKey;
 static NSHashTable<UIView *> *NotificationViews;
+static NSHashTable<UIView *> *OpticalHosts;
 static BOOL Sampling;
 
 BOOL MSIslandUsesOwnedRim(void) {
     return MSRuntimeFlag(@"RimGeometryEnabled") || MSRuntimeFlag(@"GlassAnimationEnabled") || MSRuntimeFlag(@"EdgeColorEnabled");
 }
 BOOL MSIslandRepairsNeedFrames(void) {
-    return MSRuntimeFlag(@"GlassAnimationEnabled") || MSRuntimeFlag(@"EdgeColorEnabled") || MSRuntimeFlag(@"ShortHaloEnabled");
+    for (UIView *host in OpticalHosts.allObjects) {
+        if (!host.window || host.hidden || host.alpha<.01) continue;
+        MSIslandOpticalState *state=objc_getAssociatedObject(host,&OpticalStateKey);
+        if (MSRuntimeFlag(@"EdgeColorEnabled") && state.glass.window) return YES;
+        if (!MSRuntimeFlag(@"GlassAnimationEnabled")) continue;
+        for (UIView *view=state.glass;view;view=view.superview) {
+            CALayer *layer=view.layer,*presentation=layer.presentationLayer;
+            if (layer.animationKeys.count || (presentation &&
+                (!CGRectEqualToRect(layer.bounds,presentation.bounds) ||
+                 !CATransform3DEqualToTransform(layer.transform,presentation.transform) ||
+                 fabs(layer.opacity-presentation.opacity)>.001))) return YES;
+        }
+    }
+    return NO;
 }
 void MSIslandNotificationLayout(UIView *view) {
     if (![view isKindOfClass:UIView.class] || !NSThread.isMainThread) return;
@@ -190,6 +206,8 @@ static MSIslandOpticalState *State(UIView *host) {
     state.halo.shadowColor=UIColor.blackColor.CGColor; state.halo.shadowOffset=CGSizeZero;
     state.rim.name=@"MangoSuiteOwnedOpticalRim"; state.halo.name=@"MangoSuiteOwnedNotificationHalo";
     objc_setAssociatedObject(host,&OpticalStateKey,state,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (!OpticalHosts) OpticalHosts=[NSHashTable weakObjectsHashTable];
+    [OpticalHosts addObject:host];
     return state;
 }
 void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edgeOptIn) {
@@ -212,8 +230,9 @@ void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edgeOptIn) {
     }
     if (!best || opacity<.01 || todo.count) { [state.rim removeFromSuperlayer]; [state.halo removeFromSuperlayer]; return; }
     BOOL animated=MSRuntimeFlag(@"GlassAnimationEnabled");
-    CALayer *source=animated ? (best.layer.presentationLayer ?: best.layer) : best.layer;
-    CALayer *target=animated ? (host.layer.presentationLayer ?: host.layer) : host.layer;
+    BOOL hasPair=animated && best.layer.presentationLayer && host.layer.presentationLayer;
+    CALayer *source=hasPair ? best.layer.presentationLayer : best.layer;
+    CALayer *target=hasPair ? host.layer.presentationLayer : host.layer;
     CGRect bounds=source.bounds;
     CGAffineTransform map=LayerMap(source,target);
     if (!FiniteMap(map) || !isfinite(bounds.size.width) || !isfinite(bounds.size.height) || bounds.size.width<1 || bounds.size.height<1) {
@@ -232,11 +251,14 @@ void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edgeOptIn) {
     CGRect rect=CGPathGetBoundingBox(path.CGPath);
     if (!isfinite(rect.origin.x) || !isfinite(rect.origin.y) || !isfinite(rect.size.width) || !isfinite(rect.size.height)) return;
     state=State(host);
+    state.glass=best;
     CFTimeInterval now=CACurrentMediaTime(); double elapsed=state.lastTick ? now-state.lastTick : 1.0/30; state.lastTick=now;
     double dynamics=MSRuntimeNumber(@"EdgeDynamics",.5,0,1);
-    if (color && now-state.lastSample >= 1.0/(4+4*dynamics)) {
+    double sampleInterval=fmax(1.0/(4+4*dynamics),state.sampleCost>.02 ? .5 : 0);
+    if (color && now-state.lastSample >= sampleInterval) {
         NSString *result=nil;
         NSArray *sample=SampleEdge(best,bounds,&result);
+        state.sampleCost=CACurrentMediaTime()-now;
         state.lastSample=now; state.sampleResult=result;
         if (sample) { state.targets=sample; if (!state.colorsValid) state.colors=sample; state.colorsValid=YES; }
         else { state.colorsValid=NO; state.targets=nil; state.colors=nil; }
@@ -276,8 +298,10 @@ void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edgeOptIn) {
     else [state.rim removeFromSuperlayer];
     // Explicit shadowPath and minimum blur remove dependence on content height.
     UIView *haloParent=host.superview;
-    CALayer *haloTarget=animated ? (haloParent.layer.presentationLayer ?: haloParent.layer) : haloParent.layer;
-    CGAffineTransform haloMap=haloTarget ? LayerMap(source,haloTarget) : CGAffineTransformIdentity;
+    CALayer *haloTarget=hasPair ? haloParent.layer.presentationLayer : haloParent.layer;
+    CALayer *haloSource=source;
+    if (!haloTarget) { haloTarget=haloParent.layer; haloSource=best.layer; }
+    CGAffineTransform haloMap=haloTarget ? LayerMap(haloSource,haloTarget) : CGAffineTransformIdentity;
     CGRect haloRect=CGRectApplyAffineTransform(bounds,haloMap);
     double haloRadius=fmin(radius,MSOpticalRadius(haloRect.size.width,haloRect.size.height,0));
     UIBezierPath *haloPath=[UIBezierPath bezierPathWithRoundedRect:haloRect cornerRadius:haloRadius];
@@ -291,6 +315,6 @@ void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edgeOptIn) {
     [CATransaction commit];
     if (MSDiagnosticsActive() && now-state.lastLog >= 1) {
         state.lastLog=now;
-        MSDiagnosticsLog(@"Glass",[NSString stringWithFormat:@"rim=%d geometry=%d presentation=%d halo=%d h=%.2f radius=%.2f thickness=%.2f dynamics=%.2f color=%d valid=%d capture=%@ opacity=%.3f path=(%.1f,%.1f,%.1f,%.1f)",rim,MSRuntimeFlag(@"RimGeometryEnabled"),animated,halo,bounds.size.height,radius,thickness,dynamics,color,state.colorsValid,state.sampleResult ?: @"off",opacity,rect.origin.x,rect.origin.y,rect.size.width,rect.size.height]);
+        MSDiagnosticsLog(@"Glass",[NSString stringWithFormat:@"rim=%d geometry=%d presentation=%d halo=%d h=%.2f radius=%.2f thickness=%.2f dynamics=%.2f color=%d valid=%d capture=%@ sampleMs=%.1f intervalMs=%.1f opacity=%.3f path=(%.1f,%.1f,%.1f,%.1f)",rim,MSRuntimeFlag(@"RimGeometryEnabled"),hasPair,halo,bounds.size.height,radius,thickness,dynamics,color,state.colorsValid,state.sampleResult ?: @"off",state.sampleCost*1000,sampleInterval*1000,opacity,rect.origin.x,rect.origin.y,rect.size.width,rect.size.height]);
     }
 }
