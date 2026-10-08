@@ -104,6 +104,9 @@ static UIView *CreateBackground(BOOL mango, CGRect rect) {
     objc_setAssociatedObject(view, &GlassModeKey, @(mango), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     return view;
 }
+static BOOL MSRuntimeFlag(NSString *key) { return [key isEqualToString:@"IdleEnabled"]; }
+static BOOL IslandEdgeOptIn(void) { return YES; }
+static void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edge) { (void)host; (void)idle; (void)edge; }
 /* ACTUAL_MEDIA_HELPERS */
 static UIView *View(Class cls, UIWindow *window) {
     UIView *view = [cls new];

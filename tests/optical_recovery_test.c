@@ -3,6 +3,7 @@
 #undef main
 #include "../modules/orientation/RecoveryPolicy.h"
 #include "../modules/visual/MangoIdleIsland/OpticalMath.h"
+#include "../src/DiagnosticsPolicy.h"
 
 int main(void) {
     MSSplitOwnership state={0}; Fixture fixture=upright();
@@ -64,6 +65,14 @@ int main(void) {
     MSRGB q={0,0,0};
     for (unsigned i=0;i<30;i++) q=MSColorSmooth(q,target,1.0/30,.5);
     assert(fabs(p.r-q.r)<1e-9 && fabs(p.g-q.g)<1e-9);
+    assert(MSDiagnosticSessionActive(1,100,100));
+    assert(MSDiagnosticSessionActive(1,100,1299.99));
+    assert(!MSDiagnosticSessionActive(1,100,1300));
+    assert(!MSDiagnosticSessionActive(0,100,110));
+    assert(!MSDiagnosticSessionActive(1,0,110));
+    assert(!MSDiagnosticSessionActive(1,NAN,110));
+    assert(!MSDiagnosticSessionActive(1,100,99));
+    assert(MSDiagnosticSessionActive(1,1300,1301));
     puts("PASS: real recovery policy handles Dock/library scene remap, no repeated turns, foreign ownership, independent off, bounded direction bridge, capsule degeneracy, area/saturation color choice and frame-rate-independent smoothing");
     return 0;
 }

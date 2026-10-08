@@ -30,6 +30,7 @@ static int Failures;
 @implementation UIView
 @end
 
+static BOOL MSRuntimeFlag(NSString *key) { return [key isEqualToString:@"IdleEnabled"]; }
 /* ACTUAL_HELPERS */
 /* ACTUAL_POLICY_EXPRESSIONS */
 

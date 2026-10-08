@@ -48,6 +48,30 @@ int main(void) {
     @autoreleasepool {
         normalAndOriginalException();
         restoreExceptionReleasesRecursionGuard();
+        id gesture=[NSObject new], other=[NSObject new];
+        __block __weak id scope=nil;
+        __block unsigned depth=0, calls=0;
+        CGPoint translation=CGPointMake(15,40),velocity=CGPointMake(12,-80);
+        assert(Same(MSB9PanQueryValue(translation,gesture,scope,depth,YES),translation));
+        for (unsigned throws=0;throws<=1;throws++) {
+            BOOL caught=NO;
+            @try {
+                MSB9RunPanQueries(gesture,^{
+                    ++calls;
+                    assert(scope==gesture && depth==1);
+                    assert(Same(MSB9PanQueryValue(translation,gesture,scope,depth,YES),CGPointMake(15,-40)));
+                    assert(Same(MSB9PanQueryValue(velocity,gesture,scope,depth,YES),CGPointMake(12,80)));
+                    assert(Same(MSB9PanQueryValue(translation,other,scope,depth,YES),translation));
+                    assert(Same(MSB9PanQueryValue(translation,gesture,scope,depth,NO),translation));
+                    MSB9RunPanQueries(other,^{ assert(scope==other && depth==2); },&scope,&depth);
+                    assert(scope==gesture && depth==1);
+                    if (throws) [NSException raise:@"QueryCallback" format:@"expected"];
+                },&scope,&depth);
+            } @catch (NSException *exception) { caught=[exception.name isEqualToString:@"QueryCallback"]; }
+            assert(caught==(BOOL)throws && !scope && depth==0);
+        }
+        assert(calls==2);
+        puts("PASS: production Beta9 pan query scope covers translation/velocity, other gesture and thread passthrough, nested calls and exception cleanup without recognizer mutation");
         puts("PASS: actual production pan helper, temporary y only, one original call, normal/exception restoration, recursion guard recovery");
     }
     return 0;

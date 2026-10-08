@@ -514,19 +514,17 @@ static BOOL OwnsGestureWindow(UIView *view) {
 static void (*OriginalMangoPan)(id, SEL, id);
 static void (*OriginalPillPan)(id, SEL, id);
 static CGPoint (*OriginalTranslation)(id,SEL,UIView *), (*OriginalVelocity)(id,SEL,UIView *);
-static __weak UIPanGestureRecognizer *ScopedPan;
+static __weak id ScopedPan;
 static unsigned PanDepth;
 static BOOL PanInstalled;
 static unsigned PanAttempts;
 static CGPoint HookTranslation(id gesture,SEL selector,UIView *view) {
     CGPoint value=OriginalTranslation(gesture,selector,view);
-    if (PanDepth && gesture==ScopedPan && NSThread.isMainThread) value.y=-value.y;
-    return value;
+    return MSB9PanQueryValue(value,gesture,ScopedPan,PanDepth,NSThread.isMainThread);
 }
 static CGPoint HookVelocity(id gesture,SEL selector,UIView *view) {
     CGPoint value=OriginalVelocity(gesture,selector,view);
-    if (PanDepth && gesture==ScopedPan && NSThread.isMainThread) value.y=-value.y;
-    return value;
+    return MSB9PanQueryValue(value,gesture,ScopedPan,PanDepth,NSThread.isMainThread);
 }
 static void RunMangoPan(id controller, SEL selector, UIPanGestureRecognizer *gesture, void (*original)(id,SEL,id)) {
     if (!MSRuntimeFlag(@"SwipeDirectionEnabled") || !NSThread.isMainThread || PanDepth || !Enabled || Busy || Depth || B9Disabled(Disabled) ||
@@ -552,9 +550,7 @@ static void RunMangoPan(id controller, SEL selector, UIPanGestureRecognizer *ges
     // Correct both Ended queries without changing recognizer state. Native
     // callbacks may consume velocity as well as translation. Other gestures,
     // horizontal movement and Began/Changed drag behavior pass through.
-    ScopedPan=gesture; ++PanDepth;
-    @try { original(controller,selector,gesture); }
-    @finally { --PanDepth; ScopedPan=nil; }
+    MSB9RunPanQueries(gesture,^{ original(controller,selector,gesture); },&ScopedPan,&PanDepth);
 }
 static void HookMangoPan(id controller,SEL selector,UIPanGestureRecognizer *gesture) { RunMangoPan(controller,selector,gesture,OriginalMangoPan); }
 static void HookPillPan(id controller,SEL selector,UIPanGestureRecognizer *gesture) { RunMangoPan(controller,selector,gesture,OriginalPillPan); }

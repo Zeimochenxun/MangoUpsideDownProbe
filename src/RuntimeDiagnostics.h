@@ -10,6 +10,7 @@
 #include <time.h>
 #include <math.h>
 #import "RuntimeSettings.h"
+#include "DiagnosticsPolicy.h"
 
 // This recorder observes existing decisions; it never sets a view or preference.
 // Each translation unit has a finite session. All callers are on the main queue.
@@ -19,7 +20,7 @@ static inline BOOL MSDiagnosticsActive(void) {
     id token = MSRuntimeSettings()[@"DebugSessionToken"];
     double began = [token isKindOfClass:NSNumber.class] ? [token doubleValue] : 0;
     double now = NSDate.date.timeIntervalSince1970;
-    return isfinite(began) && began > 0 && now >= began && now-began < 1200;
+    return MSDiagnosticSessionActive(1,began,now);
 }
 
 static inline void MSDiagnosticsLog(NSString *module, NSString *message) {
