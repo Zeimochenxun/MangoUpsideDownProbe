@@ -98,9 +98,11 @@ static BOOL SuiteFlag(NSString *key) {
         [_specifiers addObject:slider];
     }
     [self addSwitch:@"7 通知上下滑动方向修复（暂停）" key:@"SwipeDirectionEnabled"];
-    [_specifiers.lastObject setProperty:@NO forKey:@"enabled"];
+    PSSpecifier *pausedSwipe=_specifiers.lastObject;
+    [pausedSwipe setProperty:@NO forKey:@"enabled"];
     [self addSection:nil];
-    [_specifiers.lastObject setProperty:@"上一版通知上滑后进入安全模式，本版已停用方向改写并保留原有选择。通知动作暂由 Mango 原版处理；保留的开关值不会启用这项改写。" forKey:@"footerText"];
+    PSSpecifier *pauseHelp=_specifiers.lastObject;
+    [pauseHelp setProperty:@"上一版通知上滑后进入安全模式，本版已停用方向改写并保留原有选择。通知动作暂由 Mango 原版处理；保留的开关值不会启用这项改写。" forKey:@"footerText"];
     [self addSection:@"调试"];
     PSSpecifier *diagnostics = [PSSpecifier preferenceSpecifierNamed:@"调试日志与一键提取" target:self set:nil get:nil detail:NSClassFromString(@"MangoSuiteDiagnosticsController") cell:PSLinkCell edit:nil];
     [_specifiers addObject:diagnostics];
