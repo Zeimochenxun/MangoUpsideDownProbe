@@ -5,7 +5,7 @@
 #include <stdio.h>
 
 int main(int argc,const char *argv[]) { @autoreleasepool {
-    assert(argc==2);
+    assert(argc==3);
     assert(MSWritePreferenceFlag(@"Enabled",NO,NULL));
     assert(MSWritePreferenceFlag(@"DebugEnabled",YES,NULL));
     assert(MSWritePreferenceValue(@"DebugSessionToken",@(NSDate.date.timeIntervalSince1970),NULL));
@@ -22,7 +22,9 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     // Load a harmless host fixture to prove the observer reports a stale or
     // externally loaded suite image even when its own planned mask is zero.
     void *handle=dlopen(argv[1],RTLD_NOW|RTLD_LOCAL);assert(handle);
+    void *outside=dlopen(argv[2],RTLD_NOW|RTLD_LOCAL);assert(outside);
     NSString *after=MSStartupSnapshot(0,YES);
+    assert([after containsString:@"repairImagesAnyPath=5"]);
     assert([after containsString:@"suiteImagesCurrently=1"] && [after containsString:@"image=MangoIdleIsland.dylib source=suite-module UUID="]);
     NSFileManager *files=NSFileManager.defaultManager;
     NSString *directory=[NSString stringWithUTF8String:jbroot("/var/mobile/Library/Logs")];
@@ -32,6 +34,6 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     NSString *text=[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
     assert([text containsString:@"version=1.2.0~beta9.6"] && [text containsString:@"plannedMask=0"] && [text containsString:@"suiteImagesCurrently=1"]);
     // This is a test fixture with no constructor or hooks, not a loaded tweak.
-    assert(!dlclose(handle));
-    puts("PASS: production startup observer records with master disabled, checks bounded UUID commands and detects an already loaded suite image despite a zero planned mask");
+    assert(!dlclose(handle));assert(!dlclose(outside));
+    puts("PASS: production startup observer records with master disabled, checks bounded UUID commands and detects already loaded modules both inside and outside the suite directory despite a zero planned mask");
 } return 0; }

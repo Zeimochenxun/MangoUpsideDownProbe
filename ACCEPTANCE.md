@@ -4,7 +4,7 @@
 
 1. 安装完整 Beta9.6 后在多巴胺中重新启动用户空间，重新打开设置，确认通知崩溃隔离默认开启且旧选择保留。
 2. 先点击“提取最近 SpringBoard 崩溃报告与日志”，保存与此前上滑时刻对应的原始报告；不需要反复触发崩溃。未找到时说明结果，可单独提供已有 .ips／.crash。
-3. 导出已有日志后再开始记录，约两秒后提取全部日志。核对实际 compiled-loader、plannedMask、isolationAtStartup 与 suiteImagesCurrently。仅安装版本标签不能证明旧进程已退出。
+3. 导出已有日志后再开始记录，约两秒后提取全部日志。核对实际 compiled-loader、plannedMask、isolationAtStartup 与 suiteImagesCurrently、repairImagesAnyPath、legacyOrientationImage。仅安装版本标签不能证明旧进程已退出。
 4. 隔离下静止玻璃、光晕、轮廓、采色、分屏与 World／小芒补偿不应由整合包加载。Mango 原版自身效果仍可能显示，不要把原生效果视为隔离失效。
 5. 正常使用时记录通知动作的方向、手机方向和异常时刻。若再次进入安全模式，保存报告与现有会话，停止重复该动作，不先重开会话覆盖筛选条件。
 6. 只有取得真实调用栈并完成后续修复后，才恢复对左右资源库、底部设置、1／3／4／5／7的完整真机验收。隔离没有崩溃也不能证明七项问题已经修复。

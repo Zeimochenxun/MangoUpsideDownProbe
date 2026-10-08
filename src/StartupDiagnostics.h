@@ -23,7 +23,8 @@ static inline NSString *MSImageUUID(const struct mach_header *header) {
 }
 static inline NSString *MSStartupSnapshot(unsigned plannedMask,BOOL isolationAtStartup) {
     NSMutableArray<NSString *> *images=[NSMutableArray new];
-    unsigned suitePresent=0,total=0;
+    unsigned suitePresent=0,repairPresent=0,total=0;
+    BOOL legacy=NO;
     for (uint32_t i=0;i<_dyld_image_count();i++) {
         const char *raw=_dyld_get_image_name(i);
         if (!raw) continue;
@@ -33,6 +34,11 @@ static inline NSString *MSStartupSnapshot(unsigned plannedMask,BOOL isolationAtS
             [name hasPrefix:@"Mango"] || [name isEqualToString:@"AMangoSuiteLoader.dylib"];
         if (!interesting) continue;
         total++;
+        if ([name isEqualToString:@"MangoIdleIsland.dylib"]) repairPresent|=1;
+        if ([name isEqualToString:@"MangoIslandAdaptiveColor.dylib"]) repairPresent|=2;
+        if ([name isEqualToString:@"MangoUpsideDownWorld.dylib"]) repairPresent|=4;
+        if ([name isEqualToString:@"MangoSplitUpsideDownFix.dylib"]) repairPresent|=8;
+        if ([name isEqualToString:@"MangoUpsideDownFix.dylib"] || [name isEqualToString:@"MangoOrientationProbe.dylib"]) legacy=YES;
         if (suite) {
             if ([name isEqualToString:@"MangoIdleIsland.dylib"]) suitePresent|=1;
             if ([name isEqualToString:@"MangoIslandAdaptiveColor.dylib"]) suitePresent|=2;
@@ -41,8 +47,8 @@ static inline NSString *MSStartupSnapshot(unsigned plannedMask,BOOL isolationAtS
         }
         if (images.count<64) [images addObject:[NSString stringWithFormat:@"image=%@ source=%@ UUID=%@",name,suite ? @"suite-module" : @"other-injection-or-native",MSImageUUID(_dyld_get_image_header(i))]];
     }
-    return [NSString stringWithFormat:@"STARTUP compiled-loader=1.2.0~beta9.6 plannedMask=%u isolationAtStartup=%d isolationRequested=%d suiteImagesCurrently=%u interestingImageCount=%u truncated=%d hook-installation=unknown\n%@",
-        plannedMask,isolationAtStartup,MSPreferenceFlag(MSRuntimeSettings(),@"CrashIsolationEnabled"),suitePresent,total,total>64,[images componentsJoinedByString:@"\n"]];
+    return [NSString stringWithFormat:@"STARTUP compiled-loader=1.2.0~beta9.6 plannedMask=%u isolationAtStartup=%d isolationRequested=%d suiteImagesCurrently=%u repairImagesAnyPath=%u legacyOrientationImage=%d interestingImageCount=%u truncated=%d hook-installation=unknown\n%@",
+        plannedMask,isolationAtStartup,MSPreferenceFlag(MSRuntimeSettings(),@"CrashIsolationEnabled"),suitePresent,repairPresent,legacy,total,total>64,[images componentsJoinedByString:@"\n"]];
 }
 static inline void MSStartStartupDiagnostics(unsigned plannedMask,BOOL isolationAtStartup) {
     static dispatch_source_t timer;

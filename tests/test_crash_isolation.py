@@ -21,6 +21,9 @@ with tempfile.TemporaryDirectory(prefix="mango-crash-isolation-") as temporary:
     fixture_source=work/"fixture.c"
     fixture_source.write_text("int no_hooks_fixture(void) { return 1; }\n",encoding="utf-8")
     subprocess.run(["xcrun","clang","-dynamiclib",str(fixture_source),"-o",str(fixture)],check=True)
+    outside=work/"Library/MobileSubstrate/DynamicLibraries/MangoUpsideDownWorld.dylib"
+    outside.parent.mkdir(parents=True)
+    subprocess.run(["xcrun","clang","-dynamiclib",str(fixture_source),"-o",str(outside)],check=True)
     binary=work/"startup-test"
     subprocess.run(common+[str(host/"StartupRecordingCheck.m"),str(host/"RootHide.m"),str(ROOT/"src/SuitePreferences.m"),"-o",str(binary)],check=True)
-    subprocess.run([str(binary),str(fixture)],env=env,check=True)
+    subprocess.run([str(binary),str(fixture),str(outside)],env=env,check=True)

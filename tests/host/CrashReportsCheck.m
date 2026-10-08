@@ -31,6 +31,16 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     assert(link(outside.fileSystemRepresentation,[[source stringByAppendingPathComponent:@"SpringBoard-hardlink.ips"] fileSystemRepresentation])==0);
     assert([[NSMutableData dataWithLength:2*1024*1024+1] writeToFile:[source stringByAppendingPathComponent:@"SpringBoard-huge.ips"] atomically:YES]);
     assert([files createDirectoryAtPath:[source stringByAppendingPathComponent:@"SpringBoard-directory.ips"] withIntermediateDirectories:NO attributes:nil error:NULL]);
+    NSString *unicodeSource=[root stringByAppendingPathComponent:@"unicode-reports"];
+    assert([files createDirectoryAtPath:unicodeSource withIntermediateDirectories:YES attributes:nil error:NULL]);
+    NSMutableData *unicode=[[@"Process: SpringBoard [99]\n" dataUsingEncoding:NSUTF8StringEncoding] mutableCopy];
+    if ((16384-unicode.length)%3==0) [unicode appendData:[@"x" dataUsingEncoding:NSUTF8StringEncoding]];
+    NSMutableString *body=[NSMutableString new];for (int i=0;i<6000;i++) [body appendString:@"你"];
+    [unicode appendData:[body dataUsingEncoding:NSUTF8StringEncoding]];
+    assert(![[NSString alloc] initWithData:[unicode subdataWithRange:NSMakeRange(0,16384)] encoding:NSUTF8StringEncoding]);
+    assert([unicode writeToFile:[unicodeSource stringByAppendingPathComponent:@"SpringBoard-unicode.crash"] atomically:YES]);
+    NSArray<NSURL *> *unicodeCopy=MSCopyRecentSpringBoardReports(@[unicodeSource],[root stringByAppendingPathComponent:@"unicode-export"],NULL);
+    assert(unicodeCopy.count==1 && [[NSData dataWithContentsOfURL:unicodeCopy[0]] isEqual:unicode]);
     NSError *error=nil;NSArray<NSURL *> *copied=MSCopyRecentSpringBoardReports(@[source,source],output,&error);
     assert(copied.count==3 && !error);
     for (unsigned i=0;i<3;i++) {
@@ -45,5 +55,5 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     assert([other writeToFile:blocked atomically:YES]);
     assert(!MSCopyRecentSpringBoardReports(@[source],blocked,&error) && error);
     assert([[NSData dataWithContentsOfFile:blocked] isEqual:other]);
-    puts("PASS: production crash collector copies the newest three complete matching reports, preserves source bytes, deduplicates candidates and rejects symlink/hardlink/oversize/wrong-process/directory inputs; empty and blocked destinations handled");
+    puts("PASS: production crash collector copies the newest three complete matching reports, preserves source bytes, deduplicates candidates and rejects symlink/hardlink/oversize/wrong-process/directory inputs; UTF-8 boundary, empty and blocked destinations handled");
 } return 0; }

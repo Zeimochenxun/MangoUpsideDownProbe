@@ -29,6 +29,7 @@ Suite `1.2.0~beta9.6`，用于 Mango **1.0-Beta9-1 / iOS 16.5 / Dopamine RootHid
 - `compiled-loader=1.2.0~beta9.6`：当前观察器的实际编译版本。
 - `plannedMask=0 isolationAtStartup=1`：本进程启动时没有计划加载整合修复模块。
 - `suiteImagesCurrently=0`：当时 SpringBoard 的 dyld 列表没有整合目录的模块镜像；若非0，不能视为完成隔离。
+- `repairImagesAnyPath=0 legacyOrientationImage=0`：同时核对整合目录之外的同名修复模块和旧方向模块；目录内为0并不排除外部副本。
 - 已加载 Mango／注入镜像的文件名与内存 UUID，用于比较旧代码及其它注入。最多记录64个相关镜像，标明是否截断。
 
 这里记录的是镜像存在和启动决策，不判断每个挂钩是否安装，也不能单独排除 Mango 原版、其它插件或 backboardd 旧进程的影响。隔离和总开关关闭时仍可启用 Startup 记录。其余模块不加载时没有相应的新日志是预期。

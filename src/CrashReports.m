@@ -32,6 +32,7 @@ static BOOL SpringBoardData(NSData *data,NSString *extension) {
     }
     NSData *head=[data subdataWithRange:NSMakeRange(0,MIN(data.length,16384))];
     NSString *text=[[NSString alloc] initWithData:head encoding:NSUTF8StringEncoding];
+    if (!text && data.length>head.length) text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if (!text) return NO;
     NSRegularExpression *process=[NSRegularExpression regularExpressionWithPattern:@"(?m)^Process:[ \\t]+SpringBoard(?:[ \\t]|$)" options:0 error:NULL];
     return [process firstMatchInString:text options:0 range:NSMakeRange(0,text.length)]!=nil;
