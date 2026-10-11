@@ -59,7 +59,7 @@ static BOOL SuiteFlag(NSString *key) {
 
     [self addSection:@"灵动岛外观"];
     [self addSwitch:@"静止灵动岛与过渡修复" key:@"IdleEnabled"];
-    [self addSwitch:@"静止灵动岛黑色光晕（跟随 Mango 光晕设置）" key:@"IdleGlowEnabled"];
+    [self addSwitch:@"静止灵动岛黑色光晕（圆形，跟随 Mango 透明度/范围）" key:@"IdleGlowEnabled"];
     PSSpecifier *glass = [PSSpecifier preferenceSpecifierNamed:@"玻璃与边缘光参数" target:self set:nil get:nil detail:NSClassFromString(@"MangoSuiteGlassController") cell:PSLinkCell edit:nil];
     [_specifiers addObject:glass];
 
