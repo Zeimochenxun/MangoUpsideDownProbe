@@ -7,9 +7,7 @@
 #import <string.h>
 #import "Policy.h"
 #import "SuitePreferences.h"
-#import "StartupDiagnostics.h"
 #import "Beta9Compatibility.h"
-#import "PillSwipe.h"
 
 static BOOL HasImage(const char *filename) {
     for (uint32_t i = 0; i < _dyld_image_count(); ++i) {
@@ -52,24 +50,19 @@ __attribute__((constructor)) static void StartSuite(void) {
         BOOL backboard = [process isEqualToString:@"backboardd"];
         if (!springboard && !backboard) return;
 
-        NSError *readError = nil;
-        NSDictionary *snapshot = MSReadPreferences(&readError);
-        BOOL isolation=MSPreferenceFlag(snapshot,@"CrashIsolationEnabled");
-        // Switch 7 is independent of module isolation: it is one gesture-argument
-        // substitution (see PillSwipe.h) and loads no module.
-        if (springboard && snapshot && MSPreferenceFlag(snapshot,@"Enabled") && MSPreferenceFlag(snapshot,@"SwipeDirectionEnabled"))
-            MSPillSwipeInstall();
-        if (!snapshot || isolation) {
-            NSLog(@"[MangoSuite] version=1.2.0~beta9.7 process=%@ isolation=1 startup-mask=0 no-modules-loaded preferences=%@",process,readError.localizedDescription ?: @"available");
-            if (springboard) MSStartStartupDiagnostics(0,YES);
-            return;
-        }
-
-        // Identity verification still guards every non-isolated load path.
+        // Read installed identities before hooks load. Adaptive must intercept
+        // shader construction before MangoOSRendering initializes in backboardd.
+        // This is a compatibility check, not an authorization or signature check.
         NSError *compatibilityError = nil;
         if (!MSValidateBeta9Files(&compatibilityError)) {
             NSLog(@"[MangoSuite] Beta9 modules not loaded: %@", compatibilityError.localizedDescription);
-            if (springboard) MSStartStartupDiagnostics(0,NO);
+            return;
+        }
+
+        NSError *readError = nil;
+        NSDictionary *snapshot = MSReadPreferences(&readError);
+        if (!snapshot) {
+            NSLog(@"[MangoSuite] preferences unavailable; modules not loaded: %@", readError);
             return;
         }
 
@@ -89,8 +82,8 @@ __attribute__((constructor)) static void StartSuite(void) {
                                   HasImage("MangoOrientationProbe.dylib");
         BOOL optical = MSPreferenceFlag(snapshot,@"RimGeometryEnabled") || MSPreferenceFlag(snapshot,@"GlassAnimationEnabled") ||
                        MSPreferenceFlag(snapshot,@"ShortHaloEnabled") || MSPreferenceFlag(snapshot,@"EdgeColorEnabled");
-        unsigned modules = MSModulesWithIsolation(state, springboard ? MS_SPRINGBOARD : MS_BACKBOARD, optical, isolation);
-        NSLog(@"[MangoSuite] version=1.2.0~beta9.7 process=%@ startup-mask=%u changes=require-userspace-restart", process, modules);
+        unsigned modules = MSModulesWithOptics(state, springboard ? MS_SPRINGBOARD : MS_BACKBOARD, optical);
+        NSLog(@"[MangoSuite] version=1.2.0~beta9.8 process=%@ startup-mask=%u changes=require-userspace-restart", process, modules);
         if (state.legacyOrientation) NSLog(@"[MangoSuite] legacy orientation hook detected; orientation modules suppressed");
 
         // The renderer process must receive the shader hook during startup.
@@ -99,6 +92,5 @@ __attribute__((constructor)) static void StartSuite(void) {
         if (modules & MS_WORLD) LoadModule(@"MangoUpsideDownWorld");
         if (modules & MS_SPLIT) LoadModule(@"MangoSplitUpsideDownFix");
         if (modules & MS_IDLE) LoadModule(@"MangoIdleIsland");
-        if (springboard) MSStartStartupDiagnostics(modules,isolation);
     }
 }

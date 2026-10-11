@@ -51,15 +51,11 @@ static BOOL SuiteFlag(NSString *key) {
     _specifiers = [NSMutableArray new];
 
     PSSpecifier *notice = [PSSpecifier emptyGroupSpecifier];
-    [notice setProperty:@"本插件为mango插件的自改补丁，仅自用。Beta9.7 仍为崩溃隔离诊断版，默认停用整合补丁；新增第7项倒置通知上下滑修复，不受隔离开关影响。此前问题和通知上滑崩溃尚未确认解决。" forKey:@"footerText"];
+    [notice setProperty:@"本插件为mango插件的自改补丁，仅自用" forKey:@"footerText"];
     [_specifiers addObject:notice];
 
     [self addSection:@"总开关"];
     [self addSwitch:@"启用整合修复" key:@"Enabled"];
-    [self addSection:@"通知崩溃隔离"];
-    PSSpecifier *isolationHelp=_specifiers.lastObject;
-    [isolationHelp setProperty:@"默认开启。重新启动用户空间后，全部整合补丁停止加载，Mango 原版继续运行；各项原有选择保留。此模式用于定位，原有问题可能继续存在。关闭隔离后会恢复补丁，当前通知上滑崩溃仍未定位。更改后务必在多巴胺中重新启动用户空间。" forKey:@"footerText"];
-    [self addSwitch:@"完全隔离整合补丁（需重启用户空间）" key:@"CrashIsolationEnabled"];
 
     [self addSection:@"灵动岛外观"];
     [self addSwitch:@"静止灵动岛与过渡修复" key:@"IdleEnabled"];
@@ -92,7 +88,7 @@ static BOOL SuiteFlag(NSString *key) {
     [self addSwitch:@"4 调整位置大小保持倒置" key:@"IslandLayoutEnabled"];
     [self addSwitch:@"5 短通知黑色光晕修复" key:@"ShortHaloEnabled"];
     [self addSwitch:@"6 灵动岛边缘实时采色" key:@"EdgeColorEnabled"];
-    for (NSDictionary *row in @[@{@"name":@"灵动岛边缘粗细（点）", @"key":@"EdgeThickness", @"min":@.5, @"max":@4.0},
+    for (NSDictionary *row in @[@{@"name":@"采色边缘粗细（点）", @"key":@"EdgeThickness", @"min":@.5, @"max":@4.0},
                                 @{@"name":@"采色边缘动态程度", @"key":@"EdgeDynamics", @"min":@0.0, @"max":@1.0}]) {
         PSSpecifier *slider = [PSSpecifier preferenceSpecifierNamed:row[@"name"] target:self set:@selector(writeValue:specifier:) get:@selector(readValue:) detail:nil cell:PSSliderCell edit:nil];
         [slider setProperty:row[@"key"] forKey:@"key"];
@@ -101,10 +97,7 @@ static BOOL SuiteFlag(NSString *key) {
         [slider setProperty:@YES forKey:@"showValue"];
         [_specifiers addObject:slider];
     }
-    [self addSwitch:@"7 倒置时通知上下滑动方向修复" key:@"SwipeDirectionEnabled"];
-    [self addSection:nil];
-    PSSpecifier *swipeHelp=_specifiers.lastObject;
-    [swipeHelp setProperty:@"仅在界面倒置时、通知手势结束瞬间，把 Mango 读取的纵向滑动方向换成屏幕上看到的方向；不改手势识别器，不加载模块。关闭或方向不对时可关掉此项，重新启动用户空间后生效。" forKey:@"footerText"];
+    [self addSwitch:@"7 通知上下滑动方向修复" key:@"SwipeDirectionEnabled"];
     [self addSection:@"调试"];
     PSSpecifier *diagnostics = [PSSpecifier preferenceSpecifierNamed:@"调试日志与一键提取" target:self set:nil get:nil detail:NSClassFromString(@"MangoSuiteDiagnosticsController") cell:PSLinkCell edit:nil];
     [_specifiers addObject:diagnostics];
@@ -144,7 +137,7 @@ static BOOL SuiteFlag(NSString *key) {
         if (!saved) [self showMessage:error.localizedDescription ?: @"请重新打开设置后检查当前倒置开关。" title:@"保存失败"];
         return;
     }
-    NSArray *known = [@[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled", @"DebugEnabled", @"CrashIsolationEnabled"] arrayByAddingObjectsFromArray:MSRepairKeys()];
+    NSArray *known = [@[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled", @"DebugEnabled"] arrayByAddingObjectsFromArray:MSRepairKeys()];
     if (![known containsObject:key] || ![value isKindOfClass:NSNumber.class]) return;
     BOOL enabled = [value boolValue];
     NSError *saveError = nil;

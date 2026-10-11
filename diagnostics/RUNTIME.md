@@ -1,15 +1,8 @@
-# Beta9.6 日志与崩溃报告
+# Beta9.3 调试记录与提取
 
-设置 → Mango 整合 → 调试日志与一键提取。
-
-优先点击“提取最近 SpringBoard 崩溃报告与日志”，取得此前上滑时刻对应的 .ips／.crash 和已有会话。不必反复触发，也不要先重开会话。最多复制3份合格完整报告，每份2MB；只读同用户普通文件并确认 SpringBoard 进程，原文件不改。候选路径、权限、扫描和读取上限可能使导出为空，空结果不能排除崩溃。
-
-保存已有记录后，再开始／重新开始记录。即使整合修复停用，Foundation 启动观察器仍可记录约两秒内的实际 loaded image 状态。每会话20分钟、每模块256KB；关闭记录后停止写入。
-
-Startup 字段：compiled-loader 实际编译版本；plannedMask 启动加载计划；isolationAtStartup 启动时隔离状态；isolationRequested 当前保存状态；suiteImagesCurrently 当前 SpringBoard dyld 中整合目录模块位图（Idle=1、Adaptive=2、World=4、Split=8）。repairImagesAnyPath 另记录任何路径的四个同名修复模块，legacyOrientationImage 标记旧方向／探针镜像。镜像存在不代表其挂钩已安装，列表最多64项且注明截断。
-
-成功的本次隔离记录应为 Beta9.6、plannedMask=0、isolationAtStartup=1、suiteImagesCurrently=0、repairImagesAnyPath=0、legacyOrientationImage=0。开关已改但旧模块仍存在时，先核对用户空间重启；SpringBoard 记录不能证明 backboardd 旧进程已经退出。更改隔离开关后需在多巴胺中重新启动用户空间。
-
-隔离下 Idle／Glass／World／Split 模块不加载，缺少这些新记录是预期。Mango 原版和其它注入仍存在，安全模式根因需真实报告的崩溃线程与镜像对照。启动记录和没有复现均不能视为七项问题已修复。
-
-附带 shell 工具仍仅采集已有日志快照，不注入、不改偏好、不重启，也不代替设置页的崩溃报告导出。
+在设置 → Mango 整合 → 调试日志与一键提取中点击开始记录，复现后点击提取。无需运行终端工具。
+默认关闭，记录会话持续20分钟，可再次点击开始重新计时。每模块256KB、每秒最多8条。日志保存在 RootHide 映射的 /var/mobile/Library/Logs/MangoSuiteDiagnostics，模块名为 Idle、Glass、World、Split。
+导出通过系统分享页面生成有界文本，记录开关、会话、尺寸、物理坐标、方向、变换所有权、手势补偿和采色接口状态。不会导出通知文字、媒体内容、完整设置域或截图。
+Glass 中的 display-pixels 表示从可用的系统屏幕接口取像，springboard-window-pixels 表示窗口快照回退，不能证明前台 App 已被捕获。采集失败会记录不可用并移除采色效果。所有像素仅在一次采样的内存中使用。
+底层读写拒绝符号链接和非常规文件，文件只由手机 mobile 用户读写。现有 capture-runtime.sh 作为手动备用提取工具保留。
+日志只提供排查证据；最终显示与触摸结果仍需要手机上的观察。

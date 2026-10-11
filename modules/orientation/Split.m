@@ -8,7 +8,6 @@
 #import "../../src/RuntimeSettings.h"
 #include "SplitReconcile.h"
 #include "RecoveryPolicy.h"
-#import "LauncherSurfaces.h"
 #include <math.h>
 
 static const char *Disabled = "/var/mobile/Library/Preferences/MangoSplitUpsideDownFix.disabled";
@@ -457,10 +456,7 @@ static void Reconcile(void) {
                 DiagnosticBegin(active, resolved, all);
             } @catch (__unused NSException *exception) { DiagnosticPass = NO; }
         }
-        for (UIWindow *w in Windows.allObjects) {
-            Update(w, active);
-            MSLauncherSurfacesObserve(w.rootViewController);
-        }
+        for (UIWindow *w in Windows.allObjects) Update(w, active);
         // Inactive windows can lack patch ownership. The fallback observes
         // exact plain UIWindows only; it never adds them to the real Windows.
         if (DiagnosticPass && MSDiagnosticsActive())
