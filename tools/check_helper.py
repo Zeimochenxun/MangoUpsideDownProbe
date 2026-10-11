@@ -35,8 +35,10 @@ for filename in sys.argv[1:]:
                    b"RimGeometryEnabled", b"LauncherRecoveryEnabled", b"GlassAnimationEnabled", b"IslandLayoutEnabled",
                    b"ShortHaloEnabled", b"EdgeColorEnabled", b"SwipeDirectionEnabled", b"EdgeThickness", b"EdgeDynamics", b"DebugEnabled", b"CrashIsolationEnabled", b"exportCrashReports", b"MSCopyRecentSpringBoardReports"]:
         assert string in prefs, string
-    assert b"compiled-loader=1.2.0~beta9.6" in content[binaries[0]][0]
+    assert b"compiled-loader=1.2.0~beta9.7" in content[binaries[0]][0]
     assert b"suiteImagesCurrently" in content[binaries[0]][0]
+    for string in (b"MangoPillElement", b"handlePanGesture:", b"pill swipe installed"):
+        assert string in content[binaries[0]][0], string
     optical=content["Library/MobileSubstrate/DynamicLibraries/MangoIdleIsland.dylib"][0]
     for string in (b"MangoSuiteOwnedOpticalRim",b"MangoSuiteOwnedNotificationHalo",b"UIGetScreenImage"):
         assert string in optical,string

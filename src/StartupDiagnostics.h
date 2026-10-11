@@ -47,7 +47,7 @@ static inline NSString *MSStartupSnapshot(unsigned plannedMask,BOOL isolationAtS
         }
         if (images.count<64) [images addObject:[NSString stringWithFormat:@"image=%@ source=%@ UUID=%@",name,suite ? @"suite-module" : @"other-injection-or-native",MSImageUUID(_dyld_get_image_header(i))]];
     }
-    return [NSString stringWithFormat:@"STARTUP compiled-loader=1.2.0~beta9.6 plannedMask=%u isolationAtStartup=%d isolationRequested=%d suiteImagesCurrently=%u repairImagesAnyPath=%u legacyOrientationImage=%d interestingImageCount=%u truncated=%d hook-installation=unknown\n%@",
+    return [NSString stringWithFormat:@"STARTUP compiled-loader=1.2.0~beta9.7 plannedMask=%u isolationAtStartup=%d isolationRequested=%d suiteImagesCurrently=%u repairImagesAnyPath=%u legacyOrientationImage=%d interestingImageCount=%u truncated=%d hook-installation=unknown\n%@",
         plannedMask,isolationAtStartup,MSPreferenceFlag(MSRuntimeSettings(),@"CrashIsolationEnabled"),suitePresent,repairPresent,legacy,total,total>64,[images componentsJoinedByString:@"\n"]];
 }
 static inline void MSStartStartupDiagnostics(unsigned plannedMask,BOOL isolationAtStartup) {

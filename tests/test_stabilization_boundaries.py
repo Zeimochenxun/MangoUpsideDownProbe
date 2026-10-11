@@ -33,13 +33,26 @@ split=(ROOT/'modules/orientation/Split.m').read_text(encoding='utf-8')
 assert 'MSSplitReconcileRecovery(&owned,active,1,RootSnapshot,RootWrite' in split
 assert 'MSLauncherSurfacesInstall(' not in split
 prefs=(ROOT/'prefs/Prefs.m').read_text(encoding='utf-8')
-assert '7 通知上下滑动方向修复（暂停）' in prefs
-assert 'if ([key isEqualToString:@"SwipeDirectionEnabled"]) return;' in prefs
+assert '7 倒置时通知上下滑动方向修复' in prefs and '暂停' not in prefs
+assert 'if ([key isEqualToString:@"SwipeDirectionEnabled"]) return;' not in prefs
+pill=(ROOT/'src/PillSwipe.h').read_text(encoding='utf-8')
+def check_pill(text):
+    assert 'MSHookMessageEx(' not in text and 'UIPanGestureRecognizer' not in text
+    assert 'setTranslation' not in text and 'dlopen(' not in text and '#import <UIKit/' not in text
+    assert text.count('class_replaceMethod(')==1 and '"MangoPillElement"' in text and '"handlePanGesture:"' in text
+    assert 'MSPillStateEnded' in text and 'MSPillIMPIsBeta9Hello(' in text
+check_pill(pill)
+for addition in ('MSHookMessageEx(UIPanGestureRecognizer.class,a,b,c);','[gesture setTranslation:p inView:v];','#import <UIKit/UIKit.h>'):
+    try: check_pill(pill+chr(10)+addition)
+    except AssertionError: pass
+    else: raise AssertionError('Pill swipe mutation path was not rejected')
 print('PASS: compiled-source boundaries exclude global pan rewrite, child surface writes, native glass-mask replacement and synchronous notification refresh; negative controls rejected')
 
 loader=(ROOT/'src/Loader.m').read_text(encoding='utf-8')
 assert 'MSModulesWithIsolation(state,' in loader
 assert 'MSStartStartupDiagnostics(modules,isolation)' in loader
+assert loader.count('MSPillSwipeInstall();')==1 and loader.index('MSPillSwipeInstall();')<loader.index('if (!snapshot || isolation) {')
+assert 'springboard && snapshot' in loader and '@"SwipeDirectionEnabled"' in loader
 startup=(ROOT/'src/StartupDiagnostics.h').read_text(encoding='utf-8')
 assert not any(x in startup for x in ('MSHookMessageEx(', 'dlopen(', '#import <UIKit/'))
 recording=(ROOT/'src/RuntimeRecording.h').read_text(encoding='utf-8')

@@ -41,6 +41,8 @@ jobs:
         run: |
           cc -Wall -Wextra -Werror tests/policy.c -o /tmp/mangosuite-policy
           /tmp/mangosuite-policy
+          cc -Wall -Wextra -Werror tests/pill_swipe_test.c -lm -o /tmp/pill-swipe-test
+          /tmp/pill-swipe-test
 
       - name: Verify Settings entry, persistence, and native independence
         run: python3 tests/test_settings_entry.py

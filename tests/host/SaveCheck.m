@@ -148,17 +148,19 @@ int main(int argc, const char *argv[]) {
             PSListController *reopened=[root new];
             Require(![[reopened readValue:Item(reopened,@"CrashIsolationEnabled")] boolValue], @"isolation selection read back");
             puts("PASS: actual isolation UI preserves sibling selections, persists explicit opt out, defaults on and fails closed for malformed values");
-        } else if ([mode isEqual:@"paused-swipe"]) {
+        } else if ([mode isEqual:@"swipe"]) {
             for (NSNumber *seed in @[@NO,@YES]) {
                 Require(MSWritePreferenceFlag(@"SwipeDirectionEnabled",seed.boolValue,NULL), @"seed existing swipe selection");
-                NSDictionary *before=MSReadPreferences(NULL);
                 PSListController *reopened=[root new];
-                Require(![[Item(reopened,@"SwipeDirectionEnabled") propertyForKey:@"enabled"] boolValue], @"paused control visibly disabled");
-                Write(reopened,@"SwipeDirectionEnabled",!seed.boolValue);
-                Require([MSReadPreferences(NULL) isEqualToDictionary:before], @"paused setter preserves all preferences including prior swipe value");
+                id enabled=[Item(reopened,@"SwipeDirectionEnabled") propertyForKey:@"enabled"];
+                Require(!enabled || [enabled boolValue], @"swipe control is usable");
                 Require([[reopened readValue:Item(reopened,@"SwipeDirectionEnabled")] boolValue]==seed.boolValue, @"prior selection remains visible");
+                NSMutableDictionary *expected=[MSReadPreferences(NULL) mutableCopy];expected[@"SwipeDirectionEnabled"]=@(!seed.boolValue);
+                Write(reopened,@"SwipeDirectionEnabled",!seed.boolValue);
+                Require([MSReadPreferences(NULL) isEqualToDictionary:expected], @"swipe setter changes only its own preference");
+                Require([[reopened readValue:Item(reopened,@"SwipeDirectionEnabled")] boolValue]==!seed.boolValue, @"new selection read back");
             }
-            puts("PASS: actual paused swipe UI disables action and preserves both prior values and sibling preferences");
+            puts("PASS: actual swipe UI is usable, saves only its own value and reads it back");
         } else if ([mode isEqual:@"failure"]) {
             unsigned before = ReadMask(controller);
             Write(controller, @"Enabled", !(before & 1));

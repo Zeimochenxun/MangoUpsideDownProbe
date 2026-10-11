@@ -9,6 +9,7 @@
 #import "SuitePreferences.h"
 #import "StartupDiagnostics.h"
 #import "Beta9Compatibility.h"
+#import "PillSwipe.h"
 
 static BOOL HasImage(const char *filename) {
     for (uint32_t i = 0; i < _dyld_image_count(); ++i) {
@@ -54,8 +55,12 @@ __attribute__((constructor)) static void StartSuite(void) {
         NSError *readError = nil;
         NSDictionary *snapshot = MSReadPreferences(&readError);
         BOOL isolation=MSPreferenceFlag(snapshot,@"CrashIsolationEnabled");
+        // Switch 7 is independent of module isolation: it is one gesture-argument
+        // substitution (see PillSwipe.h) and loads no module.
+        if (springboard && snapshot && MSPreferenceFlag(snapshot,@"Enabled") && MSPreferenceFlag(snapshot,@"SwipeDirectionEnabled"))
+            MSPillSwipeInstall();
         if (!snapshot || isolation) {
-            NSLog(@"[MangoSuite] version=1.2.0~beta9.6 process=%@ isolation=1 startup-mask=0 no-modules-loaded preferences=%@",process,readError.localizedDescription ?: @"available");
+            NSLog(@"[MangoSuite] version=1.2.0~beta9.7 process=%@ isolation=1 startup-mask=0 no-modules-loaded preferences=%@",process,readError.localizedDescription ?: @"available");
             if (springboard) MSStartStartupDiagnostics(0,YES);
             return;
         }
@@ -85,7 +90,7 @@ __attribute__((constructor)) static void StartSuite(void) {
         BOOL optical = MSPreferenceFlag(snapshot,@"RimGeometryEnabled") || MSPreferenceFlag(snapshot,@"GlassAnimationEnabled") ||
                        MSPreferenceFlag(snapshot,@"ShortHaloEnabled") || MSPreferenceFlag(snapshot,@"EdgeColorEnabled");
         unsigned modules = MSModulesWithIsolation(state, springboard ? MS_SPRINGBOARD : MS_BACKBOARD, optical, isolation);
-        NSLog(@"[MangoSuite] version=1.2.0~beta9.6 process=%@ startup-mask=%u changes=require-userspace-restart", process, modules);
+        NSLog(@"[MangoSuite] version=1.2.0~beta9.7 process=%@ startup-mask=%u changes=require-userspace-restart", process, modules);
         if (state.legacyOrientation) NSLog(@"[MangoSuite] legacy orientation hook detected; orientation modules suppressed");
 
         // The renderer process must receive the shader hook during startup.

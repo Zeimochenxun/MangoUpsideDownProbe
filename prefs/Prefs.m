@@ -51,7 +51,7 @@ static BOOL SuiteFlag(NSString *key) {
     _specifiers = [NSMutableArray new];
 
     PSSpecifier *notice = [PSSpecifier emptyGroupSpecifier];
-    [notice setProperty:@"本插件为mango插件的自改补丁，仅自用。Beta9.6 为崩溃隔离诊断版，默认停用整合补丁；此前问题和通知上滑崩溃尚未确认解决。" forKey:@"footerText"];
+    [notice setProperty:@"本插件为mango插件的自改补丁，仅自用。Beta9.7 仍为崩溃隔离诊断版，默认停用整合补丁；新增第7项倒置通知上下滑修复，不受隔离开关影响。此前问题和通知上滑崩溃尚未确认解决。" forKey:@"footerText"];
     [_specifiers addObject:notice];
 
     [self addSection:@"总开关"];
@@ -101,12 +101,10 @@ static BOOL SuiteFlag(NSString *key) {
         [slider setProperty:@YES forKey:@"showValue"];
         [_specifiers addObject:slider];
     }
-    [self addSwitch:@"7 通知上下滑动方向修复（暂停）" key:@"SwipeDirectionEnabled"];
-    PSSpecifier *pausedSwipe=_specifiers.lastObject;
-    [pausedSwipe setProperty:@NO forKey:@"enabled"];
+    [self addSwitch:@"7 倒置时通知上下滑动方向修复" key:@"SwipeDirectionEnabled"];
     [self addSection:nil];
-    PSSpecifier *pauseHelp=_specifiers.lastObject;
-    [pauseHelp setProperty:@"上一版通知上滑后进入安全模式，本版已停用方向改写并保留原有选择。通知动作暂由 Mango 原版处理；保留的开关值不会启用这项改写。" forKey:@"footerText"];
+    PSSpecifier *swipeHelp=_specifiers.lastObject;
+    [swipeHelp setProperty:@"仅在界面倒置时、通知手势结束瞬间，把 Mango 读取的纵向滑动方向换成屏幕上看到的方向；不改手势识别器，不加载模块。关闭或方向不对时可关掉此项，重新启动用户空间后生效。" forKey:@"footerText"];
     [self addSection:@"调试"];
     PSSpecifier *diagnostics = [PSSpecifier preferenceSpecifierNamed:@"调试日志与一键提取" target:self set:nil get:nil detail:NSClassFromString(@"MangoSuiteDiagnosticsController") cell:PSLinkCell edit:nil];
     [_specifiers addObject:diagnostics];
@@ -133,7 +131,6 @@ static BOOL SuiteFlag(NSString *key) {
 
 - (void)writeValue:(id)value specifier:(PSSpecifier *)specifier {
     NSString *key = [specifier propertyForKey:@"key"];
-    if ([key isEqualToString:@"SwipeDirectionEnabled"]) return;
     if ([key isEqualToString:@"EdgeThickness"] || [key isEqualToString:@"EdgeDynamics"]) {
         NSError *error = nil;
         if (!MSWritePreferenceValue(key, value, &error)) [self showMessage:error.localizedDescription title:@"保存失败"];

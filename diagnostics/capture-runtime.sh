@@ -25,7 +25,7 @@ mango_metadata=$mango_dir/metadata.txt
 mango_limit=1048576
 
 {
-    printf 'SCRIPT_REVISION=3\nDIAGNOSTIC_VERSION=1.2.0~beta9.6\nMODE=immediate-snapshot\n'
+    printf 'SCRIPT_REVISION=3\nDIAGNOSTIC_VERSION=1.2.0~beta9.7\nMODE=immediate-snapshot\n'
     printf 'START_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf 'CAPTURE_LIMIT_BYTES_PER_FILE=%s\nLOGGER_TTL_SECONDS=1200\nLOGGER_LIMIT_BYTES_PER_FILE=262144\n' "$mango_limit"
     printf 'PATH_POLICY=shell and rootfs are separate candidates; existence does not establish current-process provenance\n'

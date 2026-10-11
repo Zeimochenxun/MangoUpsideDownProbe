@@ -1,12 +1,23 @@
-# Mango Suite Beta9.6 崩溃隔离诊断版
+# Mango Suite Beta9.7 崩溃隔离诊断版 + 倒置通知上下滑修复
 
-Suite `1.2.0~beta9.6`，用于 Mango **1.0-Beta9-1 / iOS 16.5 / Dopamine RootHide / arm64e**。
+Suite `1.2.0~beta9.7`，用于 Mango **1.0-Beta9-1 / iOS 16.5 / Dopamine RootHide / arm64e**。
 
 用户确认 Beta9.5 仍未修复，上滑通知仍进入安全模式。当前没有已证实的崩溃原因，也没有已通过真机的修复。本版提供完整隔离和直接提取崩溃报告的工具，原来的七项问题仍未解决。
 
+## 7 倒置时通知上下滑动方向修复（Beta9.7 新增）
+
+设置 → Mango 整合 → 第7项，默认开启，**不受“通知崩溃隔离”影响**：它不加载任何模块，只由加载器在 SpringBoard 里做一件事。
+
+- 已核对的 Beta9-1 `-[MangoPillElement handlePanGesture:]` 只向手势对象发 `state`、`view`、`translationInView:` 三个消息，且不看方向；手势结束时按纵向位移 ±30 判断两个竖向动作。
+- 界面倒置（Mango 方向为2，或状态栏为倒置而 Mango 报告竖屏／未知）且手势处于 Ended 时，用一个转发代理把传给原函数的手势换掉：代理的 `translationInView:` 返回“屏幕固定坐标系纵向位移取反”的值，其余消息原样转发。识别器本身不改，不挂钩 UIKit，原函数仍只执行一次。
+- 取反值来自屏幕固定坐标系，而不是视图自身变换：若视图链已把位移转成屏幕上看到的方向，则不替换。方向不是2、其他手势状态、开关关闭、非主线程、UUID／方法签名不是已核对的 Beta9-1 时一律交给原版。
+- 开关值在启动时读取，更改后需重新启动用户空间。方向不对时关掉此项即可回到 Mango 原版行为。
+
+**限制**：未连接手机，没有真机验证。“屏幕上看到的上／下”是按界面倒置后用户视角定义的；若实际期望的是“朝灵动岛方向”，应关闭此项并反馈。开启调试记录后，每次倒置通知滑动结束会在 Startup 记录写入一行 `PILLSWIPE ended …`，含原始纵向位移、固定坐标系位移、交给原函数的值和是否替换；没有这一行表示没有走到替换路径（例如方向不是2或钩子未安装），不表示没有崩溃。
+
 ## 安装与隔离
 
-覆盖安装完整 `MangoSuite-1.2.0-Beta9.6-RootHide-arm64e.deb`，在多巴胺中重新启动用户空间，然后重新打开设置 App。
+覆盖安装完整 `MangoSuite-1.2.0-Beta9.7-RootHide-arm64e.deb`，在多巴胺中重新启动用户空间，然后重新打开设置 App。
 
 **设置 → Mango 整合 → 通知崩溃隔离** 默认开启。新的进程启动时，整合包的静止玻璃／轮廓／光晕／采色、World／小芒、分屏和 backboardd 自适应模块全部停止加载。整合加载器只保留 Foundation 启动观察器和设置页，Mango 原版继续自行加载。
 
@@ -26,7 +37,7 @@ Suite `1.2.0~beta9.6`，用于 Mango **1.0-Beta9-1 / iOS 16.5 / Dopamine RootHid
 
 开始／重新开始记录后约两秒，Startup 日志记录：
 
-- `compiled-loader=1.2.0~beta9.6`：当前观察器的实际编译版本。
+- `compiled-loader=1.2.0~beta9.7`：当前观察器的实际编译版本。
 - `plannedMask=0 isolationAtStartup=1`：本进程启动时没有计划加载整合修复模块。
 - `suiteImagesCurrently=0`：当时 SpringBoard 的 dyld 列表没有整合目录的模块镜像；若非0，不能视为完成隔离。
 - `repairImagesAnyPath=0 legacyOrientationImage=0`：同时核对整合目录之外的同名修复模块和旧方向模块；目录内为0并不排除外部副本。

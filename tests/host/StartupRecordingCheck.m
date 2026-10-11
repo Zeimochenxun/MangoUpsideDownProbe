@@ -32,7 +32,7 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     MSDiagnosticsLog(@"Startup",after);
     NSString *path=[directory stringByAppendingPathComponent:@"MangoSuiteDiagnostics/Startup.log"];
     NSString *text=[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
-    assert([text containsString:@"version=1.2.0~beta9.6"] && [text containsString:@"plannedMask=0"] && [text containsString:@"suiteImagesCurrently=1"]);
+    assert([text containsString:@"version=1.2.0~beta9.7"] && [text containsString:@"plannedMask=0"] && [text containsString:@"suiteImagesCurrently=1"]);
     // This is a test fixture with no constructor or hooks, not a loaded tweak.
     assert(!dlclose(handle));assert(!dlclose(outside));
     puts("PASS: production startup observer records with master disabled, checks bounded UUID commands and detects already loaded modules both inside and outside the suite directory despite a zero planned mask");
