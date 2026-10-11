@@ -536,13 +536,14 @@ static void RunMangoPan(id controller, SEL selector, UIPanGestureRecognizer *ges
     }
     UIView *view = gesture.view;
     MWTransform map=FixedMap(view);
-    NSInteger raw=0;BOOL owned=NO,inverted=NO;
+    NSInteger raw=0;BOOL owned=NO,inverted=NO,upright=NO;
     owned=OwnsGestureWindow(view);
     BOOL target=[view.window isKindOfClass:WindowClass] && !view.window.hidden;
-    BOOL correction=MSB9PanNeedsCorrection(raw=Orientation(),target,
-                              inverted=MWInvertedBasis(map.a,map.d,map.c,map.b));
+    inverted=MWInvertedBasis(map.a,map.d,map.c,map.b);
+    upright=MWUprightBasis(map.a,map.d,map.c,map.b);
+    BOOL correction=MSB10PanNeedsFlip(raw=Orientation(),upright);
     if(MSDiagnosticsActive()) @try {
-        MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN ended entry=%@ view=%p window=%p resolvedDirection=%ld apertureTarget=%d actualOwned=%d actualViewInverted=%d correction=%d",NSStringFromSelector(selector),(__bridge void *)view,(__bridge void *)view.window,(long)raw,target,owned,inverted,correction]);
+        MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN ended entry=%@ view=%p window=%p windowClass=%@ resolvedDirection=%ld apertureTarget=%d actualOwned=%d actualViewInverted=%d actualViewUpright=%d correction=%d",NSStringFromSelector(selector),(__bridge void *)view,(__bridge void *)view.window,NSStringFromClass(view.window.class),(long)raw,target,owned,inverted,upright,correction]);
     } @catch (__unused NSException *exception) {}
     if(!correction){
         original(controller,selector,gesture);return;
@@ -576,10 +577,11 @@ static void HookPillPan(id controller,SEL selector,UIPanGestureRecognizer *gestu
             NSInteger raw=Orientation();
             BOOL target=[view.window isKindOfClass:WindowClass] && !view.window.hidden;
             BOOL inverted=MWInvertedBasis(map.a,map.d,map.c,map.b);
-            BOOL correction=gates && MSB9PanNeedsCorrection(raw,target,inverted);
+            BOOL upright=MWUprightBasis(map.a,map.d,map.c,map.b);
+            BOOL correction=gates && MSB10PanNeedsFlip(raw,upright);
             CGPoint local=correction ? [gesture translationInView:view] : CGPointZero;
             BOOL usable=correction && isfinite(local.x) && isfinite(local.y);
-            if(MSDiagnosticsActive()) MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN pill-ended gates=%d flag=%d panDepth=%u enabled=%d busy=%d depth=%u disabled=%d direction=%ld window=%@ apertureTarget=%d viewInverted=%d map=(%.3f,%.3f,%.3f,%.3f) used=%d localY=%.2f handlerY=%.2f",gates,flag,PanDepth,Enabled,Busy,Depth,disabled,(long)raw,NSStringFromClass(view.window.class),target,inverted,map.a,map.b,map.c,map.d,usable,usable ? local.y : 0,usable ? -local.y : 0]);
+            if(MSDiagnosticsActive()) MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN pill-ended gates=%d flag=%d panDepth=%u enabled=%d busy=%d depth=%u disabled=%d direction=%ld window=%@ apertureTarget=%d viewInverted=%d viewUpright=%d map=(%.3f,%.3f,%.3f,%.3f) used=%d localY=%.2f handlerY=%.2f",gates,flag,PanDepth,Enabled,Busy,Depth,disabled,(long)raw,NSStringFromClass(view.window.class),target,inverted,upright,map.a,map.b,map.c,map.d,usable,usable ? local.y : 0,usable ? -local.y : 0]);
             if (usable) argument=MWPillProxy(gesture,CGPointMake(local.x,-local.y));
         }
     } @catch (__unused NSException *exception) { argument=gesture; }

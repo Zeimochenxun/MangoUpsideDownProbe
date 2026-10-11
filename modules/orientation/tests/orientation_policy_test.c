@@ -20,6 +20,10 @@ int main(void) {
     assert(!MSB8PanNeedsCorrection(0,1,1));
     assert(!MSB8PanNeedsCorrection(3,1,1));
     assert(!MSB8PanNeedsCorrection(4,1,1));
+    // Beta9.9 device log: flip only an unturned view while the interface is upside-down.
+    assert(MSB10PanNeedsFlip(2,1));
+    assert(!MSB10PanNeedsFlip(2,0));
+    assert(!MSB10PanNeedsFlip(1,1) && !MSB10PanNeedsFlip(0,1) && !MSB10PanNeedsFlip(3,1) && !MSB10PanNeedsFlip(4,1));
     puts("PASS: shared orientation policy, transient portrait fallback, upright/landscape exits, physically owned pan semantics");
     return 0;
 }

@@ -24,6 +24,9 @@ int main(void) {
     assert(!MWInvertedBasis(-1,1,0,0));
     assert(!MWInvertedBasis(-1,-1,.02,0));
     assert(!MWInvertedBasis(NAN,-1,0,0));
+    assert(MWUprightBasis(1,1,0,0) && MWUprightBasis(1.042,1.042,0,0));
+    assert(!MWUprightBasis(-1,-1,0,0) && !MWUprightBasis(1,-1,0,0) && !MWUprightBasis(1,1,.02,0) && !MWUprightBasis(NAN,1,0,0));
+    assert(!(MWUprightBasis(1,1,0,0) && MWInvertedBasis(1,1,0,0)));
     MWTransform content = {-.9,0,0,-.9,23,17};
     MWTransform upright = MWCancelTurn(content);
     near(upright.a,.9); near(upright.d,.9);

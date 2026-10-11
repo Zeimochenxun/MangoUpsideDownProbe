@@ -22,6 +22,12 @@ static inline int MWInvertedBasis(double dx, double dy, double skewX, double ske
     return isfinite(dx)&&isfinite(dy)&&fabs(dx)>1e-5&&fabs(dy)>1e-5&&
         fabs(skewY)<=fabs(dx)*.001&&fabs(skewX)<=fabs(dy)*.001&&dx<0&&dy<0;
 }
+// Mirror of MWInvertedBasis for a view that reaches the fixed screen space
+// without any turn: both diagonal directions forward, negligible skew.
+static inline int MWUprightBasis(double dx, double dy, double skewX, double skewY) {
+    return isfinite(dx)&&isfinite(dy)&&fabs(dx)>1e-5&&fabs(dy)>1e-5&&
+        fabs(skewY)<=fabs(dx)*.001&&fabs(skewX)<=fabs(dy)*.001&&dx>0&&dy>0;
+}
 static inline int MWFinite(MWTransform t) {
     return isfinite(t.a)&&isfinite(t.b)&&isfinite(t.c)&&isfinite(t.d)&&isfinite(t.tx)&&isfinite(t.ty);
 }
