@@ -12,7 +12,7 @@
 #import <roothide.h>
 #import "../../../src/RuntimeDiagnostics.h"
 #import "IslandRepairs.h"
-#import "SiriOrb.h"
+#import "SiriSkin.h"
 #import "../../orientation/Beta9Identity.h"
 
 // Beta9-1 runtime surface verified against the supplied Mango binaries.
@@ -44,7 +44,7 @@ static dispatch_source_t Timer;
 static CADisplayLink *DisplayLink;
 static CFTimeInterval LastTransition;
 static uint64_t ParameterReloadGeneration;
-static char OrbKey, BackgroundKey, StateKey, LastElementHostKey, GlassModeKey, LastParameterReapplyKey, EdgeAttemptKey, EdgeSeenKey;
+static char SkinKey, BackgroundKey, StateKey, LastElementHostKey, GlassModeKey, LastParameterReapplyKey, EdgeAttemptKey, EdgeSeenKey;
 
 static NSString * const MangoDomain = @"com.go.mangoosprefs";
 static NSString * const IslandFilterType = @"go.mangoos.island";
@@ -486,10 +486,9 @@ static void Update(UIView *host) {
         // the inverse-opacity backing layer. Outside compact geometry it exits
         // immediately and never participates in press/preview motion.
         BOOL needBackground = MSRuntimeFlag(@"IdleEnabled") && NeedsIdleBacking(backgroundState, blendableActivity, activity);
-        // The Siri orb takes over the idle slot: same gating and the same
-        // inverse-activity handoff as the glass backing, which stays detached.
-        BOOL orbMode = needBackground && MSRuntimeFlag(@"SiriOrbEnabled");
-        if (orbMode) needBackground = NO;
+        // The Siri skin rides on the glass backing: same pill, same gating, same
+        // inverse-activity handoff. Glass keeps the refraction; the skin adds the look.
+        BOOL skinMode = needBackground && MSRuntimeFlag(@"SiriSkinEnabled");
         BOOL constructor = needBackground && GlassConstructorVerified && !GlassConstructionFailed;
         BOOL mango = constructor && (OriginalIslandGlassSeen || MangoGlassSetting());
         BOOL upgrading = needBackground && bg && mango && ![objc_getAssociatedObject(bg, &GlassModeKey) boolValue];
@@ -529,22 +528,22 @@ static void Update(UIView *host) {
             }
         }
 
-        UIView *orb = objc_getAssociatedObject(host, &OrbKey);
-        if (orbMode) {
-            if (!orb) {
-                orb = MSSiriOrbCreate();
-                objc_setAssociatedObject(host, &OrbKey, orb, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                Log([NSString stringWithFormat:@"[ORB] created host=%p size=%.2fx%.2f", (void *)host, host.bounds.size.width, host.bounds.size.height]);
+        UIView *skin = objc_getAssociatedObject(host, &SkinKey);
+        if (skinMode && bg.superview == host) {
+            if (!skin) {
+                skin = MSSiriSkinCreate();
+                objc_setAssociatedObject(host, &SkinKey, skin, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                Log([NSString stringWithFormat:@"[SKIN] created host=%p size=%.2fx%.2f glass=%d", (void *)host, host.bounds.size.width, host.bounds.size.height, [objc_getAssociatedObject(bg, &GlassModeKey) boolValue]]);
             }
-            CGFloat orbOpacity = backgroundState ? 1.0 : MAX(0, MIN(1, 1 - activity));
+            CGFloat skinOpacity = backgroundState ? 1.0 : MAX(0, MIN(1, 1 - activity));
             [UIView performWithoutAnimation:^{
                 [CATransaction begin];
                 [CATransaction setDisableActions:YES];
-                MSSiriOrbSync(orb, host, orbOpacity);
+                MSSiriSkinSync(skin, host, bg, skinOpacity);
                 [CATransaction commit];
             }];
-        } else if (orb.superview) {
-            [UIView performWithoutAnimation:^{ [orb removeFromSuperview]; }];
+        } else if (skin.superview) {
+            [UIView performWithoutAnimation:^{ [skin removeFromSuperview]; }];
         }
 
         MSIslandRepairUpdate(host, bg, IslandEdgeOptIn());
