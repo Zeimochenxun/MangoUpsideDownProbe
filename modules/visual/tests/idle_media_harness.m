@@ -85,7 +85,7 @@ static Class WindowClass, ElementClass;
 static BOOL InUpdate, Disabled, OriginalIslandGlassSeen, GlassConstructorVerified, GlassConstructionFailed;
 // External playback enters production only in the deliberate negative control.
 static BOOL PlaybackIsPlaying;
-static char BackgroundKey, StateKey, GlassModeKey;
+static char OrbKey, BackgroundKey, StateKey, GlassModeKey;
 static NSHashTable<UIView *> *Hosts;
 static void (*OriginalLayout)(id, SEL);
 static NSUInteger NativeLayouts, Pulses;
@@ -107,6 +107,8 @@ static UIView *CreateBackground(BOOL mango, CGRect rect) {
 static BOOL MSRuntimeFlag(NSString *key) { return [key isEqualToString:@"IdleEnabled"]; }
 static BOOL IslandEdgeOptIn(void) { return YES; }
 static void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edge) { (void)host; (void)idle; (void)edge; }
+static UIView *MSSiriOrbCreate(void) { return View(UIView.class, nil); }
+static void MSSiriOrbSync(UIView *orb, UIView *host, CGFloat opacity) { (void)orb; (void)host; (void)opacity; }
 /* ACTUAL_MEDIA_HELPERS */
 static UIView *View(Class cls, UIWindow *window) {
     UIView *view = [cls new];
