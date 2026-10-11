@@ -59,7 +59,7 @@ static BOOL SuiteFlag(NSString *key) {
 
     [self addSection:@"灵动岛外观"];
     [self addSwitch:@"静止灵动岛与过渡修复" key:@"IdleEnabled"];
-    [self addSwitch:@"静止灵动岛 Siri 质感（iOS 27 样式）" key:@"SiriSkinEnabled"];
+    [self addSwitch:@"静止灵动岛黑色光晕（跟随 Mango 光晕设置）" key:@"IdleGlowEnabled"];
     PSSpecifier *glass = [PSSpecifier preferenceSpecifierNamed:@"玻璃与边缘光参数" target:self set:nil get:nil detail:NSClassFromString(@"MangoSuiteGlassController") cell:PSLinkCell edit:nil];
     [_specifiers addObject:glass];
 
@@ -138,7 +138,7 @@ static BOOL SuiteFlag(NSString *key) {
         if (!saved) [self showMessage:error.localizedDescription ?: @"请重新打开设置后检查当前倒置开关。" title:@"保存失败"];
         return;
     }
-    NSArray *known = [@[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled", @"DebugEnabled", @"SiriSkinEnabled"] arrayByAddingObjectsFromArray:MSRepairKeys()];
+    NSArray *known = [@[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled", @"DebugEnabled", @"IdleGlowEnabled"] arrayByAddingObjectsFromArray:MSRepairKeys()];
     if (![known containsObject:key] || ![value isKindOfClass:NSNumber.class]) return;
     BOOL enabled = [value boolValue];
     NSError *saveError = nil;

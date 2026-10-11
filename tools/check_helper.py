@@ -33,9 +33,9 @@ for filename in sys.argv[1:]:
                    b"IdleEnabled", b"AdaptiveEnabled", b"WorldEnabled", b"SplitEnabled",
                    b"LeXiang.UpsideDown.Enabled", b"com.go.mangoosprefs", b"MangoSuiteDiagnosticsController",
                    b"RimGeometryEnabled", b"LauncherRecoveryEnabled", b"GlassAnimationEnabled", b"IslandLayoutEnabled",
-                   b"ShortHaloEnabled", b"EdgeColorEnabled", b"SwipeDirectionEnabled", b"EdgeThickness", b"EdgeDynamics", b"DebugEnabled", b"SiriSkinEnabled"]:
+                   b"ShortHaloEnabled", b"EdgeColorEnabled", b"SwipeDirectionEnabled", b"EdgeThickness", b"EdgeDynamics", b"DebugEnabled", b"IdleGlowEnabled"]:
         assert string in prefs, string
     optical=content["Library/MobileSubstrate/DynamicLibraries/MangoIdleIsland.dylib"][0]
-    for string in (b"MangoSuiteOwnedOpticalRim",b"MangoSuiteOwnedNotificationHalo",b"UIGetScreenImage",b"MangoSuiteSiriSkin"):
+    for string in (b"MangoSuiteOwnedOpticalRim",b"MangoSuiteOwnedNotificationHalo",b"UIGetScreenImage",b"MangoSuiteIdleGlow"):
         assert string in optical,string
     print("PASS: five compiled images, current arm64e ABI, signatures, process scopes, and native Settings integration")
