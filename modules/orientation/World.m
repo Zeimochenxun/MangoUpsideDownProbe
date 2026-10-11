@@ -295,6 +295,7 @@ static BOOL KeepsWorld(UIView *root, MWWorldState *state, UIWindow *window) {
         MWKeepWorld(Math(window.transform),Math(state.outer.after),state.outer.applied,
                     state.suspended,FixedMap(window),FixedMap(root));
 }
+static void PillStatus(void);
 static void ReconcileRoot(UIView *root) {
     MWWorldState *state=State(root);UIWindow *window=root.window;
     if (state.suspended && MSRuntimeFlag(@"IslandLayoutEnabled") &&
@@ -377,7 +378,7 @@ static void Reconcile(void) {
             for (UIWindow *w in Windows.allObjects) Discover(w);
             for (UIView *root in Roots.allObjects) ReconcileRoot(root);
         }];
-    } @finally { Busy = NO; DiagnosticWorldScan(decisionRead,decision); }
+    } @finally { Busy = NO; DiagnosticWorldScan(decisionRead,decision); PillStatus(); }
 }
 static BOOL Relevant(UIView *v){
     if([v isKindOfClass:WindowClass])return YES;
@@ -565,21 +566,33 @@ static unsigned PillPanAttempts;
 static void HookPillPan(id controller,SEL selector,UIPanGestureRecognizer *gesture) {
     id argument=gesture;
     @try {
-        if (MSRuntimeFlag(@"SwipeDirectionEnabled") && NSThread.isMainThread && !PanDepth && Enabled && !Busy && !Depth && !B9Disabled(Disabled) &&
-            [gesture isKindOfClass:UIPanGestureRecognizer.class] && gesture.state==UIGestureRecognizerStateEnded) {
+        BOOL isPan=[gesture isKindOfClass:UIPanGestureRecognizer.class];
+        BOOL ended=isPan && gesture.state==UIGestureRecognizerStateEnded;
+        if (ended && NSThread.isMainThread) {
+            BOOL flag=MSRuntimeFlag(@"SwipeDirectionEnabled"), disabled=B9Disabled(Disabled);
+            BOOL gates=flag && !PanDepth && Enabled && !Busy && !Depth && !disabled;
             UIView *view=gesture.view;
             MWTransform map=FixedMap(view);
             NSInteger raw=Orientation();
             BOOL target=[view.window isKindOfClass:WindowClass] && !view.window.hidden;
             BOOL inverted=MWInvertedBasis(map.a,map.d,map.c,map.b);
-            BOOL correction=MSB9PanNeedsCorrection(raw,target,inverted);
+            BOOL correction=gates && MSB9PanNeedsCorrection(raw,target,inverted);
             CGPoint local=correction ? [gesture translationInView:view] : CGPointZero;
             BOOL usable=correction && isfinite(local.x) && isfinite(local.y);
-            if(MSDiagnosticsActive()) MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN ended entry=%@ view=%p window=%p resolvedDirection=%ld apertureTarget=%d actualViewInverted=%d correction=%d localY=%.2f handlerY=%.2f attempts=%u",NSStringFromSelector(selector),(__bridge void *)view,(__bridge void *)view.window,(long)raw,target,inverted,usable,usable ? local.y : 0,usable ? -local.y : 0,PillPanAttempts]);
+            if(MSDiagnosticsActive()) MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN pill-ended gates=%d flag=%d panDepth=%u enabled=%d busy=%d depth=%u disabled=%d direction=%ld window=%@ apertureTarget=%d viewInverted=%d map=(%.3f,%.3f,%.3f,%.3f) used=%d localY=%.2f handlerY=%.2f",gates,flag,PanDepth,Enabled,Busy,Depth,disabled,(long)raw,NSStringFromClass(view.window.class),target,inverted,map.a,map.b,map.c,map.d,usable,usable ? local.y : 0,usable ? -local.y : 0]);
             if (usable) argument=MWPillProxy(gesture,CGPointMake(local.x,-local.y));
         }
     } @catch (__unused NSException *exception) { argument=gesture; }
     OriginalPillPan(controller,selector,argument);
+}
+// Written once per diagnostic session: without it a missing hook and a hook
+// that never fires look identical in the log.
+static void PillStatus(void) {
+    static double session;
+    double current=[MSRuntimeSettings()[@"DebugSessionToken"] doubleValue];
+    if (!MSDiagnosticsActive() || session==current) return;
+    session=current;
+    MSDiagnosticsLog(@"World",[NSString stringWithFormat:@"PAN status pillInstalled=%d pillAttempts=%u resizeInstalled=%d resizeAttempts=%u worldEnabled=%d",PillPanInstalled,PillPanAttempts,PanInstalled,PanAttempts,Enabled]);
 }
 static void InstallPillPan(void) {
     if(PillPanInstalled || !Enabled || B9Disabled(Disabled))return;
