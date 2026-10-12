@@ -72,7 +72,7 @@ BOOL MSWritePreferenceValue(NSString *key, id value, NSError **error) {
     if (error) *error = nil;
     NSString *path = MSPreferencesPath();
     NSArray *known = [@[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled",
-        @"DebugEnabled", @"DebugSessionToken", @"EdgeThickness", @"EdgeDynamics", @"IdleGlowEnabled", @"IdleGlowDensity", @"IdleGlowFade"] arrayByAddingObjectsFromArray:MSRepairKeys()];
+        @"DebugEnabled", @"DebugSessionToken", @"EdgeThickness", @"EdgeDynamics", @"IdleGlowEnabled", @"IdleGlowShineEnabled", @"IdleGlowDensity", @"IdleGlowFade"] arrayByAddingObjectsFromArray:MSRepairKeys()];
     BOOL valid = [known containsObject:key] && [value isKindOfClass:NSNumber.class] && isfinite([value doubleValue]);
     if ([key isEqualToString:@"EdgeThickness"]) valid = valid && [value doubleValue] >= .5 && [value doubleValue] <= 4;
     if ([key isEqualToString:@"EdgeDynamics"]) valid = valid && [value doubleValue] >= 0 && [value doubleValue] <= 1;

@@ -19,12 +19,12 @@ int main(int argc, const char *argv[]) {
             if (item.cellType == PSSwitchCell) [keys addObject:[item propertyForKey:@"key"]];
             if (item.cellType == PSLinkCell) [links addObject:NSStringFromClass(item.detailClass)];
         }
-        NSArray *required = @[@"Enabled", @"IdleEnabled", @"IdleGlowEnabled", @"AdaptiveEnabled", @"LeXiang.UpsideDown.Enabled", @"WorldEnabled", @"SplitEnabled", @"RimGeometryEnabled", @"LauncherRecoveryEnabled", @"GlassAnimationEnabled", @"IslandLayoutEnabled", @"ShortHaloEnabled", @"EdgeColorEnabled", @"SwipeDirectionEnabled"];
+        NSArray *required = @[@"Enabled", @"IdleEnabled", @"IdleGlowEnabled", @"IdleGlowShineEnabled", @"RimGeometryEnabled", @"GlassAnimationEnabled", @"ShortHaloEnabled", @"EdgeColorEnabled", @"AdaptiveEnabled", @"LeXiang.UpsideDown.Enabled", @"WorldEnabled", @"SplitEnabled", @"LauncherRecoveryEnabled", @"IslandLayoutEnabled", @"SwipeDirectionEnabled"];
         NSArray *children = @[@"MangoSuiteGlassController", @"MangoIslandAdaptiveColorPrefsController", @"MangoSuiteDiagnosticsController"];
         if (![keys isEqual:required] || ![links isEqual:children]) {
             NSLog(@"FAIL switches=%@ links=%@", keys, links); return 1;
         }
-        puts("PASS: NSBundle opens the root page with native upside-down, master, four repair switches and both parameter links");
+        puts("PASS: NSBundle opens the regrouped root page: master, idle glow, glass/edge, adaptive color, upside-down switches and all three parameter links");
         return 0;
     }
 }

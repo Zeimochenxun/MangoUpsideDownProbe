@@ -4,13 +4,13 @@
 
 static NSString * const MaskName = @"MangoSuiteIdleGlowMask";
 
-typedef struct { double density, fade; } GlowParams;
+typedef struct { double density, fade; BOOL shine; } GlowParams;
 
 // Suite settings (Settings > Mango Suite > Island appearance): black density 0...1 (default 1) and the
 // fraction of the pill height at which the black has faded out (0.3...1, default 0.55 = a little
-// higher than the first preview's 0.65).
+// higher than the first preview's 0.65). IdleGlowShineEnabled switches the lower-edge light and the thin rim.
 static GlowParams ReadParams(void) {
-    return (GlowParams){ MSRuntimeNumber(@"IdleGlowDensity", 1, 0, 1), MSRuntimeNumber(@"IdleGlowFade", .55, .3, 1) };
+    return (GlowParams){ MSRuntimeNumber(@"IdleGlowDensity", 1, 0, 1), MSRuntimeNumber(@"IdleGlowFade", .55, .3, 1), MSRuntimeFlag(@"IdleGlowShineEnabled") };
 }
 
 static id Black(double alpha) { return (__bridge id)[UIColor colorWithWhite:0 alpha:alpha].CGColor; }
@@ -63,12 +63,13 @@ static CAGradientLayer *Vertical(NSArray *colors, NSArray<NSNumber *> *locations
 - (void)refresh {
     GlowParams p = ReadParams();
     CGSize s = self.bounds.size;
-    if (_hasApplied && p.density == _applied.density && p.fade == _applied.fade && CGSizeEqualToSize(s, _appliedSize)) return;
+    if (_hasApplied && p.density == _applied.density && p.fade == _applied.fade && p.shine == _applied.shine && CGSizeEqualToSize(s, _appliedSize)) return;
     _applied = p; _appliedSize = s; _hasApplied = YES;
     [CATransaction begin]; [CATransaction setDisableActions:YES];
     CGRect b = self.bounds;
     self.layer.cornerRadius = s.height / 2;
     for (CALayer *l in @[_dark, _shine, _rim, _ring]) l.frame = b;
+    _shine.hidden = _rim.hidden = !p.shine;
     _dark.colors = @[Black(p.density), Black(.55 * p.density), Black(0), Black(0)];
     _dark.locations = @[@0, @(.538 * p.fade), @(p.fade), @1];
     _ring.path = [UIBezierPath bezierPathWithRoundedRect:CGRectInset(b, .5, .5) cornerRadius:MAX(s.height / 2 - .5, 0)].CGPath;
