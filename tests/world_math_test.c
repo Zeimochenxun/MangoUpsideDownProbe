@@ -78,5 +78,16 @@ int main(void) {
     assert(near(reconstructed.x,top.x));
     assert(near(reconstructed.y,top.y));
 
-    puts("PASS: whole-world half-turn plus integrated opposite-edge placement geometry");
+    // Dock lift: proportional to progress, capped at the full lift.
+    assert(near(MWDockLift(0,35),0)&&near(MWDockLift(.5,35),17.5)&&near(MWDockLift(1,35),35));
+    assert(near(MWDockLift(1.3,35),35)&&near(MWDockLift(-.2,35),0)&&near(MWDockLift(NAN,35),0));
+    // Original layout rewrote the center: lift from its fresh value.
+    double y=MWDockCenterY(780,0,0,35);
+    assert(near(y,745));
+    // Original left our value alone: re-applying must not stack.
+    assert(near(MWDockCenterY(y,y,35,35),745));
+    // Back to upright (lift 0) restores the original value either way.
+    assert(near(MWDockCenterY(y,y,35,0),780));
+    assert(near(MWDockCenterY(780,y,35,0),780));
+    puts("PASS: whole-world half-turn, integrated opposite-edge placement geometry and dock lift");
 }

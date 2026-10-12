@@ -25,6 +25,18 @@ static inline int MWInvertedBasis(double dx, double dy, double skewX, double ske
 static inline int MWFinite(MWTransform t) {
     return isfinite(t.a)&&isfinite(t.b)&&isfinite(t.c)&&isfinite(t.d)&&isfinite(t.tx)&&isfinite(t.ty);
 }
+// Extra upward lift for the floating dock at presentation progress p (0 hidden,
+// 1 fully presented). Scaling with p instead of adding a fixed margin keeps the
+// finger travel that reaches p=1 unchanged: the same swipe just lifts further.
+static inline double MWDockLift(double progress, double lift) {
+    return isfinite(progress) ? lift*fmin(1,fmax(0,progress)) : 0;
+}
+// Dock center y after applying `lift`. If the original layout left our last
+// written value in place, undo our last lift first so lifts never stack.
+static inline double MWDockCenterY(double current, double lastSet, double lastLift, double lift) {
+    if (current == lastSet) current += lastLift;
+    return current - lift;
+}
 static inline int MWNear(MWTransform a, MWTransform b) {
     return fabs(a.a-b.a)<1e-6 && fabs(a.b-b.b)<1e-6 &&
         fabs(a.c-b.c)<1e-6 && fabs(a.d-b.d)<1e-6 &&

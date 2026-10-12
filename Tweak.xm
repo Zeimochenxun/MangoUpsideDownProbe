@@ -1,4 +1,4 @@
-// MangoUpsideDownWorld 1.2.0. Experimental; see EVIDENCE.md.
+// MangoUpsideDownWorld 1.3.0. Experimental; see EVIDENCE.md.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -919,6 +919,107 @@ static void InstallOrientationLockFix(void){
     MSHookMessageEx(OrientationLockClass,LockWithArgSel,(IMP)HookLockWithArg,(IMP *)&OrigLockWithArg);
 }
 
+// 1.3.0: iPad-style floating dock (Lynx 2 "useFloatingDock", i.e. SpringBoard's
+// own SBFloatingDock*) versus the notch. While SpringBoard is inverted the
+// dock's bottom edge is the physical top edge, where the iPhone 13 mini's
+// sensor housing covers part of it. Class and selector names come from iOS
+// 14.5 SpringBoard header dumps and are unverified on 16.5, so each goes
+// through Signature() and a mismatch installs nothing (see EVIDENCE.md).
+//
+// Dock: SBFloatingDockRootViewController -_layoutFloatingDockViewWithProgress:
+// places the dock for a presentation progress (0 hidden, 1 presented) inside
+// whatever animation block its caller opened. After it runs, the dock view's
+// center is lifted by NotchHeight*progress. Proportional, not a bigger
+// margin: the finger travel that reaches progress 1 is unchanged, the same
+// swipe just lifts further. Upright, the lift is 0.
+//
+// Home gesture: the edge-region test runs on the first touch. Inside the
+// notch's horizontal span the finger cannot land closer to the edge than the
+// notch's lower rim, so while a home-gesture recognizer's bottom edge is the
+// notch edge, its bottom-edge region is widened by NotchHeight for that one
+// touchesBegan: call and restored right after. The ears and every later
+// touch keep the stock region.
+static const CGFloat NotchHeight=35;    // ponytail: 13 mini housing, 5.35mm at 0.1537mm/pt; the calibration knob for any other device
+static const CGFloat NotchHalfWidth=95; // ~26mm (169pt) housing plus finger slack
+static SEL DockVCSel,TouchOrientationSel,EdgeRegionSel,SetEdgeRegionSel;
+static Class HomeGestureClass;
+// Whether v's +y points at the physical top edge, i.e. v's bottom is the notch.
+static BOOL DownIsNotch(UIView *v){
+    id<UICoordinateSpace> fixed=v.window.screen.fixedCoordinateSpace;
+    if(!fixed)return NO;
+    CGPoint o=[v convertPoint:CGPointZero toCoordinateSpace:fixed];
+    CGPoint d=[v convertPoint:CGPointMake(0,1) toCoordinateSpace:fixed];
+    return d.y-o.y<-.5;
+}
+static __weak UIView *DockView;
+static CGFloat DockLastY=NAN,DockLastLift;
+static void (*OrigDockLayout)(id,SEL,double);
+static void HookDockLayout(id self,SEL cmd,double progress){
+    OrigDockLayout(self,cmd,progress);
+    if(![NSThread isMainThread])return;
+    id vc=((id(*)(id,SEL))objc_msgSend)(self,DockVCSel);
+    UIView *v=[vc isKindOfClass:UIViewController.class]?((UIViewController *)vc).viewIfLoaded:nil;
+    if(!v.superview)return;
+    // Gate on the view we write in: lifting along its -y is away from the
+    // notch exactly when its +y points at it.
+    BOOL inverted=DownIsNotch(v.superview);
+    CGFloat lift=Enabled&&inverted?MWDockLift(progress,NotchHeight):0;
+    if(v!=DockView){DockView=v;DockLastY=NAN;DockLastLift=0;}
+    CGPoint c=v.center;
+    c.y=MWDockCenterY(c.y,DockLastY,DockLastLift,lift);
+    if(!isfinite(c.y))return;
+    if(c.y!=v.center.y)v.center=c;
+    DockLastY=c.y;DockLastLift=lift;
+    static double last;double now=CACurrentMediaTime();
+    if((inverted||DownIsNotch(v))&&now-last>1){last=now;
+        Log([NSString stringWithFormat:@"DOCKLIFT progress=%.2f lift=%.1f superviewInverted=%d viewInverted=%d",progress,lift,inverted,DownIsNotch(v)]);}
+}
+static void (*OrigEdgeTouchesBegan)(id,SEL,NSSet *,UIEvent *);
+static void HookEdgeTouchesBegan(UIGestureRecognizer *self,SEL cmd,NSSet<UITouch *> *touches,UIEvent *event){
+    BOOL widen=NO;CGPoint p=CGPointZero;
+    if(Enabled&&touches.count==1&&[NSThread isMainThread]&&[self isKindOfClass:HomeGestureClass]&&
+       ((long long(*)(id,SEL))objc_msgSend)(self,TouchOrientationSel)==UIInterfaceOrientationPortraitUpsideDown){
+        UITouch *t=touches.anyObject;
+        id<UICoordinateSpace> fixed=UIScreen.mainScreen.fixedCoordinateSpace;
+        p=[t locationInView:nil];
+        if(t.window)p=[t.window convertPoint:p toCoordinateSpace:fixed];
+        // A half-turn mirrors x about the center, so this span test holds in
+        // fixed and in upside-down screen coordinates alike.
+        widen=isfinite(p.x)&&fabs(p.x-CGRectGetMidX(fixed.bounds))<=NotchHalfWidth;
+    }
+    if(!widen){OrigEdgeTouchesBegan(self,cmd,touches,event);return;}
+    double base=((double(*)(id,SEL))objc_msgSend)(self,EdgeRegionSel);
+    ((void(*)(id,SEL,double))objc_msgSend)(self,SetEdgeRegionSel,base+NotchHeight);
+    @try{OrigEdgeTouchesBegan(self,cmd,touches,event);}
+    @finally{((void(*)(id,SEL,double))objc_msgSend)(self,SetEdgeRegionSel,base);}
+    static double last;double now=CACurrentMediaTime();
+    if(now-last>1){last=now;
+        Log([NSString stringWithFormat:@"HOMEEDGE notch-touch point={%.1f,%.1f} region=%.1f+%.1f class=%@",p.x,p.y,base,NotchHeight,NSStringFromClass(self.class)]);}
+}
+static void InstallDockNotchFix(void){
+    Class root=objc_getClass("SBFloatingDockRootViewController");
+    SEL layout=sel_registerName("_layoutFloatingDockViewWithProgress:");
+    DockVCSel=sel_registerName("floatingDockViewController");
+    if(root&&Signature(root,layout,"v",@[@(@encode(double))])&&Signature(root,DockVCSel,"@",@[]))
+        MSHookMessageEx(root,layout,(IMP)HookDockLayout,(IMP *)&OrigDockLayout);
+    else Log(@"NO DOCK LIFT: signature mismatch");
+    // Hooked on the UIKit base class, where the edge-region test lives, so a
+    // home-gesture subclass that overrides touchesBegan: and calls super is
+    // still covered; HomeGestureClass scopes it back to home gestures only.
+    Class edge=objc_getClass("UIScreenEdgePanGestureRecognizer");
+    HomeGestureClass=objc_getClass("SBHomeGesturePanGestureRecognizer");
+    TouchOrientationSel=sel_registerName("_touchInterfaceOrientation");
+    EdgeRegionSel=sel_registerName("_bottomEdgeRegionSize");
+    SetEdgeRegionSel=sel_registerName("_setBottomEdgeRegionSize:");
+    if(edge&&HomeGestureClass&&ValidClass(HomeGestureClass,edge)&&
+       Signature(edge,@selector(touchesBegan:withEvent:),"v",@[@"@",@"@"])&&
+       Signature(HomeGestureClass,TouchOrientationSel,@encode(long long),@[])&&
+       Signature(edge,EdgeRegionSel,@encode(double),@[])&&
+       Signature(edge,SetEdgeRegionSel,"v",@[@(@encode(double))]))
+        MSHookMessageEx(edge,@selector(touchesBegan:withEvent:),(IMP)HookEdgeTouchesBegan,(IMP *)&OrigEdgeTouchesBegan);
+    else Log(@"NO HOME EDGE FIX: signature mismatch");
+}
+
 // Diagnostic-only touch/gesture trace, added in 0.9.0-alpha9. Off by default;
 // toggled at runtime by TracePath, same mechanism as Disabled (see
 // Reconcile). It answers directly, rather than by inference, which class is
@@ -1097,6 +1198,7 @@ static void Install(void){
     InstallMangoResizePanFix();
     InstallLongPressProbe();
     InstallOrientationLockFix();
-    Log(@"INSTALLED World 1.2.0: placement + world transform + exact Mango ended-pan Y correction + orientation-lock fix");Reconcile();
+    InstallDockNotchFix();
+    Log(@"INSTALLED World 1.3.0: placement + world transform + exact Mango ended-pan Y correction + orientation-lock fix + floating-dock notch lift + home-gesture notch edge region");Reconcile();
 }
 __attribute__((constructor)) static void StartWorld(void){@autoreleasepool{dispatch_async(dispatch_get_main_queue(),^{Install();});}}

@@ -1,4 +1,4 @@
-# MangoUpsideDownWorld 1.2.0：证据与边界
+# MangoUpsideDownWorld 1.3.0：证据与边界
 
 ## 1.2.0：四方向 Probe 已定位通知手势的真实消费点
 
@@ -279,12 +279,40 @@ alpha14 的修法分两处，而不是简单地"不再跳过这个窗口"：
 
 修法：`HookLockNoArg` 检测到 `Orientation()==UIInterfaceOrientationPortraitUpsideDown` 时，调用 `OrigLockWithArg` 传入的目标从 `UIInterfaceOrientationPortrait` 改为 `UIInterfaceOrientationPortraitUpsideDown`——只改了这一个常量，其它逻辑（`Signature()` 校验、`OrientationLockFixOK` 兜底、对带参数版本的只读观察 hook）原样不变。对应日志字符串同步改为 `ORIENTATIONLOCK forced-to-upsidedown`。
 
+## 1.3.0：iPad 样式 Dock 在倒置时避开刘海 + 刘海区域的底边上划
+
+**需求**：用 Lynx 2（`com.cydiabc.lynxtwo-rootless` 2.5.4，开关 `useFloatingDock`）开启 iPad 浮动 Dock 后，倒置时 Dock 底部被刘海挡住一部分。要求：倒置且 Dock 完全抬起时再往上抬，正向不变；上滑的手指行程不变，同样距离抬得更高；修好倒置时在刘海区域从"底边"上划回主屏/唤出 Dock。
+
+**Dock 是谁画的**：解包 Lynx.dylib 的字符串，它只是打开系统自带的浮动 Dock（`isFloatingDockSupported`、`SBFloatingDockController`、`SBFloatingDockViewController` 等），没有自己的 Dock 视图。所以要改的是 SpringBoard 自己的 `SBFloatingDock*`。
+
+**类名/方法名来源**：iOS 14.5 的 SpringBoard / UIKitCore 头文件转储（github.com/xybp888/iOS-Header，`14.5/PrivateFrameworks/SpringBoard.framework/SBFloatingDockRootViewController.h`、`SBHomeGesturePanGestureRecognizer.h`、`UIKitCore.framework/UIScreenEdgePanGestureRecognizer.h`）。没找到公开的 16.x 转储，**16.5 上未核实**——所以和本文件其它私有 hook 一样，全部先过 `Signature()`，对不上就记 `NO DOCK LIFT` / `NO HOME EDGE FIX` 并且什么都不装。
+
+**刘海尺寸（网上查证）**：
+- 13 mini：375×812 pt，原生缩放 2.88，1080×2340 px，476 ppi；状态栏 50 pt，竖屏安全区上 50 / 下 34（useyourloaf.com/blog/iphone-13-screen-sizes、ios-resolution.com/iphone-13-mini）。
+- 刘海本体没有官方 pt 数据。iPhone 13 系列的传感器外壳实测/泄露数据约 26 mm 宽（PhoneArena）、5.35 mm 高（MiniTool；9to5Mac 说比 12 窄约 20–30%、略高）。
+- 换算：1 pt = 2.8805 px ÷ 476 ppi = 0.1537 mm。刘海高 5.35 mm ≈ **34.8 pt → 取 35 pt**；宽 26 mm ≈ 169 pt。交叉验证：13（460 ppi，3x）状态栏 47 pt ≈ 7.79 mm，13 mini 50 pt ≈ 7.69 mm，物理高度一致，说明 50 pt = 刘海 ~35 pt + 状态栏留白，数据自洽。
+
+**抬多少**：`NotchHeight = 35`。Dock 原本离屏幕底边有一个系统间距 m；抬 35 pt 后，Dock 离刘海下沿还是同样的 m，看起来跟正向时离屏幕底边一样。这是一个可调常量，真机觉得不够/太多直接改 `Tweak.xm` 里这一个数。
+
+**Dock 抬升的做法**：hook `SBFloatingDockRootViewController -_layoutFloatingDockViewWithProgress:`（progress 0 = 藏起、1 = 完全抬起），原实现跑完后把 Dock 视图的 center 再往上移 `35 × progress`（`MWDockLift`，限制在 0…1）。
+- 按比例而不是加大边距：系统把手指位移换算成 progress 的那段完全没动，手指走到 progress=1 的距离不变，Dock 却多走了 35 pt——就是"同样的划动距离抬得更高"。
+- 方向判定用几何，不用 Mango：只有 Dock 视图父视图的 +y 在屏幕固定坐标系里指向物理顶边（刘海那边）时才抬。正向、横屏都是 0。也就是说判定的正好是要修的那件事本身。
+- 不叠加：记住上次写入的值和抬升量（`MWDockCenterY`），原实现没重设 center 时先撤销上次的抬升再算，原实现重设了就从新值算。回正向时抬升量为 0，自动还原。
+- 在原调用方的动画块里同步写入，Dock 的展开/收起动画终点直接就是抬升后的位置，不会出现先到原位再跳一下。
+
+**底边上划的做法**：倒置时界面"底边"就是刘海那条边。刘海本身没有触摸层，手指在刘海那一段起手时，第一次被识别到的位置在刘海下沿，离边 ~35 pt，超出了系统底边识别区，所以起手失败；刘海两侧的"耳朵"区域手指能贴边起手，不受影响。修法：在 `UIScreenEdgePanGestureRecognizer -touchesBegan:withEvent:` 上 hook（区域判定在 UIKit 基类里，子类重写后调 super 也能覆盖到），只对 `SBHomeGesturePanGestureRecognizer` 及其子类、`_touchInterfaceOrientation == 倒置`、单指、且起手点在刘海水平范围内（中心 ±95 pt）时，把 `_bottomEdgeRegionSize` 临时加 35 pt，调完原实现立刻改回去。不留状态、不影响耳朵区域、不影响后续触摸，也不会和别的识别器互相叠加。
+
+**新增日志**：`DOCKLIFT progress=… lift=… superviewInverted=… viewInverted=…`（只在倒置时记，1 秒限流）；`HOMEEDGE notch-touch point={x,y} region=基础值+35 class=…`（1 秒限流）。
+
+**置信度**：Dock 抬升依赖两个推断：(1) 16.5 上仍是 `_layoutFloatingDockViewWithProgress:` 负责摆放 Dock；(2) 这之后没有别的代码在下一次调用之前把 Dock 视图挪回去。`DOCKLIFT` 出现、`lift=35.0`、但 Dock 实际没动 → 是 (2) 不成立，下一步要连带 hook `viewDidLayoutSubviews`。`superviewInverted=0 viewInverted=1` → 系统是在 Dock 视图自己身上做的旋转，这一版按设计不动它（往错误方向移比不移更糟）。底边上划依赖"区域判定只在第一下触摸时做、且读的是 `_setBottomEdgeRegionSize:` 写进去的设置"：`HOMEEDGE` 出现但刘海处依旧起不了手 → 这条推断不成立。
+
 ## 尚未处理
 
 - 岛落到屏幕底部。alpha2 加了跳过原因日志，未改判定。需要真机复现后读 `SKIP` 行才能定性；另需确认异常时岛内文字对倒置视角是正还是倒，以区分是 Mango 的方向状态问题还是 World 的几何判定问题。
 - 灵动岛拖动方向问题本身停在 alpha14 已有的结论上（`LPROBE` 几乎不触发，怀疑走的是 `UITouch` 自己的 `locationInView:`/`previousLocationInView:`）——alpha15 系列曾经尝试推进这一点，但因为手动开关本身的真机 bug 没查完就被搁置，这次的 1.0.0/1.0.1 没有继续这条线，也没有回退掉 alpha15 的诊断结论，只是暂不基于那份代码继续。
 - **Face ID 跟随倒置——已确认放弃，不是"尚未处理"**：真正的限制在 Face ID 认证流程本身（Secure Enclave 边界 + iPhone 平台从未支持倒置识别），不是这份文件能触及的范围，本节列出仅为存档，不再等待后续动作。
 - 1.0.1 的方向锁定修复（锁在倒置状态）尚未真机验证：需要确认 `ORIENTATIONLOCK forced-to-upsidedown` 是否出现、锁定后界面是否真的保持倒置不被自动转走、Control Center 开关本身的视觉状态是否和实际锁定状态一致。
+- 1.3.0 的 Dock 抬升和刘海处上划尚未真机验证，类名方法名也只在 14.5 转储里核对过。主屏倒置时 Dock 抬高 35 pt 后，可能压到最下一行图标或页码点——系统按未抬升的 Dock 高度给主屏图标留位置，这一版没改主屏布局；如有遮挡可先用 Lynx 自带的主屏边距调。
 
 ## 保留风险
 
