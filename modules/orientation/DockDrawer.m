@@ -55,6 +55,7 @@ static CGRect DividerFrame={{0,12},{1,49}};
 static __weak UIView *DividerSource;
 static UIView *Divider;
 static NSUInteger Pins;
+static NSString *DividerLook=@"none";
 
 static BOOL DrawerOn(void){return MSRuntimeFlag(@"DockDrawerEnabled");}
 static id Call(id obj,NSString *name){
@@ -292,9 +293,18 @@ static void Refresh(UIView *dock){
     }
     if(!Divider)Divider=[UIView new];
     UIView *source=DividerSource;
+    // Row 1's divider gets its grey from SpringBoard's visual styling: a
+    // colour blended through layer filters (Beta9.9.18 drew it plain white
+    // without them), so copy the layer's whole look, not just the colour.
     Divider.backgroundColor=source.backgroundColor?:[UIColor colorWithWhite:1 alpha:.3];
     Divider.alpha=source?source.alpha:1;
+    Divider.layer.backgroundColor=source?source.layer.backgroundColor:Divider.layer.backgroundColor;
     Divider.layer.compositingFilter=source.layer.compositingFilter;
+    Divider.layer.filters=source.layer.filters;
+    Divider.layer.opacity=source?source.layer.opacity:1;
+    DividerLook=source?[NSString stringWithFormat:@"bg=%@ compositing=%@ filters=%@ opacity=%.2f alpha=%.2f sublayers=%lu subviews=%lu",
+        source.backgroundColor,source.layer.compositingFilter,[source.layer.filters valueForKey:@"name"],source.layer.opacity,source.alpha,
+        (unsigned long)source.layer.sublayers.count,(unsigned long)source.subviews.count]:@"no-source";
     CGFloat end=x+Pins*Pitch-(Pitch-IconSize.width);
     Divider.frame=CGRectMake(end+g/2-DividerFrame.size.width/2,DividerFrame.origin.y,DividerFrame.size.width,DividerFrame.size.height);
     Divider.hidden=!divide;
@@ -387,9 +397,9 @@ static void Status(double progress){
     double now=CACurrentMediaTime();
     if(now-last<2)return;
     last=now;
-    NSString *body=[NSString stringWithFormat:@"DRAWER status install=%@ on=%d pan=%d p=%.2f progress=%.2f extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ candidates=%lu pins=%lu shown=%lu divider=%d iconScale=%.3f iconFail=%@ recentFront=%@",
+    NSString *body=[NSString stringWithFormat:@"DRAWER status install=%@ on=%d pan=%d p=%.2f progress=%.2f extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ candidates=%lu pins=%lu shown=%lu divider=%d iconScale=%.3f iconFail=%@ dividerLook={%@} recentFront=%@",
         InstallState,DrawerOn(),DrawerPan!=nil,P,progress,Extent,LastOffset,Margin,NSStringFromCGSize(IconSize),Pitch,NSStringFromCGRect(PlatBase),Source,
-        (unsigned long)Candidates,(unsigned long)Pins,(unsigned long)Shown,Divider&&!Divider.hidden,IconScale,IconFail,[[MRU subarrayWithRange:NSMakeRange(0,MIN(MRU.count,(NSUInteger)6))] componentsJoinedByString:@","]];
+        (unsigned long)Candidates,(unsigned long)Pins,(unsigned long)Shown,Divider&&!Divider.hidden,IconScale,IconFail,DividerLook,[[MRU subarrayWithRange:NSMakeRange(0,MIN(MRU.count,(NSUInteger)6))] componentsJoinedByString:@","]];
     if([body isEqualToString:lastBody])return;
     lastBody=body;
     MSDiagnosticsLog(@"World",body);
