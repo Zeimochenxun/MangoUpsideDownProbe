@@ -303,6 +303,7 @@ void MSDockDrawerProgress(UIView *dock,double progress);
 void MSDockDrawerTick(UIView *dock,double progress);
 void MSDockDrawerInstall(Class dockClass,Class rootClass);
 void MSDockReapply(BOOL animated);
+CGFloat MSDockDrawerSqueeze(UIView *dock);
 static void ShieldUpdate(void);
 static BOOL ShieldVisible(void);
 static void ReconcileRoot(UIView *root) {
@@ -745,14 +746,16 @@ static CGFloat DockLiftFor(UIView *dock){
 }
 static __weak UIView *DockViewRef;
 static CGAffineTransform DockIncoming,DockWritten;
-static CGFloat DockLastLift;
+static CGFloat DockLastLift,DockLastSqueeze=1;
 static void (*OrigDockTransform)(id,SEL,CGAffineTransform);
 static void HookDockTransform(UIView *self,SEL cmd,CGAffineTransform t){
     // isKindOfClass: as well, in case the hook landed on an inherited superclass method.
     if(![NSThread isMainThread]||![self isKindOfClass:DockViewClass]||![self.window.rootViewController isKindOfClass:DockRootClass]){OrigDockTransform(self,cmd,t);return;}
     CGFloat lift=DockLiftFor(self);
-    CGAffineTransform out=t;out.ty-=lift;
-    DockViewRef=self;DockIncoming=t;DockWritten=out;DockLastLift=lift;DockWrites++;
+    // The drawer's horizontal squeeze while stretched past fully open.
+    CGFloat squeeze=MSDockDrawerSqueeze(self);
+    CGAffineTransform out=t;out.ty-=lift;out.a*=squeeze;
+    DockViewRef=self;DockIncoming=t;DockWritten=out;DockLastLift=lift;DockLastSqueeze=squeeze;DockWrites++;
     OrigDockTransform(self,cmd,out);
     static double last;double now=CACurrentMediaTime();
     if(lift>0&&now-last>1){last=now;
@@ -761,11 +764,11 @@ static void HookDockTransform(UIView *self,SEL cmd,CGAffineTransform t){
 void MSDockReapply(BOOL animated){
     UIView *dock=DockViewRef;
     if(!dock||!OrigDockTransform)return;
-    CGFloat lift=DockLiftFor(dock);
+    CGFloat lift=DockLiftFor(dock),squeeze=MSDockDrawerSqueeze(dock);
     // Only rewrite our own last value; anything else belongs to SpringBoard.
-    if(lift==DockLastLift||!CGAffineTransformEqualToTransform(dock.transform,DockWritten))return;
-    CGAffineTransform out=DockIncoming;out.ty-=lift;
-    DockWritten=out;DockLastLift=lift;
+    if((lift==DockLastLift&&squeeze==DockLastSqueeze)||!CGAffineTransformEqualToTransform(dock.transform,DockWritten))return;
+    CGAffineTransform out=DockIncoming;out.ty-=lift;out.a*=squeeze;
+    DockWritten=out;DockLastLift=lift;DockLastSqueeze=squeeze;
     if(animated)OrigDockTransform(dock,@selector(setTransform:),out);
     else [UIView performWithoutAnimation:^{OrigDockTransform(dock,@selector(setTransform:),out);}];
 }

@@ -37,6 +37,9 @@
 // with rising resistance (the extra shows below row 2), and a release
 // springs it to rest with a slight bounce carrying the finger's speed;
 // closing does not bounce, so the platter never dips below its own height.
+// Beta9.9.23: the stretch also narrows the dock slightly (up to Narrow),
+// a horizontal scale World.m folds into the dock transform only while
+// stretched, so it springs back with the height on release.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -47,6 +50,8 @@
 #import "../../src/RuntimeDiagnostics.h"
 
 void MSDockDrawerProgress(UIView *dock,double progress);
+CGFloat MSDockDrawerSqueeze(UIView *dock);
+void MSDockReapply(BOOL animated); // World.m
 void MSDockDrawerTick(UIView *dock,double progress);
 void MSDockDrawerInstall(Class dockClass,Class rootClass);
 
@@ -72,7 +77,7 @@ static UIView *Divider;
 static NSUInteger Pins;
 static NSString *DividerLook=@"none";
 static BOOL Closing,RefreshQueued;
-static const CGFloat Stretch=.25;
+static const CGFloat Stretch=.25,Narrow=.04;
 static NSString *RowKey=@"";
 static CGFloat DrawnWidth;
 
@@ -166,7 +171,10 @@ static void ApplyExtension(UIView *dock){
     for(NSString *name in @[@"userIconListView",@"recentIconListView"])
         for(UIView *icon in ((UIView *)Call(dock,name)).subviews){
             UIView *mark=Call(icon,@"indicator");
-            if([mark isKindOfClass:UIView.class]&&![mark isDescendantOfView:plat])mark.transform=CGAffineTransformMakeTranslation(0,-d);
+            if(![mark isKindOfClass:UIView.class]||[mark isDescendantOfView:plat])continue;
+            // ... and with the dock's squeeze, which they are outside of.
+            CGPoint middle=[dock.superview convertPoint:dock.center toView:mark.superview];
+            mark.transform=CGAffineTransformMakeTranslation((mark.center.x-middle.x)*(MSDockDrawerSqueeze(dock)-1),-d);
         }
     // Row 1 changed metric set under an open row 2: lay row 2 out again.
     NSString *key=MetricKey();
@@ -178,7 +186,13 @@ static void ApplyExtension(UIView *dock){
 static NSString *MetricKey(void){
     return [NSString stringWithFormat:@"%.1f %.1f %@ %.1f %.1f",Margin,Pitch,NSStringFromCGSize(PlatBase.size),DrawnWidth,DividerFrame.size.height];
 }
+// Horizontal scale for the dock: below 1 only while stretched past open.
+CGFloat MSDockDrawerSqueeze(UIView *dock){
+    if(!dock||dock!=Dock||P<=1||!DrawerOn())return 1;
+    return 1-Narrow*fmin(1,(P-1)/Stretch);
+}
 static void Settle(UIView *dock){
+    MSDockReapply(YES); // animates only inside an animation block
     [dock setNeedsLayout];
     [dock layoutIfNeeded];
 }
