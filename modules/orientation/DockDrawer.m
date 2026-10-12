@@ -450,10 +450,11 @@ static void Animate(UIView *dock,CGFloat target,NSTimeInterval duration,void (^d
             StartP=P;
             if(P<=0)Refresh(dock);
             __attribute__((fallthrough));
-        case UIGestureRecognizerStateChanged:
+        case UIGestureRecognizerStateChanged:{
             P=fmax(0,fmin(1,StartP-[g translationInView:dock.superview].y/e));
             [UIView performWithoutAnimation:^{Settle(dock);}];
             break;
+        }
         case UIGestureRecognizerStateEnded:
         case UIGestureRecognizerStateCancelled:{
             // Where the flick would coast to decides open or closed.
