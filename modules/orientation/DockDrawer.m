@@ -47,6 +47,7 @@ static UIPanGestureRecognizer *DrawerPan;
 static NSMutableDictionary<NSString *,UIView *> *Icons;
 static NSString *Source=@"none",*InstallState=@"not-run",*IconFail=@"none";
 static NSUInteger Shown,Candidates;
+static CGFloat IconScale=NAN;
 
 static BOOL DrawerOn(void){return MSRuntimeFlag(@"DockDrawerEnabled");}
 static id Call(id obj,NSString *name){
@@ -107,7 +108,16 @@ static void ApplyExtension(UIView *dock){
     CGFloat d=fmax(0,fmin(LastOffset,Extent));
     CGRect out=PlatBase;out.size.height+=d;
     PlatWritten=out;
+    // Row 1's icon lists are flexible-height subviews of the platter and,
+    // autoresized, re-centred row 1 in the taller platter (Beta9.9.16 on
+    // device). While the drawer is out only the full-bleed backgrounds
+    // follow the platter; SpringBoard keeps placing the lists itself.
+    plat.autoresizesSubviews=NO;
     if(!CGRectEqualToRect(f,out))plat.frame=out;
+    UIViewAutoresizing fill=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+    for(UIView *v in plat.subviews)
+        if(v!=Strip&&(v.autoresizingMask&fill)==fill&&!CGRectEqualToRect(v.frame,plat.bounds))v.frame=plat.bounds;
+    plat.autoresizesSubviews=d<=0;
     if(!Strip){Strip=[UIView new];Strip.clipsToBounds=YES;}
     if(Strip.superview!=plat)[plat addSubview:Strip];
     Strip.frame=CGRectMake(0,PlatBase.size.height-Margin,PlatBase.size.width,Margin+d);
@@ -177,6 +187,14 @@ static NSArray<NSString *> *RecentBundles(UIView *dock){
         switcher,(unsigned long)fromSwitcher,(unsigned long)(out.count-own-fromSwitcher),(unsigned long)skip.count];
     return out;
 }
+static UIView *ImageView(UIView *iconView){
+    NSMutableArray<UIView *> *queue=[NSMutableArray arrayWithArray:iconView.subviews];
+    for(NSUInteger i=0;i<queue.count&&i<64;i++){
+        if([NSStringFromClass(queue[i].class) containsString:@"IconImageView"])return queue[i];
+        [queue addObjectsFromArray:queue[i].subviews];
+    }
+    return nil;
+}
 // A real icon view set up the way SpringBoard set up row 1's `model`.
 static UIView *IconView(NSString *bundle,UIView *model,id iconModel){
     UIView *view=Icons[bundle];
@@ -191,6 +209,7 @@ static UIView *IconView(NSString *bundle,UIView *model,id iconModel){
     view=[[iconClass alloc] initWithConfigurationOptions:((unsigned long long(*)(id,SEL))objc_msgSend)(model,options)
                                       listLayoutProvider:Call(model,@"listLayoutProvider")];
     if(![view isKindOfClass:UIView.class]){IconFail=@"init-failed";return nil;}
+    ((void(*)(id,SEL,id))objc_msgSend)(view,NSSelectorFromString(@"setIcon:"),icon);
     for(NSString *name in @[@"location",@"delegate"]){
         SEL setter=NSSelectorFromString([NSString stringWithFormat:@"set%@%@:",[[name substringToIndex:1] uppercaseString],[name substringFromIndex:1]]);
         if([view respondsToSelector:setter])((void(*)(id,SEL,id))objc_msgSend)(view,setter,Call(model,name));
@@ -201,7 +220,15 @@ static UIView *IconView(NSString *bundle,UIView *model,id iconModel){
         SEL setter=NSSelectorFromString(name);
         if([view respondsToSelector:setter])((void(*)(id,SEL,BOOL))objc_msgSend)(view,setter,[name isEqualToString:@"setLabelHidden:"]);
     }
-    ((void(*)(id,SEL,id))objc_msgSend)(view,NSSelectorFromString(@"setIcon:"),icon);
+    // Row 1 draws its 60pt icons at SpringBoard's content scale (0.78 on
+    // device) and ours did not pick that up, so match the drawn image size.
+    view.bounds=CGRectMake(0,0,IconSize.width,IconSize.height);
+    [view layoutIfNeeded];
+    UIView *mine=ImageView(view),*theirs=ImageView(model);
+    CGFloat want=theirs?[theirs convertRect:theirs.bounds toView:model].size.width:0;
+    CGFloat have=mine?[mine convertRect:mine.bounds toView:view].size.width:0;
+    if(want>0&&have>0&&fabs(want/have-1)>.02)view.transform=CGAffineTransformMakeScale(want/have,want/have);
+    IconScale=want>0&&have>0?want/have:NAN;
     if(!Icons)Icons=[NSMutableDictionary dictionary];
     Icons[bundle]=view;
     return view;
@@ -226,7 +253,7 @@ static void Refresh(UIView *dock){
     CGFloat total=views.count?views.count*Pitch-(Pitch-IconSize.width):0;
     CGFloat x=(PlatBase.size.width-total)/2;
     for(NSUInteger i=0;i<views.count;i++){
-        views[i].frame=CGRectMake(x+i*Pitch,Margin,IconSize.width,IconSize.height);
+        views[i].center=CGPointMake(x+i*Pitch+IconSize.width/2,Margin+IconSize.height/2);
         if(views[i].superview!=Strip)[Strip addSubview:views[i]];
     }
     Shown=views.count;
@@ -317,9 +344,9 @@ static void Status(double progress){
     double now=CACurrentMediaTime();
     if(now-last<2)return;
     last=now;
-    NSString *body=[NSString stringWithFormat:@"DRAWER status install=%@ on=%d pan=%d p=%.2f progress=%.2f extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ candidates=%lu shown=%lu iconFail=%@ recentFront=%@",
+    NSString *body=[NSString stringWithFormat:@"DRAWER status install=%@ on=%d pan=%d p=%.2f progress=%.2f extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ candidates=%lu shown=%lu iconScale=%.3f iconFail=%@ recentFront=%@",
         InstallState,DrawerOn(),DrawerPan!=nil,P,progress,Extent,LastOffset,Margin,NSStringFromCGSize(IconSize),Pitch,NSStringFromCGRect(PlatBase),Source,
-        (unsigned long)Candidates,(unsigned long)Shown,IconFail,[[MRU subarrayWithRange:NSMakeRange(0,MIN(MRU.count,(NSUInteger)6))] componentsJoinedByString:@","]];
+        (unsigned long)Candidates,(unsigned long)Shown,IconScale,IconFail,[[MRU subarrayWithRange:NSMakeRange(0,MIN(MRU.count,(NSUInteger)6))] componentsJoinedByString:@","]];
     if([body isEqualToString:lastBody])return;
     lastBody=body;
     MSDiagnosticsLog(@"World",body);
