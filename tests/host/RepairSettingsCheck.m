@@ -3,8 +3,8 @@
 int main(void) {
     @autoreleasepool {
         NSDictionary *defaults=MSReadPreferences(NULL);
-        assert(defaults && MSRepairKeys().count==8);
-        assert(!MSPreferenceFlag(defaults,@"EdgeColorEnabled") && !MSPreferenceFlag(defaults,@"DebugEnabled"));
+        assert(defaults && MSRepairKeys().count==9);
+        assert(!MSPreferenceFlag(defaults,@"EdgeColorEnabled") && !MSPreferenceFlag(defaults,@"DebugEnabled") && !MSPreferenceFlag(defaults,@"DockDrawerEnabled"));
         for (NSString *key in MSRepairKeys()) {
             assert(MSWritePreferenceFlag(key,NO,NULL));
             NSDictionary *before=MSReadPreferences(NULL);

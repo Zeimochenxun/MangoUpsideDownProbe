@@ -298,8 +298,11 @@ static BOOL KeepsWorld(UIView *root, MWWorldState *state, UIWindow *window) {
 static void PillStatus(void);
 static void DockStatus(void);
 static void DockSync(void);
-static void DockProbe(void);
-void MSDockDrawerProbe(UIView *dock,double progress,BOOL inApp,long orientation);
+static void DockDrawerTick(void);
+CGFloat MSDockDrawerOffset(UIView *dock,double progress);
+void MSDockDrawerTick(UIView *dock,double progress);
+void MSDockDrawerInstall(Class dockClass,Class rootClass);
+void MSDockReapply(BOOL animated);
 static void ShieldUpdate(void);
 static BOOL ShieldVisible(void);
 static void ReconcileRoot(UIView *root) {
@@ -384,7 +387,7 @@ static void Reconcile(void) {
             for (UIWindow *w in Windows.allObjects) Discover(w);
             for (UIView *root in Roots.allObjects) ReconcileRoot(root);
         }];
-    } @finally { Busy = NO; DiagnosticWorldScan(decisionRead,decision); PillStatus(); DockSync(); ShieldUpdate(); DockStatus(); DockProbe(); }
+    } @finally { Busy = NO; DiagnosticWorldScan(decisionRead,decision); PillStatus(); DockSync(); ShieldUpdate(); DockStatus(); DockDrawerTick(); }
 }
 static BOOL Relevant(UIView *v){
     if([v isKindOfClass:WindowClass])return YES;
@@ -731,9 +734,13 @@ static double DockProgress(UIView *dock){
     if(PresentedProgressSel&&[root isKindOfClass:DockRootClass])return ((double(*)(id,SEL))objc_msgSend)(root,PresentedProgressSel);
     return NAN;
 }
+// Everything added to SpringBoard's dock translation: the notch lift while
+// inverted, plus the second-row drawer's pull (DockDrawer.m) in any orientation.
 static CGFloat DockLiftFor(UIView *dock){
-    if(!DockFixOn()||!DownIsNotch(dock.superview))return 0;
-    return MWDockLift(DockProgress(dock),MSRuntimeNumber(@"DockNotchLift",NotchHeight,0,50));
+    double progress=DockProgress(dock);
+    CGFloat drawer=MSDockDrawerOffset(dock,progress);
+    if(!DockFixOn()||!DownIsNotch(dock.superview))return drawer;
+    return MWDockLift(progress,MSRuntimeNumber(@"DockNotchLift",NotchHeight,0,50))+drawer;
 }
 static __weak UIView *DockViewRef;
 static CGAffineTransform DockIncoming,DockWritten;
@@ -750,7 +757,8 @@ static void HookDockTransform(UIView *self,SEL cmd,CGAffineTransform t){
     if(lift>0&&now-last>1){last=now;
         Log([NSString stringWithFormat:@"DOCKLIFT progress=%.2f lift=%.1f ty=%.1f->%.1f",DockProgress(self),lift,t.ty,out.ty]);}
 }
-static void DockSync(void){
+// Also how the drawer pushes each finger step (animated inside its spring).
+void MSDockReapply(BOOL animated){
     UIView *dock=DockViewRef;
     if(!dock||!OrigDockTransform)return;
     CGFloat lift=DockLiftFor(dock);
@@ -758,8 +766,10 @@ static void DockSync(void){
     if(lift==DockLastLift||!CGAffineTransformEqualToTransform(dock.transform,DockWritten))return;
     CGAffineTransform out=DockIncoming;out.ty-=lift;
     DockWritten=out;DockLastLift=lift;
-    [UIView performWithoutAnimation:^{OrigDockTransform(dock,@selector(setTransform:),out);}];
+    if(animated)OrigDockTransform(dock,@selector(setTransform:),out);
+    else [UIView performWithoutAnimation:^{OrigDockTransform(dock,@selector(setTransform:),out);}];
 }
+static void DockSync(void){MSDockReapply(NO);}
 static void (*OrigEdgeTouchesBegan)(id,SEL,NSSet *,UIEvent *);
 static void HookEdgeTouchesBegan(UIGestureRecognizer *self,SEL cmd,NSSet<UITouch *> *touches,UIEvent *event){
     if(![NSThread isMainThread]||![self isKindOfClass:HomeGestureClass]){OrigEdgeTouchesBegan(self,cmd,touches,event);return;}
@@ -875,11 +885,9 @@ static void DockStatus(void){
         MSDiagnosticsLog(@"World",body);
     }@catch(__unused NSException *exception){}
 }
-// Dock second row, stage 1: the read-only probe in DockDrawer.m.
-static void DockProbe(void){
+static void DockDrawerTick(void){
     UIView *dock=DockViewRef;
-    BOOL inApp=MSDiagnosticsActive()&&FrontAppSel&&((id(*)(id,SEL))objc_msgSend)(UIApplication.sharedApplication,FrontAppSel);
-    MSDockDrawerProbe(dock,dock?DockProgress(dock):NAN,inApp,(long)Orientation());
+    MSDockDrawerTick(dock,dock?DockProgress(dock):NAN);
 }
 static void InstallDockNotchFix(void){
     DockRootClass=objc_getClass("SBFloatingDockRootViewController");
@@ -898,6 +906,7 @@ static void InstallDockNotchFix(void){
         if(hasLayout)MSHookMessageEx(DockRootClass,layout,(IMP)HookDockLayout,(IMP *)&OrigDockLayout);
         MSHookMessageEx(DockViewClass,@selector(setTransform:),(IMP)HookDockTransform,(IMP *)&OrigDockTransform);
         DockInstall=hasLayout?@"hooked":@"hooked-presented-only";
+        MSDockDrawerInstall(DockViewClass,DockRootClass);
     }
     if(![DockInstall hasPrefix:@"hooked"])Log([@"NO DOCK LIFT: " stringByAppendingString:DockInstall]);
     // Hooked on the UIKit base class, where the edge-region test lives, so a

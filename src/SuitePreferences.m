@@ -55,7 +55,7 @@ NSDictionary *MSReadPreferences(NSError **error) {
 BOOL MSPreferenceFlag(NSDictionary *snapshot, NSString *key) {
     if (!snapshot) return NO;
     id value = snapshot[key];
-    BOOL defaultValue = ![@[@"EdgeColorEnabled", @"DebugEnabled", @"IdleGlowFrostedEnabled"] containsObject:key];
+    BOOL defaultValue = ![@[@"EdgeColorEnabled", @"DebugEnabled", @"IdleGlowFrostedEnabled", @"DockDrawerEnabled"] containsObject:key];
     return value == nil ? defaultValue : ([value isKindOfClass:NSNumber.class] && [value boolValue]);
 }
 
@@ -66,7 +66,7 @@ BOOL MSWritePreferenceFlag(NSString *key, BOOL enabled, NSError **error) {
 NSArray<NSString *> *MSRepairKeys(void) {
     return @[@"RimGeometryEnabled", @"LauncherRecoveryEnabled", @"GlassAnimationEnabled",
              @"IslandLayoutEnabled", @"ShortHaloEnabled", @"EdgeColorEnabled", @"SwipeDirectionEnabled",
-             @"DockNotchEnabled"];
+             @"DockNotchEnabled", @"DockDrawerEnabled"];
 }
 
 BOOL MSWritePreferenceValue(NSString *key, id value, NSError **error) {
