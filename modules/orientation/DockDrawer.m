@@ -33,6 +33,10 @@
 // Row 1 switches between metric sets with its icon count (327x73 at 60pt
 // pitch, 330x90 at 74pt), so row 2 re-measures and re-lays itself out
 // whenever they change.
+// Beta9.9.22: pulled past fully open the platter stretches a little more
+// with rising resistance (the extra shows below row 2), and a release
+// springs it to rest with a slight bounce carrying the finger's speed;
+// closing does not bounce, so the platter never dips below its own height.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -68,6 +72,7 @@ static UIView *Divider;
 static NSUInteger Pins;
 static NSString *DividerLook=@"none";
 static BOOL Closing,RefreshQueued;
+static const CGFloat Stretch=.25;
 static NSString *RowKey=@"";
 static CGFloat DrawnWidth;
 
@@ -138,7 +143,7 @@ static void ApplyExtension(UIView *dock){
         CGRect r=[divider convertRect:divider.bounds toView:plat];
         if(r.size.width>0&&r.size.height>0)DividerFrame=r;
     }
-    CGFloat d=DrawerOn()?fmax(0,fmin(1,P))*Extent:0;
+    CGFloat d=DrawerOn()?fmax(0,fmin(1+Stretch,P))*Extent:0;
     LastOffset=d;
     CGRect out=PlatBase;out.origin.y-=d;out.size.height+=d;
     PlatWritten=out;
@@ -422,17 +427,26 @@ static void Refresh(UIView *dock){
     RowKey=MetricKey();
 }
 
-// Up opens, down closes only an open drawer; mostly-sideways drags, and a
+// Up opens (or stretches), down closes only an open drawer; mostly-sideways drags, and a
 // dock less than half way in or on its way out, are left to SpringBoard.
 static BOOL Wants(UIPanGestureRecognizer *g){
     UIView *dock=g.view;
     if(!DrawerOn()||!dock||dock!=Dock||Closing||PresentedProgress(dock)<.5)return NO;
     CGPoint v=[g velocityInView:dock.superview];
     if(fabs(v.y)<=fabs(v.x))return NO;
-    return v.y<0?P<1:P>0;
+    // Up is always the drawer's: it opens, or stretches an open one.
+    return v.y<0||P>0;
 }
-static void Animate(UIView *dock,CGFloat target,NSTimeInterval duration,void (^done)(void)){
-    [UIView animateWithDuration:duration delay:0 usingSpringWithDamping:.86 initialSpringVelocity:0
+// Past fully open the pull meets rising resistance, approaching Stretch of
+// a row (UIScrollView-style rubber band, in drawer units).
+static CGFloat Rubber(CGFloat over){
+    return Stretch*(1-1/(over*.55/Stretch+1));
+}
+// speed: the finger's speed toward target in points per second.
+static void Animate(UIView *dock,CGFloat target,CGFloat speed,void (^done)(void)){
+    CGFloat distance=fabs(target-P)*fmax(Extent,1);
+    CGFloat initial=distance>1?fmax(0,fmin(20,speed/distance)):0;
+    [UIView animateWithDuration:target>0?.55:.3 delay:0 usingSpringWithDamping:target>0?.78:1 initialSpringVelocity:initial
                         options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction
                      animations:^{P=target;Settle(dock);} completion:^(__unused BOOL finished){if(done)done();}];
 }
@@ -451,7 +465,8 @@ static void Animate(UIView *dock,CGFloat target,NSTimeInterval duration,void (^d
             if(P<=0)Refresh(dock);
             __attribute__((fallthrough));
         case UIGestureRecognizerStateChanged:{
-            P=fmax(0,fmin(1,StartP-[g translationInView:dock.superview].y/e));
+            CGFloat raw=StartP-[g translationInView:dock.superview].y/e;
+            P=raw>1?1+Rubber(raw-1):fmax(0,raw);
             [UIView performWithoutAnimation:^{Settle(dock);}];
             break;
         }
@@ -460,7 +475,7 @@ static void Animate(UIView *dock,CGFloat target,NSTimeInterval duration,void (^d
             // Where the flick would coast to decides open or closed.
             CGFloat v=[g velocityInView:dock.superview].y;
             CGFloat target=g.state==UIGestureRecognizerStateEnded?(P-v*.15/e>.5?1:0):(StartP>.5?1:0);
-            Animate(dock,target,.45,nil);
+            Animate(dock,target,target>0?-v:v,nil);
             break;
         }
         default:break;
@@ -481,7 +496,7 @@ void MSDockDrawerProgress(UIView *dock,double progress){
     UIGestureRecognizerState s=DrawerPan.state;
     if(s==UIGestureRecognizerStateBegan||s==UIGestureRecognizerStateChanged)return;
     Closing=YES;
-    dispatch_async(dispatch_get_main_queue(),^{Animate(dock,0,.3,^{Closing=NO;});});
+    dispatch_async(dispatch_get_main_queue(),^{Animate(dock,0,0,^{Closing=NO;});});
 }
 
 static void (*OrigLayout)(UIView *,SEL);
