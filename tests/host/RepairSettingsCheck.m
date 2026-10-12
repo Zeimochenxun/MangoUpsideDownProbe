@@ -3,7 +3,7 @@
 int main(void) {
     @autoreleasepool {
         NSDictionary *defaults=MSReadPreferences(NULL);
-        assert(defaults && MSRepairKeys().count==9);
+        assert(defaults && MSRepairKeys().count==10);
         assert(!MSPreferenceFlag(defaults,@"EdgeColorEnabled") && !MSPreferenceFlag(defaults,@"DebugEnabled") && !MSPreferenceFlag(defaults,@"DockDrawerEnabled"));
         for (NSString *key in MSRepairKeys()) {
             assert(MSWritePreferenceFlag(key,NO,NULL));
@@ -24,6 +24,15 @@ int main(void) {
         assert(MSWritePreferenceValue(@"DockNotchLift",@0,NULL));
         assert(MSWritePreferenceValue(@"DockNotchLift",@50,NULL));
         assert(!MSWritePreferenceValue(@"DockNotchLift",@50.1,NULL));
+        assert(MSWritePreferenceValue(@"DockDrawerPinned",(@[@"com.apple.Preferences",@"com.tencent.xin"]),NULL));
+        assert([MSReadPreferences(NULL)[@"DockDrawerPinned"] isEqual:(@[@"com.apple.Preferences",@"com.tencent.xin"])]);
+        assert(MSWritePreferenceValue(@"DockDrawerPinned",@[],NULL));
+        assert(!MSWritePreferenceValue(@"DockDrawerPinned",(@[@"a",@"b",@"c",@"d",@"e",@"f"]),NULL));
+        assert(!MSWritePreferenceValue(@"DockDrawerPinned",(@[@"a",@"a"]),NULL));
+        assert(!MSWritePreferenceValue(@"DockDrawerPinned",@[@"bad id"],NULL));
+        assert(!MSWritePreferenceValue(@"DockDrawerPinned",@[@1],NULL));
+        assert(!MSWritePreferenceValue(@"DockDrawerPinned",@YES,NULL));
+        assert(!MSWritePreferenceValue(@"DockNotchLift",@[@"a"],NULL));
         assert(!MSWritePreferenceValue(@"unrecognized",@YES,NULL));
         assert(MSWritePreferenceValue(@"DebugSessionToken",@1000,NULL));
         assert(MSWritePreferenceFlag(@"DebugEnabled",YES,NULL));

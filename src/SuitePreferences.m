@@ -63,18 +63,31 @@ BOOL MSWritePreferenceFlag(NSString *key, BOOL enabled, NSError **error) {
     return MSWritePreferenceValue(key, @(enabled), error);
 }
 
+// DockDrawerPinned: at most 5 distinct bundle identifiers.
+static BOOL ValidBundleList(id value) {
+    if (![value isKindOfClass:NSArray.class] || [value count] > 5) return NO;
+    NSCharacterSet *bad = [[NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_"] invertedSet];
+    for (id item in value) {
+        if (![item isKindOfClass:NSString.class]) return NO;
+        NSString *bundle = item;
+        if (!bundle.length || bundle.length > 255 || [bundle rangeOfCharacterFromSet:bad].location != NSNotFound) return NO;
+    }
+    return [NSSet setWithArray:value].count == [value count];
+}
+
 NSArray<NSString *> *MSRepairKeys(void) {
     return @[@"RimGeometryEnabled", @"LauncherRecoveryEnabled", @"GlassAnimationEnabled",
              @"IslandLayoutEnabled", @"ShortHaloEnabled", @"EdgeColorEnabled", @"SwipeDirectionEnabled",
-             @"DockNotchEnabled", @"DockDrawerEnabled"];
+             @"DockNotchEnabled", @"DockDrawerEnabled", @"DockDrawerDivider"];
 }
 
 BOOL MSWritePreferenceValue(NSString *key, id value, NSError **error) {
     if (error) *error = nil;
     NSString *path = MSPreferencesPath();
     NSArray *known = [@[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled",
-        @"DebugEnabled", @"DebugSessionToken", @"EdgeThickness", @"EdgeDynamics", @"IdleGlowEnabled", @"IdleGlowShineEnabled", @"IdleGlowAdaptiveEnabled", @"IdleGlowFrostedEnabled", @"IdleGlowDensity", @"IdleGlowFade", @"DockNotchLift"] arrayByAddingObjectsFromArray:MSRepairKeys()];
-    BOOL valid = [known containsObject:key] && [value isKindOfClass:NSNumber.class] && isfinite([value doubleValue]);
+        @"DebugEnabled", @"DebugSessionToken", @"EdgeThickness", @"EdgeDynamics", @"IdleGlowEnabled", @"IdleGlowShineEnabled", @"IdleGlowAdaptiveEnabled", @"IdleGlowFrostedEnabled", @"IdleGlowDensity", @"IdleGlowFade", @"DockNotchLift", @"DockDrawerPinned"] arrayByAddingObjectsFromArray:MSRepairKeys()];
+    BOOL valid = [known containsObject:key] && ([key isEqualToString:@"DockDrawerPinned"] ? ValidBundleList(value) :
+        [value isKindOfClass:NSNumber.class] && isfinite([value doubleValue]));
     if ([key isEqualToString:@"EdgeThickness"]) valid = valid && [value doubleValue] >= .5 && [value doubleValue] <= 4;
     if ([key isEqualToString:@"EdgeDynamics"]) valid = valid && [value doubleValue] >= 0 && [value doubleValue] <= 1;
     if ([key isEqualToString:@"IdleGlowDensity"]) valid = valid && [value doubleValue] >= 0 && [value doubleValue] <= 1;

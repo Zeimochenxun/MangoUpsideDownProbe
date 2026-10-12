@@ -96,7 +96,7 @@ static BOOL SuiteFlag(NSString *key) {
 
     NSError *nativeReadError = nil;
     (void)MSReadNativeUpsideDown(&nativeReadError);
-    [self addSection:@"屏幕倒置" footer:nativeReadError ? nativeReadError.localizedDescription : @"“Mango 原生屏幕倒置”独立于总开关，保存后按页尾说明 Respring。“倒置方向与小芒”“分屏倒置”是模块开关（需重启用户空间）；启动器重开倒置恢复依赖分屏倒置，调整位置大小保持倒置、通知上下滑动方向修复、Dock 避开刘海依赖倒置方向与小芒。Dock 避开刘海：配合 Lynx 等开启的 iPad 样式 Dock，倒置时把完全抬起的 Dock 再抬高（滑杆可调，默认 35 点）露出刘海，并在刘海下沿约 13 点高的一窄条里只响应系统上划手势（回主屏/唤出 Dock），不再误触 App 在那里的按钮，这一窄条里的点按也不会传给 App；正向不变。Dock 第二排（默认关闭，依赖倒置方向与小芒，正向倒置都可用）：iPad 样式 Dock 完全显示后，在 Dock 上或紧贴它的上沿往上拉，Dock 像抽屉一样拉长出第二排，放最近用过、第一排没有的 App；往下拉收起，Dock 收起时一起收起。"];
+    [self addSection:@"屏幕倒置" footer:nativeReadError ? nativeReadError.localizedDescription : @"“Mango 原生屏幕倒置”独立于总开关，保存后按页尾说明 Respring。“倒置方向与小芒”“分屏倒置”是模块开关（需重启用户空间）；启动器重开倒置恢复依赖分屏倒置，调整位置大小保持倒置、通知上下滑动方向修复、Dock 避开刘海依赖倒置方向与小芒。Dock 避开刘海：配合 Lynx 等开启的 iPad 样式 Dock，倒置时把完全抬起的 Dock 再抬高（滑杆可调，默认 35 点）露出刘海，并在刘海下沿约 13 点高的一窄条里只响应系统上划手势（回主屏/唤出 Dock），不再误触 App 在那里的按钮，这一窄条里的点按也不会传给 App；正向不变。Dock 第二排（默认关闭，依赖倒置方向与小芒，正向倒置都可用）：iPad 样式 Dock 完全显示后，在 Dock 上或紧贴它的上沿往上拉，Dock 像抽屉一样拉长出第二排，左边放“第二排固定 App”里选的 App（按选择顺序），右边放最近用过、第一排没有的 App，中间分隔线可关；往下拉收起，Dock 收起时一起收起。"];
     [self addSwitch:@"Mango 原生屏幕倒置" key:NativeUpsideDownKey];
     PSSpecifier *nativeItem = _specifiers.lastObject;
     [nativeItem setProperty:@(!nativeReadError) forKey:@"enabled"];
@@ -108,6 +108,8 @@ static BOOL SuiteFlag(NSString *key) {
     [self addSwitch:@"倒置时 Dock 避开刘海" key:@"DockNotchEnabled"];
     [self addSlider:@"Dock 抬升高度（点，默认 35）" key:@"DockNotchLift" min:0 max:50];
     [self addSwitch:@"Dock 第二排（上拉抽屉）" key:@"DockDrawerEnabled"];
+    [self addLink:@"第二排固定 App" detail:NSClassFromString(@"MangoSuiteDockPinnedController")];
+    [self addSwitch:@"第二排固定与最近之间的分隔线" key:@"DockDrawerDivider"];
 
     [self addSection:@"调试" footer:nil];
     [self addLink:@"调试日志与一键提取" detail:NSClassFromString(@"MangoSuiteDiagnosticsController")];

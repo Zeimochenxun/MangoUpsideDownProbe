@@ -18,6 +18,9 @@
 // row 1 already shows and drops the oldest for each new one, so the drawer
 // keeps its own list of every app that comes to the front, newest first,
 // and shows the ones row 1 does not.
+// Pinned apps (Beta9.9.18): DockDrawerPinned, chosen in Settings, go first
+// in their order; recents fill the rest, after a divider styled like row
+// 1's when DockDrawerDivider is on.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -48,6 +51,10 @@ static NSMutableDictionary<NSString *,UIView *> *Icons;
 static NSString *Source=@"none",*InstallState=@"not-run",*IconFail=@"none";
 static NSUInteger Shown,Candidates;
 static CGFloat IconScale=NAN;
+static CGRect DividerFrame={{0,12},{1,49}};
+static __weak UIView *DividerSource;
+static UIView *Divider;
+static NSUInteger Pins;
 
 static BOOL DrawerOn(void){return MSRuntimeFlag(@"DockDrawerEnabled");}
 static id Call(id obj,NSString *name){
@@ -105,6 +112,12 @@ static void ApplyExtension(UIView *dock){
             if(Pitch<IconSize.width)Pitch=IconSize.width;
         }
     }
+    UIView *divider=Call(dock,@"dividerView");
+    if([divider isKindOfClass:UIView.class]&&divider.superview){
+        DividerSource=divider;
+        CGRect r=[divider convertRect:divider.bounds toView:plat];
+        if(r.size.width>0&&r.size.height>0)DividerFrame=r;
+    }
     CGFloat d=fmax(0,fmin(LastOffset,Extent));
     CGRect out=PlatBase;out.size.height+=d;
     PlatWritten=out;
@@ -149,14 +162,18 @@ static void RecordFront(void){
     while(MRU.count>MRUCap)[MRU removeLastObject];
     [MRU writeToURL:MRUFile() error:nil];
 }
+static NSSet<NSString *> *UserDock(id vc){
+    NSMutableSet<NSString *> *out=[NSMutableSet set];
+    for(id icon in Items(Call(Call(vc,@"dockListModel"),@"icons"))){NSString *b=Bundle(icon,@"applicationBundleID");if(b)[out addObject:b];}
+    return out;
+}
 // Recent apps, newest first: the drawer's own list, then the app
 // switcher's if reachable, then SpringBoard's 3 dock recents. Row 1's apps
 // and the app in front are skipped.
 static NSArray<NSString *> *RecentBundles(UIView *dock){
     id vc=Call(dock.window.rootViewController,@"floatingDockViewController");
     id model=Call(Call(vc,@"suggestionsViewController"),@"suggestionsModel");
-    NSMutableSet<NSString *> *skip=[NSMutableSet set];
-    for(id icon in Items(Call(Call(vc,@"dockListModel"),@"icons"))){NSString *b=Bundle(icon,@"applicationBundleID");if(b)[skip addObject:b];}
+    NSMutableSet<NSString *> *skip=[UserDock(vc) mutableCopy];
     for(id item in Items(Call(model,@"currentDisplayItems"))){NSString *b=Bundle(item,@"bundleIdentifier");if(b)[skip addObject:b];}
     NSString *front=Bundle(Call(UIApplication.sharedApplication,@"_accessibilityFrontMostApplication"),@"bundleIdentifier");
     if(front)[skip addObject:front];
@@ -239,23 +256,49 @@ static void Refresh(UIView *dock){
     if(!model||!Strip)return;
     id vc=Call(dock.window.rootViewController,@"floatingDockViewController");
     id iconModel=Call(Call(Call(vc,@"suggestionsViewController"),@"suggestionsModel"),@"iconModel")?:Call(Call(vc,@"iconManager"),@"iconModel");
-    NSUInteger cap=(NSUInteger)fmax(1,floor((PlatBase.size.width-2*Margin+(Pitch-IconSize.width))/Pitch));
+    // Row 1 spaces its two lists by a margin, the divider and a margin.
+    CGFloat gap=2*Margin+DividerFrame.size.width;
+    NSUInteger (^capacity)(CGFloat)=^NSUInteger(CGFloat g){
+        return (NSUInteger)fmax(1,floor((PlatBase.size.width-2*Margin-g+(Pitch-IconSize.width))/Pitch));
+    };
     NSMutableArray<UIView *> *views=[NSMutableArray array];
     NSMutableSet<NSString *> *used=[NSMutableSet set];
+    NSSet<NSString *> *userDock=UserDock(vc);
+    for(id bundle in Items(MSRuntimeSettings()[@"DockDrawerPinned"])){
+        if(views.count>=capacity(0))break;
+        if(![bundle isKindOfClass:NSString.class]||[userDock containsObject:bundle]||[used containsObject:bundle])continue;
+        UIView *v=IconView(bundle,model,iconModel);
+        if(v){[views addObject:v];[used addObject:bundle];}
+    }
+    Pins=views.count;
+    BOOL divide=Pins&&MSRuntimeFlag(@"DockDrawerDivider");
+    NSUInteger cap=capacity(divide?gap:0);
     NSArray<NSString *> *bundles=RecentBundles(dock);
     Candidates=bundles.count;
     for(NSString *bundle in bundles){
         if(views.count>=cap)break;
+        if([used containsObject:bundle])continue;
         UIView *v=IconView(bundle,model,iconModel);
         if(v){[views addObject:v];[used addObject:bundle];}
     }
+    divide=divide&&views.count>Pins;
     for(NSString *bundle in Icons.allKeys)if(![used containsObject:bundle]){[Icons[bundle] removeFromSuperview];[Icons removeObjectForKey:bundle];}
-    CGFloat total=views.count?views.count*Pitch-(Pitch-IconSize.width):0;
+    CGFloat g=divide?gap:0;
+    CGFloat total=views.count?views.count*Pitch-(Pitch-IconSize.width)+g:0;
     CGFloat x=(PlatBase.size.width-total)/2;
     for(NSUInteger i=0;i<views.count;i++){
-        views[i].center=CGPointMake(x+i*Pitch+IconSize.width/2,Margin+IconSize.height/2);
+        views[i].center=CGPointMake(x+i*Pitch+(i>=Pins?g:0)+IconSize.width/2,Margin+IconSize.height/2);
         if(views[i].superview!=Strip)[Strip addSubview:views[i]];
     }
+    if(!Divider)Divider=[UIView new];
+    UIView *source=DividerSource;
+    Divider.backgroundColor=source.backgroundColor?:[UIColor colorWithWhite:1 alpha:.3];
+    Divider.alpha=source?source.alpha:1;
+    Divider.layer.compositingFilter=source.layer.compositingFilter;
+    CGFloat end=x+Pins*Pitch-(Pitch-IconSize.width);
+    Divider.frame=CGRectMake(end+g/2-DividerFrame.size.width/2,DividerFrame.origin.y,DividerFrame.size.width,DividerFrame.size.height);
+    Divider.hidden=!divide;
+    if(Divider.superview!=Strip)[Strip addSubview:Divider];
     Shown=views.count;
 }
 
@@ -344,9 +387,9 @@ static void Status(double progress){
     double now=CACurrentMediaTime();
     if(now-last<2)return;
     last=now;
-    NSString *body=[NSString stringWithFormat:@"DRAWER status install=%@ on=%d pan=%d p=%.2f progress=%.2f extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ candidates=%lu shown=%lu iconScale=%.3f iconFail=%@ recentFront=%@",
+    NSString *body=[NSString stringWithFormat:@"DRAWER status install=%@ on=%d pan=%d p=%.2f progress=%.2f extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ candidates=%lu pins=%lu shown=%lu divider=%d iconScale=%.3f iconFail=%@ recentFront=%@",
         InstallState,DrawerOn(),DrawerPan!=nil,P,progress,Extent,LastOffset,Margin,NSStringFromCGSize(IconSize),Pitch,NSStringFromCGRect(PlatBase),Source,
-        (unsigned long)Candidates,(unsigned long)Shown,IconScale,IconFail,[[MRU subarrayWithRange:NSMakeRange(0,MIN(MRU.count,(NSUInteger)6))] componentsJoinedByString:@","]];
+        (unsigned long)Candidates,(unsigned long)Pins,(unsigned long)Shown,Divider&&!Divider.hidden,IconScale,IconFail,[[MRU subarrayWithRange:NSMakeRange(0,MIN(MRU.count,(NSUInteger)6))] componentsJoinedByString:@","]];
     if([body isEqualToString:lastBody])return;
     lastBody=body;
     MSDiagnosticsLog(@"World",body);

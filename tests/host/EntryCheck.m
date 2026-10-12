@@ -19,8 +19,8 @@ int main(int argc, const char *argv[]) {
             if (item.cellType == PSSwitchCell) [keys addObject:[item propertyForKey:@"key"]];
             if (item.cellType == PSLinkCell) [links addObject:NSStringFromClass(item.detailClass)];
         }
-        NSArray *required = @[@"Enabled", @"IdleEnabled", @"IdleGlowEnabled", @"IdleGlowShineEnabled", @"IdleGlowAdaptiveEnabled", @"IdleGlowFrostedEnabled", @"RimGeometryEnabled", @"GlassAnimationEnabled", @"ShortHaloEnabled", @"EdgeColorEnabled", @"AdaptiveEnabled", @"LeXiang.UpsideDown.Enabled", @"WorldEnabled", @"SplitEnabled", @"LauncherRecoveryEnabled", @"IslandLayoutEnabled", @"SwipeDirectionEnabled", @"DockNotchEnabled", @"DockDrawerEnabled"];
-        NSArray *children = @[@"MangoSuiteGlassController", @"MangoIslandAdaptiveColorPrefsController", @"MangoSuiteDiagnosticsController"];
+        NSArray *required = @[@"Enabled", @"IdleEnabled", @"IdleGlowEnabled", @"IdleGlowShineEnabled", @"IdleGlowAdaptiveEnabled", @"IdleGlowFrostedEnabled", @"RimGeometryEnabled", @"GlassAnimationEnabled", @"ShortHaloEnabled", @"EdgeColorEnabled", @"AdaptiveEnabled", @"LeXiang.UpsideDown.Enabled", @"WorldEnabled", @"SplitEnabled", @"LauncherRecoveryEnabled", @"IslandLayoutEnabled", @"SwipeDirectionEnabled", @"DockNotchEnabled", @"DockDrawerEnabled", @"DockDrawerDivider"];
+        NSArray *children = @[@"MangoSuiteGlassController", @"MangoIslandAdaptiveColorPrefsController", @"MangoSuiteDockPinnedController", @"MangoSuiteDiagnosticsController"];
         if (![keys isEqual:required] || ![links isEqual:children]) {
             NSLog(@"FAIL switches=%@ links=%@", keys, links); return 1;
         }
