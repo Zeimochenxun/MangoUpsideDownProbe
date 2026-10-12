@@ -13,8 +13,11 @@
 //   drags in apps and fails on the home screen; it is told not to begin for
 //   the drags the drawer takes (up, or down while the drawer is open);
 // - row 2 icons are real SBIconViews configured like row 1's and tapped
-//   through the same SBHIconManager; their apps come from the app switcher's
-//   recent layouts (SpringBoard keeps only 3 dock recents), minus row 1.
+//   through the same SBHIconManager.
+// Row 2's apps (Beta9.9.16): SpringBoard's dock remembers only the 3 recents
+// row 1 already shows and drops the oldest for each new one, so the drawer
+// keeps its own list of every app that comes to the front, newest first,
+// and shows the ones row 1 does not.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -42,8 +45,8 @@ static __weak UIView *Dock;
 static UIView *Strip;
 static UIPanGestureRecognizer *DrawerPan;
 static NSMutableDictionary<NSString *,UIView *> *Icons;
-static NSString *Source=@"none",*InstallState=@"not-run";
-static NSUInteger Shown;
+static NSString *Source=@"none",*InstallState=@"not-run",*IconFail=@"none";
+static NSUInteger Shown,Candidates;
 
 static BOOL DrawerOn(void){return MSRuntimeFlag(@"DockDrawerEnabled");}
 static id Call(id obj,NSString *name){
@@ -116,9 +119,29 @@ static void Settle(UIView *dock,BOOL animated){
     [dock layoutIfNeeded];
 }
 
-// Recent apps, newest first, from the app switcher; SpringBoard's dock
-// recents (only 3) when no switcher list is reachable. Row 1's apps and the
-// app in front are skipped.
+// The drawer's own recency list, fed from World.m's 250ms tick by whichever
+// app is in front, persisted so a respring keeps it.
+static const NSUInteger MRUCap=24;
+static NSMutableArray<NSString *> *MRU;
+static NSURL *MRUFile(void){
+    return [NSURL fileURLWithPath:[NSString stringWithUTF8String:jbroot("/var/mobile/Library/Application Support/MangoSuite/dock-recents.plist")]];
+}
+static void RecordFront(void){
+    if(!MRU){
+        MRU=[NSMutableArray array];
+        for(id b in [NSArray arrayWithContentsOfURL:MRUFile() error:nil])
+            if([b isKindOfClass:NSString.class]&&MRU.count<MRUCap)[MRU addObject:b];
+    }
+    NSString *front=Bundle(Call(UIApplication.sharedApplication,@"_accessibilityFrontMostApplication"),@"bundleIdentifier");
+    if(!front||[MRU.firstObject isEqualToString:front])return;
+    [MRU removeObject:front];
+    [MRU insertObject:front atIndex:0];
+    while(MRU.count>MRUCap)[MRU removeLastObject];
+    [MRU writeToURL:MRUFile() error:nil];
+}
+// Recent apps, newest first: the drawer's own list, then the app
+// switcher's if reachable, then SpringBoard's 3 dock recents. Row 1's apps
+// and the app in front are skipped.
 static NSArray<NSString *> *RecentBundles(UIView *dock){
     id vc=Call(dock.window.rootViewController,@"floatingDockViewController");
     id model=Call(Call(vc,@"suggestionsViewController"),@"suggestionsModel");
@@ -127,27 +150,31 @@ static NSArray<NSString *> *RecentBundles(UIView *dock){
     for(id item in Items(Call(model,@"currentDisplayItems"))){NSString *b=Bundle(item,@"bundleIdentifier");if(b)[skip addObject:b];}
     NSString *front=Bundle(Call(UIApplication.sharedApplication,@"_accessibilityFrontMostApplication"),@"bundleIdentifier");
     if(front)[skip addObject:front];
+    NSMutableArray<NSString *> *out=[NSMutableArray array];
+    void (^add)(NSString *)=^(NSString *b){if(b&&![skip containsObject:b]&&![out containsObject:b])[out addObject:b];};
+    for(NSString *b in MRU)add(b);
+    NSUInteger own=out.count;
+    NSString *switcher=@"none";
     NSArray *layouts=nil;
     for(UIWindow *w in dock.window.windowScene.windows){
         if(![NSStringFromClass(w.class) isEqualToString:@"SBMainSwitcherWindow"])continue;
         NSMutableArray *vcs=[NSMutableArray array];
         if(w.rootViewController)[vcs addObject:w.rootViewController];
         for(NSUInteger i=0;i<vcs.count&&i<16;i++)[vcs addObjectsFromArray:((UIViewController *)vcs[i]).childViewControllers];
-        for(id c in vcs)if((layouts=Items(Call(c,@"recentAppLayouts")))){Source=NSStringFromClass([c class]);break;}
+        for(id c in vcs)if((layouts=Items(Call(c,@"recentAppLayouts")))){switcher=NSStringFromClass([c class]);break;}
         if(layouts)break;
     }
     if(!layouts){
         layouts=Items(Call(Call(objc_getClass("SBMainSwitcherViewController"),@"sharedInstanceIfExists"),@"recentAppLayouts"));
-        if(layouts)Source=@"SBMainSwitcherViewController.shared";
+        if(layouts)switcher=@"SBMainSwitcherViewController.shared";
     }
-    NSMutableArray<NSString *> *out=[NSMutableArray array];
+    NSUInteger fromSwitcher=out.count;
     for(id layout in layouts)
-        for(id item in Items(Call(layout,@"allItems"))){NSString *b=Bundle(item,@"bundleIdentifier");if(b&&![out containsObject:b])[out addObject:b];}
-    if(!out.count){
-        Source=@"dock-recents";
-        for(id item in Items(Call(model,@"currentRecentDisplayItemsSortedByRecency"))){NSString *b=Bundle(item,@"bundleIdentifier");if(b&&![out containsObject:b])[out addObject:b];}
-    }
-    [out filterUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *b,__unused NSDictionary *bindings){return ![skip containsObject:b];}]];
+        for(id item in Items(Call(layout,@"allItems")))add(Bundle(item,@"bundleIdentifier"));
+    fromSwitcher=out.count-fromSwitcher;
+    for(id item in Items(Call(model,@"currentRecentDisplayItemsSortedByRecency")))add(Bundle(item,@"bundleIdentifier"));
+    Source=[NSString stringWithFormat:@"own:%lu/%lu switcher:%@:%lu dock:%lu skip:%lu",(unsigned long)own,(unsigned long)MRU.count,
+        switcher,(unsigned long)fromSwitcher,(unsigned long)(out.count-own-fromSwitcher),(unsigned long)skip.count];
     return out;
 }
 // A real icon view set up the way SpringBoard set up row 1's `model`.
@@ -158,11 +185,12 @@ static UIView *IconView(NSString *bundle,UIView *model,id iconModel){
     id icon=[iconModel respondsToSelector:lookup]?((id(*)(id,SEL,id))objc_msgSend)(iconModel,lookup,bundle):nil;
     Class iconClass=objc_getClass("SBIconView");
     SEL options=NSSelectorFromString(@"configurationOptions"),info=NSSelectorFromString(@"iconImageInfo"),scale=NSSelectorFromString(@"iconContentScale");
-    if(!icon||!iconClass||![iconClass instancesRespondToSelector:@selector(initWithConfigurationOptions:listLayoutProvider:)]||
-       ![model respondsToSelector:options]||![model respondsToSelector:info]||![model respondsToSelector:scale])return nil;
+    if(!icon){IconFail=[NSString stringWithFormat:@"no-icon:%@ model=%@",bundle,iconModel?NSStringFromClass([iconModel class]):@"nil"];return nil;}
+    if(!iconClass||![iconClass instancesRespondToSelector:@selector(initWithConfigurationOptions:listLayoutProvider:)]||
+       ![model respondsToSelector:options]||![model respondsToSelector:info]||![model respondsToSelector:scale]){IconFail=@"no-icon-view-api";return nil;}
     view=[[iconClass alloc] initWithConfigurationOptions:((unsigned long long(*)(id,SEL))objc_msgSend)(model,options)
                                       listLayoutProvider:Call(model,@"listLayoutProvider")];
-    if(![view isKindOfClass:UIView.class])return nil;
+    if(![view isKindOfClass:UIView.class]){IconFail=@"init-failed";return nil;}
     for(NSString *name in @[@"location",@"delegate"]){
         SEL setter=NSSelectorFromString([NSString stringWithFormat:@"set%@%@:",[[name substringToIndex:1] uppercaseString],[name substringFromIndex:1]]);
         if([view respondsToSelector:setter])((void(*)(id,SEL,id))objc_msgSend)(view,setter,Call(model,name));
@@ -187,7 +215,9 @@ static void Refresh(UIView *dock){
     NSUInteger cap=(NSUInteger)fmax(1,floor((PlatBase.size.width-2*Margin+(Pitch-IconSize.width))/Pitch));
     NSMutableArray<UIView *> *views=[NSMutableArray array];
     NSMutableSet<NSString *> *used=[NSMutableSet set];
-    for(NSString *bundle in RecentBundles(dock)){
+    NSArray<NSString *> *bundles=RecentBundles(dock);
+    Candidates=bundles.count;
+    for(NSString *bundle in bundles){
         if(views.count>=cap)break;
         UIView *v=IconView(bundle,model,iconModel);
         if(v){[views addObject:v];[used addObject:bundle];}
@@ -287,8 +317,9 @@ static void Status(double progress){
     double now=CACurrentMediaTime();
     if(now-last<2)return;
     last=now;
-    NSString *body=[NSString stringWithFormat:@"DRAWER status install=%@ on=%d pan=%d p=%.2f progress=%.2f extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ shown=%lu",
-        InstallState,DrawerOn(),DrawerPan!=nil,P,progress,Extent,LastOffset,Margin,NSStringFromCGSize(IconSize),Pitch,NSStringFromCGRect(PlatBase),Source,(unsigned long)Shown];
+    NSString *body=[NSString stringWithFormat:@"DRAWER status install=%@ on=%d pan=%d p=%.2f progress=%.2f extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ candidates=%lu shown=%lu iconFail=%@ recentFront=%@",
+        InstallState,DrawerOn(),DrawerPan!=nil,P,progress,Extent,LastOffset,Margin,NSStringFromCGSize(IconSize),Pitch,NSStringFromCGRect(PlatBase),Source,
+        (unsigned long)Candidates,(unsigned long)Shown,IconFail,[[MRU subarrayWithRange:NSMakeRange(0,MIN(MRU.count,(NSUInteger)6))] componentsJoinedByString:@","]];
     if([body isEqualToString:lastBody])return;
     lastBody=body;
     MSDiagnosticsLog(@"World",body);
@@ -296,6 +327,7 @@ static void Status(double progress){
 // World.m's 250ms reconcile: attaches or removes the drawer's pan, and
 // closes the drawer once the dock has gone away.
 void MSDockDrawerTick(UIView *dock,double progress){
+    if(DrawerOn())RecordFront();
     BOOL on=dock&&DrawerOn()&&[InstallState isEqualToString:@"hooked"];
     if(DrawerPan&&(!on||DrawerPan.view!=dock)){[DrawerPan.view removeGestureRecognizer:DrawerPan];DrawerPan=nil;}
     if(!on){

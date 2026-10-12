@@ -1,9 +1,13 @@
-# Mango Suite Beta9.9.15（以 Beta9.3 为基准）测试版
+# Mango Suite Beta9.9.16（以 Beta9.3 为基准）测试版
 
-版本 `1.2.0~beta9.9.15`，安装包 `MangoSuite-1.2.0-Beta9.9.15-RootHide-arm64e.deb`。Beta9.9.15 新增 Dock 第二排（上拉抽屉，默认关闭）；Beta9.9.14 只加 Dock 第二排的只读探测；Beta9.9.13 只为 Dock 抬升高度加一个滑杆；Beta9.9.11、Beta9.9.12 只修改“倒置时 Dock 避开刘海”（见下面三节）；Beta9.9.10 在 Beta9.9.9 基础上新增该开关；Beta9.9.9 在 Beta9.9.1 基础上新增“静止灵动岛黑色光晕”（见文末），其余不变。
+版本 `1.2.0~beta9.9.16`，安装包 `MangoSuite-1.2.0-Beta9.9.16-RootHide-arm64e.deb`。Beta9.9.16 让 Dock 第二排用自己的最近使用列表；Beta9.9.15 新增 Dock 第二排（上拉抽屉，默认关闭）；Beta9.9.14 只加 Dock 第二排的只读探测；Beta9.9.13 只为 Dock 抬升高度加一个滑杆；Beta9.9.11、Beta9.9.12 只修改“倒置时 Dock 避开刘海”（见下面三节）；Beta9.9.10 在 Beta9.9.9 基础上新增该开关；Beta9.9.9 在 Beta9.9.1 基础上新增“静止灵动岛黑色光晕”（见文末），其余不变。
 适用于已正常运行的 Mango **1.0-Beta9-1 / iOS 16.5 / Dopamine RootHide / arm64e**，沿用现有 iPhone 13 mini 目标。
 
 Beta9.3 专门处理上版启动器仍无法倒置的反馈。日志显示方向2已识别，但窗口旋转后的校验坐标仍为正向，随后修正长期暂停。本版在“启动器重开倒置恢复”开启时改为修正已验证 Mango 启动器的内容根视图，使用子层坐标校验，并为其保存独立所有权；停用或返回正向时恢复自身变换。
+
+## Beta9.9.16：Dock 第二排改用自己的最近使用列表
+
+真机反馈第二排始终是空的：系统 Dock 只记 3 个最近使用的 App，正好是第一排显示的那 3 个，新开一个就挤掉最旧的，第二排在排除第一排之后无 App 可放。现在开关打开后，抽屉自己每 0.25 秒记录一次前台 App，按最近顺序保留 24 个，存在 `/var/mobile/Library/Application Support/MangoSuite/dock-recents.plist`（Respring 后保留）；第二排显示其中第一排没有、也不是当前前台的 App，App 切换器列表和系统 Dock 的 3 个最近作为补充。列表从打开开关后开始积累，用过 4 个以上的 App 后第二排才会出现图标。`DRAWER status` 新增每个来源的个数、候选数、图标创建失败原因和最近记录的前台 App。
 
 ## Beta9.9.15：Dock 第二排（上拉抽屉）第一版
 
