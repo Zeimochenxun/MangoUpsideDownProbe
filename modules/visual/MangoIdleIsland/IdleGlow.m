@@ -6,14 +6,15 @@
 
 static NSString * const MaskName = @"MangoSuiteIdleGlowMask";
 
-typedef struct { double density, fade; BOOL shine, adaptive; } GlowParams;
+typedef struct { double density, fade; BOOL shine, adaptive, frosted; } GlowParams;
 
 // Suite settings (Settings > Mango Suite > Island, idle): black density 0...1 (default 1), the fraction
 // of the pill height at which the black has faded out (0.3...1, default 0.55), IdleGlowShineEnabled for
-// the lower-edge light and thin rim, IdleGlowAdaptiveEnabled for the light-background style.
+// the lower-edge light and thin rim, IdleGlowAdaptiveEnabled for the light-background style and
+// IdleGlowFrostedEnabled (default off) to force that style whatever the background is.
 static GlowParams ReadParams(void) {
     return (GlowParams){ MSRuntimeNumber(@"IdleGlowDensity", 1, 0, 1), MSRuntimeNumber(@"IdleGlowFade", .55, .3, 1),
-                         MSRuntimeFlag(@"IdleGlowShineEnabled"), MSRuntimeFlag(@"IdleGlowAdaptiveEnabled") };
+                         MSRuntimeFlag(@"IdleGlowShineEnabled"), MSRuntimeFlag(@"IdleGlowAdaptiveEnabled"), MSRuntimeFlag(@"IdleGlowFrostedEnabled") };
 }
 
 static id Black(double alpha) { return (__bridge id)[UIColor colorWithWhite:0 alpha:alpha].CGColor; }
@@ -83,7 +84,7 @@ static CAGradientLayer *Vertical(NSArray *colors, NSArray<NSNumber *> *locations
 - (void)refresh {
     GlowParams p = ReadParams();
     CGSize s = self.bounds.size;
-    if (_hasApplied && p.density == _applied.density && p.fade == _applied.fade && p.shine == _applied.shine && p.adaptive == _applied.adaptive && CGSizeEqualToSize(s, _appliedSize)) return;
+    if (_hasApplied && p.density == _applied.density && p.fade == _applied.fade && p.shine == _applied.shine && p.adaptive == _applied.adaptive && p.frosted == _applied.frosted && CGSizeEqualToSize(s, _appliedSize)) return;
     _applied = p; _appliedSize = s; _hasApplied = YES;
     [CATransaction begin]; [CATransaction setDisableActions:YES];
     CGRect b = self.bounds;
@@ -100,14 +101,15 @@ static CAGradientLayer *Vertical(NSArray *colors, NSArray<NSNumber *> *locations
 // luminance < 0 means unknown: keep the current finish. Hysteresis keeps a mid-tone background from flickering.
 - (void)adaptToLuminance:(double)luminance {
     BOOL light = _light;
-    if (!_applied.adaptive) light = NO;
+    if (_applied.frosted) light = YES;
+    else if (!_applied.adaptive) light = NO;
     else if (luminance > .66) light = YES;
     else if (luminance >= 0 && luminance < .55) light = NO;
     if (_styled && light == _light) return;
     BOOL first = !_styled;
     _styled = YES; _light = light;
     [self applyStyleAnimated:!first];
-    MSDiagnosticsLog(@"Idle", [NSString stringWithFormat:@"[GLOW] finish=%@ luminance=%.2f adaptive=%d", light ? @"frosted" : @"clear", luminance, _applied.adaptive]);
+    MSDiagnosticsLog(@"Idle", [NSString stringWithFormat:@"[GLOW] finish=%@ luminance=%.2f adaptive=%d forced=%d", light ? @"frosted" : @"clear", luminance, _applied.adaptive, _applied.frosted]);
 }
 
 - (void)layoutSubviews {
@@ -146,7 +148,8 @@ void MSIdleGlowSync(UIView *glow, UIView *host, UIView *backing, CGFloat opacity
     if ([glow isKindOfClass:MSIdleGlowView.class]) {
         MSIdleGlowView *view = (MSIdleGlowView *)glow;
         [view refresh];
-        [view adaptToLuminance:ReadParams().adaptive ? MSIslandBackgroundLuminance(host, backing) : -1];
+        GlowParams p = ReadParams();
+        [view adaptToLuminance:(p.adaptive && !p.frosted) ? MSIslandBackgroundLuminance(host, backing) : -1];
     }
     MaskBacking(backing);
 }

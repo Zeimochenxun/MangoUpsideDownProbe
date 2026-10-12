@@ -69,13 +69,14 @@ static BOOL SuiteFlag(NSString *key) {
     [self addSection:@"总开关" footer:@"总开关，以及“静止灵动岛”“背景颜色自适应”“倒置方向与小芒”“分屏倒置”四个模块开关，更改后需在多巴胺中“重新启动用户空间”。其余开关和滑杆约 1 秒内生效。详见页尾“如何应用开关更改”。"];
     [self addSwitch:@"启用整合修复" key:@"Enabled"];
 
-    [self addSection:@"灵动岛 · 静止态" footer:@"黑色光晕：顶部纯黑向下渐隐，同时把玻璃底渐隐成透明。浓度是黑色的深浅，渐隐位置是黑色在胶囊高度的多少处消失（越小越靠上）。下沿提亮是下边缘的柔光和一圈下沿更亮的细玻璃边。随背景明暗自动切换：背景偏亮（如白色页面）时，改用下半淡灰磨砂 + 全周细轮廓线，避免灰糊和下沿消失；约每秒取样一次岛周围的亮度。"];
+    [self addSection:@"灵动岛 · 静止态" footer:@"黑色光晕：顶部纯黑向下渐隐，同时把玻璃底渐隐成透明。浓度是黑色的深浅，渐隐位置是黑色在胶囊高度的多少处消失（越小越靠上）。下沿提亮是下边缘的柔光和一圈下沿更亮的细玻璃边。随背景明暗自动切换：背景偏亮（如白色页面）时，改用下半淡灰磨砂 + 全周细轮廓线，避免灰糊和下沿消失；约每秒取样一次岛周围的亮度。若自动切换没有生效（取样拿不到前台 App 画面），打开“始终使用磨砂样式”即可固定为磨砂。"];
     [self addSwitch:@"静止灵动岛与过渡修复" key:@"IdleEnabled"];
     [self addSwitch:@"黑色光晕（上黑下透）" key:@"IdleGlowEnabled"];
     [self addSlider:@"黑色浓度" key:@"IdleGlowDensity" min:0 max:1];
     [self addSlider:@"渐隐位置（越小黑色越靠上）" key:@"IdleGlowFade" min:.3 max:1];
     [self addSwitch:@"下沿提亮" key:@"IdleGlowShineEnabled"];
     [self addSwitch:@"随背景明暗自动切换" key:@"IdleGlowAdaptiveEnabled"];
+    [self addSwitch:@"始终使用磨砂样式（不随背景变化）" key:@"IdleGlowFrostedEnabled"];
 
     [self addSection:@"灵动岛 · 玻璃与边缘" footer:@"边缘实时采色默认关闭；采色粗细与动态程度只在采色开启时起作用。"];
     [self addLink:@"玻璃与边缘光参数" detail:NSClassFromString(@"MangoSuiteGlassController")];
@@ -145,7 +146,7 @@ static BOOL SuiteFlag(NSString *key) {
         if (!saved) [self showMessage:error.localizedDescription ?: @"请重新打开设置后检查当前倒置开关。" title:@"保存失败"];
         return;
     }
-    NSArray *known = [@[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled", @"DebugEnabled", @"IdleGlowEnabled", @"IdleGlowShineEnabled", @"IdleGlowAdaptiveEnabled"] arrayByAddingObjectsFromArray:MSRepairKeys()];
+    NSArray *known = [@[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled", @"DebugEnabled", @"IdleGlowEnabled", @"IdleGlowShineEnabled", @"IdleGlowAdaptiveEnabled", @"IdleGlowFrostedEnabled"] arrayByAddingObjectsFromArray:MSRepairKeys()];
     if (![known containsObject:key] || ![value isKindOfClass:NSNumber.class]) return;
     BOOL enabled = [value boolValue];
     NSError *saveError = nil;
