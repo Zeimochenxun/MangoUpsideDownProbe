@@ -21,6 +21,9 @@
 // Pinned apps (Beta9.9.18): DockDrawerPinned, chosen in Settings, go first
 // in their order; recents fill the rest, after a divider styled like row
 // 1's when DockDrawerDivider is on.
+// Beta9.9.20: running-app marks like Lynx's under row 2, and a pull that
+// starts while SpringBoard is still animating the dock in waits for the
+// dock to come to rest instead of pulling row 2 out from under it.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -56,6 +59,9 @@ static __weak UIView *DividerSource;
 static UIView *Divider;
 static NSUInteger Pins;
 static NSString *DividerLook=@"none";
+static NSUInteger Springs;
+static BOOL Waiting;
+static CGFloat Origin;
 
 static BOOL DrawerOn(void){return MSRuntimeFlag(@"DockDrawerEnabled");}
 static id Call(id obj,NSString *name){
@@ -251,12 +257,68 @@ static UIView *IconView(NSString *bundle,UIView *model,id iconModel){
     Icons[bundle]=view;
     return view;
 }
+// Lynx's running-app marks (showDockIndicators) hang on row 1's icon views
+// as `indicator`. Row 2 copies the look of one that is showing (none when
+// Lynx's marks are off or no row 1 app runs) and puts it under each row 2
+// app that is still running.
+static char IndicatorKey;
+static CGRect IndicatorBox;
+static UIView *IndicatorSource;
+static NSString *IndicatorLook=@"none";
+static void LearnIndicator(UIView *dock){
+    IndicatorBox=CGRectNull;IndicatorSource=nil;IndicatorLook=@"none";
+    Class iconClass=objc_getClass("SBIconView");
+    for(NSString *name in @[@"userIconListView",@"recentIconListView"])
+        for(UIView *icon in ((UIView *)Call(dock,name)).subviews){
+            if(!iconClass||![icon isKindOfClass:iconClass])continue;
+            UIView *mark=Call(icon,@"indicator");
+            if(![mark isKindOfClass:UIView.class]||mark.hidden||mark.alpha<.01||!mark.window)continue;
+            IndicatorBox=[mark convertRect:mark.bounds toView:icon];
+            IndicatorSource=mark;
+            IndicatorLook=[NSString stringWithFormat:@"%@ box=%@ bg=%@ radius=%.1f alpha=%.2f in=%@",NSStringFromClass(mark.class),
+                NSStringFromCGRect(IndicatorBox),mark.backgroundColor,mark.layer.cornerRadius,mark.alpha,NSStringFromClass(mark.superview.class)];
+            return;
+        }
+}
+static BOOL Running(NSString *bundle){
+    id apps=Call(objc_getClass("SBApplicationController"),@"sharedInstance");
+    SEL lookup=NSSelectorFromString(@"applicationWithBundleIdentifier:"),running=NSSelectorFromString(@"isRunning");
+    id app=[apps respondsToSelector:lookup]?((id(*)(id,SEL,id))objc_msgSend)(apps,lookup,bundle):nil;
+    if(app&&![app respondsToSelector:running])app=Call(app,@"processState");
+    return [app respondsToSelector:running]&&((BOOL(*)(id,SEL))objc_msgSend)(app,running);
+}
+static void UpdateIndicators(void){
+    UIView *source=IndicatorSource;
+    for(NSString *bundle in Icons){
+        UIView *icon=Icons[bundle];
+        UIImageView *mark=objc_getAssociatedObject(icon,&IndicatorKey);
+        if(!source||CGRectIsNull(IndicatorBox)||icon.superview!=Strip||!Running(bundle)){mark.hidden=YES;continue;}
+        if(!mark){
+            mark=[UIImageView new];mark.userInteractionEnabled=NO;
+            objc_setAssociatedObject(icon,&IndicatorKey,mark,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        mark.backgroundColor=source.backgroundColor;
+        mark.alpha=source.alpha;
+        mark.layer.cornerRadius=source.layer.cornerRadius;
+        mark.layer.compositingFilter=source.layer.compositingFilter;
+        if([source isKindOfClass:UIImageView.class]){mark.image=((UIImageView *)source).image;mark.tintColor=source.tintColor;}
+        // IndicatorBox is in a row 1 icon view's own (unscaled) box; row 2's
+        // icon views have that same box around their centre.
+        CGRect box=IndicatorBox;
+        box.origin.x+=icon.center.x-IconSize.width/2;
+        box.origin.y+=icon.center.y-IconSize.height/2;
+        mark.frame=box;
+        if(mark.superview!=Strip)[Strip addSubview:mark];
+        mark.hidden=NO;
+    }
+}
 // Fills row 2 as the drawer starts opening; as many icons as row 1 fits.
 static void Refresh(UIView *dock){
     UIView *model=RowOneIcon(dock,NULL);
     if(!model||!Strip)return;
     id vc=Call(dock.window.rootViewController,@"floatingDockViewController");
     id iconModel=Call(Call(Call(vc,@"suggestionsViewController"),@"suggestionsModel"),@"iconModel")?:Call(Call(vc,@"iconManager"),@"iconModel");
+    LearnIndicator(dock);
     // Row 1 spaces its two lists by a margin, the divider and a margin.
     CGFloat gap=2*Margin+DividerFrame.size.width;
     NSUInteger (^capacity)(CGFloat)=^NSUInteger(CGFloat g){
@@ -283,7 +345,10 @@ static void Refresh(UIView *dock){
         if(v){[views addObject:v];[used addObject:bundle];}
     }
     divide=divide&&views.count>Pins;
-    for(NSString *bundle in Icons.allKeys)if(![used containsObject:bundle]){[Icons[bundle] removeFromSuperview];[Icons removeObjectForKey:bundle];}
+    for(NSString *bundle in Icons.allKeys)if(![used containsObject:bundle]){
+        [objc_getAssociatedObject(Icons[bundle],&IndicatorKey) removeFromSuperview];
+        [Icons[bundle] removeFromSuperview];[Icons removeObjectForKey:bundle];
+    }
     CGFloat g=divide?gap:0;
     CGFloat total=views.count?views.count*Pitch-(Pitch-IconSize.width)+g:0;
     CGFloat x=(PlatBase.size.width-total)/2;
@@ -309,6 +374,7 @@ static void Refresh(UIView *dock){
     Divider.frame=CGRectMake(end+g/2-DividerFrame.size.width/2,DividerFrame.origin.y,DividerFrame.size.width,DividerFrame.size.height);
     Divider.hidden=!divide;
     if(Divider.superview!=Strip)[Strip addSubview:Divider];
+    UpdateIndicators();
     Shown=views.count;
 }
 
@@ -321,6 +387,18 @@ static BOOL Wants(UIPanGestureRecognizer *g){
     if(fabs(v.y)<=fabs(v.x))return NO;
     return v.y<0?P<1:P>0;
 }
+// SpringBoard is still animating the dock (its own animation, not our spring).
+static BOOL Settling(UIView *dock){return !Springs&&dock.layer.animationKeys.count>0;}
+static void Finish(UIView *dock,CGFloat target,NSUInteger tries){
+    if(Settling(dock)&&tries<20){
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC),dispatch_get_main_queue(),^{Finish(dock,target,tries+1);});
+        return;
+    }
+    Springs++;
+    [UIView animateWithDuration:.45 delay:0 usingSpringWithDamping:.86 initialSpringVelocity:0
+                        options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction
+                     animations:^{P=target;Settle(dock,YES);} completion:^(__unused BOOL finished){Springs--;}];
+}
 @interface MSDockDrawerPan : NSObject <UIGestureRecognizerDelegate>
 @end
 @implementation MSDockDrawerPan
@@ -332,21 +410,25 @@ static BOOL Wants(UIPanGestureRecognizer *g){
     CGFloat e=fmax(Extent,1);
     switch(g.state){
         case UIGestureRecognizerStateBegan:
-            StartP=P;
+            StartP=P;Origin=0;Waiting=Settling(dock);
             if(P<=0)Refresh(dock);
             __attribute__((fallthrough));
-        case UIGestureRecognizerStateChanged:
-            P=fmax(0,fmin(1,StartP-[g translationInView:dock.superview].y/e));
+        case UIGestureRecognizerStateChanged:{
+            // Pulled while SpringBoard still brings the dock in: hold the
+            // drawer shut and measure the pull from where the dock settles.
+            CGFloat t=[g translationInView:dock.superview].y;
+            if(Waiting&&Settling(dock)){Origin=t;break;}
+            Waiting=NO;
+            P=fmax(0,fmin(1,StartP-(t-Origin)/e));
             Settle(dock,NO);
             break;
+        }
         case UIGestureRecognizerStateEnded:
         case UIGestureRecognizerStateCancelled:{
             // Where the flick would coast to decides open or closed.
             CGFloat v=[g velocityInView:dock.superview].y;
             CGFloat target=g.state==UIGestureRecognizerStateEnded?(P-v*.15/e>.5?1:0):(StartP>.5?1:0);
-            [UIView animateWithDuration:.45 delay:0 usingSpringWithDamping:.86 initialSpringVelocity:0
-                                options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction
-                             animations:^{P=target;Settle(dock,YES);} completion:nil];
+            Finish(dock,target,0);
             break;
         }
         default:break;
@@ -389,6 +471,8 @@ void MSDockDrawerInstall(Class dockClass,Class rootClass){
     MSHookMessageEx(dockClass,@selector(pointInside:withEvent:),(IMP)HookPointInside,(IMP *)&OrigPointInside);
     MSHookMessageEx(rootClass,begin,(IMP)HookRootShouldBegin,(IMP *)&OrigRootShouldBegin);
     InstallState=@"hooked";
+    [NSNotificationCenter.defaultCenter addObserverForName:@"SBApplicationProcessStateDidChange" object:nil queue:NSOperationQueue.mainQueue
+                                                usingBlock:^(__unused NSNotification *note){if(Strip&&!Strip.hidden)UpdateIndicators();}];
 }
 
 static void Status(double progress){
@@ -397,9 +481,9 @@ static void Status(double progress){
     double now=CACurrentMediaTime();
     if(now-last<2)return;
     last=now;
-    NSString *body=[NSString stringWithFormat:@"DRAWER status install=%@ on=%d pan=%d p=%.2f progress=%.2f extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ candidates=%lu pins=%lu shown=%lu divider=%d iconScale=%.3f iconFail=%@ dividerLook={%@} recentFront=%@",
+    NSString *body=[NSString stringWithFormat:@"DRAWER status install=%@ on=%d pan=%d p=%.2f progress=%.2f extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ candidates=%lu pins=%lu shown=%lu divider=%d iconScale=%.3f iconFail=%@ dividerLook={%@} indicator={%@} recentFront=%@",
         InstallState,DrawerOn(),DrawerPan!=nil,P,progress,Extent,LastOffset,Margin,NSStringFromCGSize(IconSize),Pitch,NSStringFromCGRect(PlatBase),Source,
-        (unsigned long)Candidates,(unsigned long)Pins,(unsigned long)Shown,Divider&&!Divider.hidden,IconScale,IconFail,DividerLook,[[MRU subarrayWithRange:NSMakeRange(0,MIN(MRU.count,(NSUInteger)6))] componentsJoinedByString:@","]];
+        (unsigned long)Candidates,(unsigned long)Pins,(unsigned long)Shown,Divider&&!Divider.hidden,IconScale,IconFail,DividerLook,IndicatorLook,[[MRU subarrayWithRange:NSMakeRange(0,MIN(MRU.count,(NSUInteger)6))] componentsJoinedByString:@","]];
     if([body isEqualToString:lastBody])return;
     lastBody=body;
     MSDiagnosticsLog(@"World",body);
