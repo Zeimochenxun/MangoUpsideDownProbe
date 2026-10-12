@@ -96,7 +96,7 @@ static BOOL SuiteFlag(NSString *key) {
 
     NSError *nativeReadError = nil;
     (void)MSReadNativeUpsideDown(&nativeReadError);
-    [self addSection:@"屏幕倒置" footer:nativeReadError ? nativeReadError.localizedDescription : @"“Mango 原生屏幕倒置”独立于总开关，保存后按页尾说明 Respring。“倒置方向与小芒”“分屏倒置”是模块开关（需重启用户空间）；启动器重开倒置恢复依赖分屏倒置，调整位置大小保持倒置、通知上下滑动方向修复、Dock 避开刘海依赖倒置方向与小芒。Dock 避开刘海：配合 Lynx 等开启的 iPad 样式 Dock，倒置时把完全抬起的 Dock 再抬 35 点露出刘海，并让刘海处也能从底边上划回主屏（不再误触 App 在刘海处的按钮）；正向不变。"];
+    [self addSection:@"屏幕倒置" footer:nativeReadError ? nativeReadError.localizedDescription : @"“Mango 原生屏幕倒置”独立于总开关，保存后按页尾说明 Respring。“倒置方向与小芒”“分屏倒置”是模块开关（需重启用户空间）；启动器重开倒置恢复依赖分屏倒置，调整位置大小保持倒置、通知上下滑动方向修复、Dock 避开刘海依赖倒置方向与小芒。Dock 避开刘海：配合 Lynx 等开启的 iPad 样式 Dock，倒置时把完全抬起的 Dock 再抬 35 点露出刘海，并在刘海下沿约 13 点高的一窄条里只响应系统上划手势（回主屏/唤出 Dock），不再误触 App 在那里的按钮，这一窄条里的点按也不会传给 App；正向不变。"];
     [self addSwitch:@"Mango 原生屏幕倒置" key:NativeUpsideDownKey];
     PSSpecifier *nativeItem = _specifiers.lastObject;
     [nativeItem setProperty:@(!nativeReadError) forKey:@"enabled"];

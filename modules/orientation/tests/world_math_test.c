@@ -43,14 +43,6 @@ int main(void) {
     // Dock lift: proportional to progress, capped at the full lift.
     near(MWDockLift(0,35),0); near(MWDockLift(.5,35),17.5); near(MWDockLift(1,35),35);
     near(MWDockLift(1.3,35),35); near(MWDockLift(-.2,35),0); near(MWDockLift(NAN,35),0);
-    // Original layout rewrote the center: lift from its fresh value.
-    double y = MWDockCenterY(780,0,0,35);
-    near(y,745);
-    // Original left our value alone: re-applying must not stack.
-    near(MWDockCenterY(y,y,35,35),745);
-    // Back to upright, or switched off (lift 0), restores the original either way.
-    near(MWDockCenterY(y,y,35,0),780);
-    near(MWDockCenterY(780,y,35,0),780);
     puts("PASS: window half-turn around screen center, non-centered/scaled geometry, content normalization, double-turn and invalid basis guards, dock notch lift");
     return 0;
 }

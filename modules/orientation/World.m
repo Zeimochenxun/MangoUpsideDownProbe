@@ -297,6 +297,9 @@ static BOOL KeepsWorld(UIView *root, MWWorldState *state, UIWindow *window) {
 }
 static void PillStatus(void);
 static void DockStatus(void);
+static void DockSync(void);
+static void ShieldUpdate(void);
+static BOOL ShieldVisible(void);
 static void ReconcileRoot(UIView *root) {
     MWWorldState *state=State(root);UIWindow *window=root.window;
     if (state.suspended && MSRuntimeFlag(@"IslandLayoutEnabled") &&
@@ -379,7 +382,7 @@ static void Reconcile(void) {
             for (UIWindow *w in Windows.allObjects) Discover(w);
             for (UIView *root in Roots.allObjects) ReconcileRoot(root);
         }];
-    } @finally { Busy = NO; DiagnosticWorldScan(decisionRead,decision); PillStatus(); DockStatus(); }
+    } @finally { Busy = NO; DiagnosticWorldScan(decisionRead,decision); PillStatus(); DockSync(); ShieldUpdate(); DockStatus(); }
 }
 static BOOL Relevant(UIView *v){
     if([v isKindOfClass:WindowClass])return YES;
@@ -662,46 +665,45 @@ static void InstallOrientationLockFix(void){
     MSHookMessageEx(OrientationLockClass,lockSel,(IMP)HookLockNoArg,(IMP *)&OrigLockNoArg);
 }
 
-// Beta9.9.10: iPad-style floating dock (Lynx 2 "useFloatingDock", i.e.
-// SpringBoard's own SBFloatingDock*) versus the notch. While SpringBoard is
-// inverted the dock's bottom edge is the physical top edge, where the iPhone
-// 13 mini's sensor housing covers part of it. Class and selector names come
-// from iOS 14.5 SpringBoard header dumps and are unverified on 16.5, so each
-// goes through Signature() and a mismatch installs nothing. Gated live by the
-// DockNotchEnabled repair switch.
+// iPad-style floating dock (Lynx 2 "useFloatingDock", i.e. SpringBoard's own
+// SBFloatingDock*) versus the notch while SpringBoard is inverted: the dock's
+// bottom edge is then the physical top edge, under the iPhone 13 mini's
+// sensor housing. Gated live by the DockNotchEnabled repair switch.
 //
-// Dock: SBFloatingDockRootViewController -_layoutFloatingDockViewWithProgress:
-// places the dock for a presentation progress (0 hidden, 1 presented) inside
-// whatever animation block its caller opened. After it runs, the dock view's
-// center is lifted by NotchHeight*progress. Proportional, not a bigger
-// margin: the finger travel that reaches progress 1 is unchanged, the same
-// swipe just lifts further. Upright, or switched off, the lift is 0.
-// Beta9.9.10's device log had no DOCKLIFT line at all, which cannot tell "not
-// hooked" from "never called" from "called but not inverted" (the install
-// line predates the recording session). DockStatus() reports all three plus
-// the real dock window/view classes and the root controller's layout-related
-// selectors on 16.5, read-only, so the next step hooks a confirmed name.
+// Dock (Beta9.9.12, from the Beta9.9.11 device DOCK status): on 16.5 the root
+// controller lays out with -_layoutFloatingDockPresentationProgress: (the 14.5
+// name -_layoutFloatingDockViewWithProgress: does not exist), and presentation
+// is a pure translation on SBFloatingDockView itself -- ty 0 presented, 109
+// hidden, 60.3 part-way -- while its position never moves. So the lift goes
+// into that same transform: every write SpringBoard makes gets
+// NotchHeight*progress more upward translation, inside whatever animation
+// block the write is in. Proportional to progress, so the finger travel that
+// reaches progress 1 is unchanged and the same swipe lifts further; hidden
+// (progress 0), upright, or switched off adds nothing. DockSync() re-writes
+// the last SpringBoard value when orientation or the switch changes while
+// the dock sits still, so upright is never left lifted.
 //
-// Home gesture: inside the notch's span the first touch registers at the
-// notch's lower rim (~38pt in the device log) while the stock bottom-edge
-// region is 33.8pt, so the gesture never becomes possible and the app under
-// the notch receives the swipe as its own interaction. Beta9.9.10 widened the
-// region only for the duration of touchesBegan:, which the device log showed
-// had no effect: the edge test evidently reads the region before that call.
-// The region is now held at NotchBand (the notch-side safe-area band, 50pt on
-// the 13 mini) for as long as the recognizer's touch orientation is
-// upside-down, and handed back unchanged otherwise. With the gesture still
-// possible, the system defers the app's touch and cancels it once the swipe
-// is recognized.
-static const CGFloat NotchHeight=35;    // dock lift: 13 mini housing, 5.35mm at 0.1537mm/pt
-static const CGFloat NotchBand=50;      // home-edge region while inverted: the 13 mini's notch-side safe-area band
-static SEL DockVCSel,TouchOrientationSel,EdgeRegionSel,SetEdgeRegionSel;
-static Class HomeGestureClass;
+// Notch swipes (Beta9.9.12, from the same log): holding the home gesture's
+// bottom-edge region at NotchBand made both SpringBoard edge recognizers stay
+// possible for notch-rim touches (stateAfter=0), yet the app under the notch
+// still acted first. The app process gates its own gestures only for touches
+// that begin at the screen edge, and a touch landing on the notch's lower rim
+// is not one; SpringBoard cannot change that gate. Instead a SpringBoard-owned
+// strip covers the notch's span down to NotchShieldDepth while inverted with
+// an app in front, so touches starting there are routed to SpringBoard and
+// reach only the system gestures, never the app. Taps inside that strip are
+// therefore not delivered to the app either; the strip is kept as shallow as
+// the device log's notch-rim touch-downs (38-47pt) allow.
+static const CGFloat NotchHeight=35;      // dock lift: 13 mini housing, 5.35mm at 0.1537mm/pt
+static const CGFloat NotchBand=50;        // home-edge region while inverted: the 13 mini's notch-side safe-area band
+static const CGFloat NotchHalfWidth=95;   // ~26mm (169pt) housing plus finger slack
+static const CGFloat NotchShieldDepth=48; // notch-rim touch-downs logged at 38-47pt from the edge
+static SEL TouchOrientationSel,EdgeRegionSel,SetEdgeRegionSel,PresentedProgressSel,FrontAppSel;
+static Class HomeGestureClass,DockViewClass,DockRootClass;
 static NSString *DockInstall=@"not-run",*EdgeInstall=@"not-run";
-static unsigned long DockCalls;
-static double DockLastProgress=NAN;
-static BOOL DockLastSuperInverted,DockLastViewInverted;
-static char EdgeRegionKey;
+static unsigned long DockCalls,DockWrites;
+static double DockLastProgress=NAN,DockLayoutProgress=NAN;
+static char EdgeRegionKey,EdgeNotchKey;
 static BOOL DockFixOn(void){return Enabled&&!B9Disabled(Disabled)&&MSRuntimeFlag(@"DockNotchEnabled");}
 // Whether v's +y points at the physical top edge, i.e. v's bottom is the notch.
 static BOOL DownIsNotch(UIView *v){
@@ -711,71 +713,139 @@ static BOOL DownIsNotch(UIView *v){
     CGPoint d=[v convertPoint:CGPointMake(0,1) toCoordinateSpace:fixed];
     return d.y-o.y<-.5;
 }
-static __weak UIView *DockView;
-static CGFloat DockLastY=NAN,DockLastLift;
 static void (*OrigDockLayout)(id,SEL,double);
 static void HookDockLayout(id self,SEL cmd,double progress){
-    OrigDockLayout(self,cmd,progress);
-    if(![NSThread isMainThread])return;
-    DockCalls++;DockLastProgress=progress;
-    id vc=((id(*)(id,SEL))objc_msgSend)(self,DockVCSel);
-    UIView *v=[vc isKindOfClass:UIViewController.class]?((UIViewController *)vc).viewIfLoaded:nil;
-    if(!v.superview)return;
-    // Gate on the view we write in: lifting along its -y is away from the
-    // notch exactly when its +y points at it.
-    BOOL inverted=DownIsNotch(v.superview);
-    DockLastSuperInverted=inverted;DockLastViewInverted=DownIsNotch(v);
-    CGFloat lift=inverted&&DockFixOn()?MWDockLift(progress,NotchHeight):0;
-    if(v!=DockView){DockView=v;DockLastY=NAN;DockLastLift=0;}
-    CGPoint c=v.center;
-    c.y=MWDockCenterY(c.y,DockLastY,DockLastLift,lift);
-    if(!isfinite(c.y))return;
-    if(c.y!=v.center.y)v.center=c;
-    DockLastY=c.y;DockLastLift=lift;
+    double outer=DockLayoutProgress;
+    DockLayoutProgress=progress;DockCalls++;DockLastProgress=progress;
+    @try{OrigDockLayout(self,cmd,progress);}@finally{DockLayoutProgress=outer;}
+}
+// The progress a transform write is for: the layout call it happens inside,
+// else the root controller's current presented progress.
+static double DockProgress(UIView *dock){
+    if(isfinite(DockLayoutProgress))return DockLayoutProgress;
+    UIViewController *root=dock.window.rootViewController;
+    if(PresentedProgressSel&&[root isKindOfClass:DockRootClass])return ((double(*)(id,SEL))objc_msgSend)(root,PresentedProgressSel);
+    return NAN;
+}
+static CGFloat DockLiftFor(UIView *dock){
+    if(!DockFixOn()||!DownIsNotch(dock.superview))return 0;
+    return MWDockLift(DockProgress(dock),NotchHeight);
+}
+static __weak UIView *DockViewRef;
+static CGAffineTransform DockIncoming,DockWritten;
+static CGFloat DockLastLift;
+static void (*OrigDockTransform)(id,SEL,CGAffineTransform);
+static void HookDockTransform(UIView *self,SEL cmd,CGAffineTransform t){
+    // isKindOfClass: as well, in case the hook landed on an inherited superclass method.
+    if(![NSThread isMainThread]||![self isKindOfClass:DockViewClass]||![self.window.rootViewController isKindOfClass:DockRootClass]){OrigDockTransform(self,cmd,t);return;}
+    CGFloat lift=DockLiftFor(self);
+    CGAffineTransform out=t;out.ty-=lift;
+    DockViewRef=self;DockIncoming=t;DockWritten=out;DockLastLift=lift;DockWrites++;
+    OrigDockTransform(self,cmd,out);
     static double last;double now=CACurrentMediaTime();
-    if((inverted||DockLastViewInverted)&&now-last>1){last=now;
-        Log([NSString stringWithFormat:@"DOCKLIFT progress=%.2f lift=%.1f superviewInverted=%d viewInverted=%d",progress,lift,inverted,DockLastViewInverted]);}
+    if(lift>0&&now-last>1){last=now;
+        Log([NSString stringWithFormat:@"DOCKLIFT progress=%.2f lift=%.1f ty=%.1f->%.1f",DockProgress(self),lift,t.ty,out.ty]);}
+}
+static void DockSync(void){
+    UIView *dock=DockViewRef;
+    if(!dock||!OrigDockTransform)return;
+    CGFloat lift=DockLiftFor(dock);
+    // Only rewrite our own last value; anything else belongs to SpringBoard.
+    if(lift==DockLastLift||!CGAffineTransformEqualToTransform(dock.transform,DockWritten))return;
+    CGAffineTransform out=DockIncoming;out.ty-=lift;
+    DockWritten=out;DockLastLift=lift;
+    [UIView performWithoutAnimation:^{OrigDockTransform(dock,@selector(setTransform:),out);}];
 }
 static void (*OrigEdgeTouchesBegan)(id,SEL,NSSet *,UIEvent *);
 static void HookEdgeTouchesBegan(UIGestureRecognizer *self,SEL cmd,NSSet<UITouch *> *touches,UIEvent *event){
     if(![NSThread isMainThread]||![self isKindOfClass:HomeGestureClass]){OrigEdgeTouchesBegan(self,cmd,touches,event);return;}
-    long long orientation=((long long(*)(id,SEL))objc_msgSend)(self,TouchOrientationSel);
+    BOOL inverted=((long long(*)(id,SEL))objc_msgSend)(self,TouchOrientationSel)==UIInterfaceOrientationPortraitUpsideDown;
     double current=((double(*)(id,SEL))objc_msgSend)(self,EdgeRegionSel);
     // Only our own last write may be treated as ours; any other value is
     // SpringBoard's fresh base and is what gets handed back when upright.
     NSArray<NSNumber *> *owned=objc_getAssociatedObject(self,&EdgeRegionKey);
     double base=owned&&current==owned[1].doubleValue?owned[0].doubleValue:current;
-    double region=orientation==UIInterfaceOrientationPortraitUpsideDown&&DockFixOn()?fmax(base,NotchBand):base;
+    double region=inverted&&DockFixOn()?fmax(base,NotchBand):base;
     if(isfinite(region)&&region!=current)((void(*)(id,SEL,double))objc_msgSend)(self,SetEdgeRegionSel,region);
     objc_setAssociatedObject(self,&EdgeRegionKey,@[@(base),@(region)],OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    OrigEdgeTouchesBegan(self,cmd,touches,event);
-    if(region==base||!MSDiagnosticsActive())return;
-    static NSMutableDictionary<NSString *,NSNumber *> *lastByClass;
-    if(!lastByClass)lastByClass=[NSMutableDictionary dictionary];
-    NSString *cls=NSStringFromClass(self.class);double now=CACurrentMediaTime();
-    if(now-lastByClass[cls].doubleValue<=.5)return;
-    lastByClass[cls]=@(now);
     UITouch *t=touches.anyObject;CGPoint p=[t locationInView:nil];
     if(t.window)p=[t.window convertPoint:p toCoordinateSpace:UIScreen.mainScreen.fixedCoordinateSpace];
-    Log([NSString stringWithFormat:@"HOMEEDGE class=%@ edges=%lu point={%.1f,%.1f} region=%.1f->%.1f stateAfter=%ld",
-        cls,(unsigned long)((UIScreenEdgePanGestureRecognizer *)self).edges,p.x,p.y,base,region,(long)self.state]);
+    // A half-turn mirrors x about the center, so the span test holds in fixed
+    // and in upside-down screen coordinates alike.
+    BOOL notch=inverted&&isfinite(p.x)&&fabs(p.x-CGRectGetMidX(UIScreen.mainScreen.fixedCoordinateSpace.bounds))<=NotchHalfWidth&&p.y<=NotchBand+10;
+    objc_setAssociatedObject(self,&EdgeNotchKey,notch?@YES:nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    OrigEdgeTouchesBegan(self,cmd,touches,event);
+    if(!notch||!MSDiagnosticsActive())return;
+    Log([NSString stringWithFormat:@"HOMEEDGE begin class=%@ point={%.1f,%.1f} region=%.1f->%.1f stateAfter=%ld shield=%d",
+        NSStringFromClass(self.class),p.x,p.y,base,region,(long)self.state,ShieldVisible()]);
 }
-// Read-only: layout/progress-related selectors a dock controller class
-// really defines on this device, walking up to UIKit.
-static NSString *DockMethods(Class start){
-    NSMutableArray<NSString *> *names=[NSMutableArray array];
-    for(Class c=start;c&&names.count<80;c=class_getSuperclass(c)){
-        const char *name=class_getName(c);
-        if(!strncmp(name,"UI",2)||!strncmp(name,"NS",2))break;
-        unsigned count=0;Method *methods=class_copyMethodList(c,&count);
-        for(unsigned i=0;i<count&&names.count<80;i++){
-            NSString *sel=NSStringFromSelector(method_getName(methods[i]));
-            for(NSString *key in @[@"rogress",@"ayout",@"ranslation",@"argin",@"resent",@"Frame",@"Height"])
-                if([sel containsString:key]){[names addObject:[NSString stringWithFormat:@"%s.%@",name,sel]];break;}
-        }
-        free(methods);
+// Read-only outcome of a notch-rim touch: did the home gesture recognize or
+// fail, and if it failed, which of UIKit's edge features said so.
+static void (*OrigHomeSetState)(id,SEL,UIGestureRecognizerState);
+static void HookHomeSetState(UIGestureRecognizer *self,SEL cmd,UIGestureRecognizerState state){
+    OrigHomeSetState(self,cmd,state);
+    if(![NSThread isMainThread]||(state!=UIGestureRecognizerStateBegan&&state!=UIGestureRecognizerStateFailed)||
+       !objc_getAssociatedObject(self,&EdgeNotchKey))return;
+    objc_setAssociatedObject(self,&EdgeNotchKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if(!MSDiagnosticsActive())return;
+    NSString *debug=@"";
+    SEL debugSel=NSSelectorFromString(@"debugDictionary");
+    if(state==UIGestureRecognizerStateFailed&&[self respondsToSelector:debugSel]){
+        id dict=((id(*)(id,SEL))objc_msgSend)(self,debugSel);
+        debug=[[dict description] stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
+        if(debug.length>1500)debug=[debug substringToIndex:1500];
     }
-    return names.count?[names componentsJoinedByString:@","]:@"none";
+    Log([NSString stringWithFormat:@"HOMEEDGE result class=%@ state=%@ %@",NSStringFromClass(self.class),
+        state==UIGestureRecognizerStateBegan?@"began":@"failed",debug]);
+}
+// The notch strip: a SpringBoard window whose only hit-testable content is
+// the strip, so the render server routes touches there to SpringBoard (and
+// its system gestures) instead of to the app; everywhere else stays clear and
+// falls through as before.
+@interface MSNotchShieldWindow : UIWindow
+@end
+@implementation MSNotchShieldWindow
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *hit=[super hitTest:point withEvent:event];
+    return hit==self?nil:hit;
+}
+@end
+static MSNotchShieldWindow *ShieldWindow;
+static UIView *ShieldStrip;
+static NSString *ShieldReason=@"not-run";
+static BOOL ShieldVisible(void){return ShieldWindow&&!ShieldWindow.hidden;}
+static UIWindowScene *MainWindowScene(void){
+    for(UIScene *scene in UIApplication.sharedApplication.connectedScenes)
+        if([scene isKindOfClass:UIWindowScene.class]&&((UIWindowScene *)scene).screen==UIScreen.mainScreen)
+            return (UIWindowScene *)scene;
+    return nil;
+}
+static void ShieldUpdate(void){
+    NSString *reason=nil;
+    if(!DockFixOn())reason=@"switch-off";
+    else if(Orientation()!=UIInterfaceOrientationPortraitUpsideDown)reason=@"not-inverted";
+    else if(FrontAppSel&&!((id(*)(id,SEL))objc_msgSend)(UIApplication.sharedApplication,FrontAppSel))reason=@"no-front-app";
+    ShieldReason=reason?:@"active";
+    if(reason){if(ShieldVisible())ShieldWindow.hidden=YES;return;}
+    if(!ShieldWindow){
+        UIWindowScene *scene=MainWindowScene();
+        ShieldWindow=scene?[[MSNotchShieldWindow alloc] initWithWindowScene:scene]:[[MSNotchShieldWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+        ShieldWindow.windowLevel=UIWindowLevelStatusBar-1;
+        ShieldWindow.backgroundColor=UIColor.clearColor;
+        ShieldStrip=[UIView new];
+        // Nearly invisible, but real content, which is what the render
+        // server's hit test needs; hitTestsAsOpaque says the same where it exists.
+        ShieldStrip.backgroundColor=[UIColor colorWithWhite:0 alpha:.011];
+        if([ShieldStrip.layer respondsToSelector:NSSelectorFromString(@"setHitTestsAsOpaque:")])
+            [ShieldStrip.layer setValue:@YES forKey:@"hitTestsAsOpaque"];
+        [ShieldWindow addSubview:ShieldStrip];
+    }
+    id<UICoordinateSpace> fixed=UIScreen.mainScreen.fixedCoordinateSpace;
+    ShieldWindow.frame=UIScreen.mainScreen.bounds;
+    CGRect strip=CGRectMake(CGRectGetMidX(fixed.bounds)-NotchHalfWidth,0,2*NotchHalfWidth,NotchShieldDepth);
+    CGRect local=[ShieldWindow convertRect:strip fromCoordinateSpace:fixed];
+    if(!CGRectEqualToRect(ShieldStrip.frame,local))ShieldStrip.frame=local;
+    if(ShieldWindow.hidden)ShieldWindow.hidden=NO;
 }
 static void DockStatus(void){
     static double lastScan,lastLog;static NSString *lastBody;
@@ -784,29 +854,17 @@ static void DockStatus(void){
     if(now-lastScan<2)return;
     lastScan=now;
     @try{
-        NSMutableString *body=[NSMutableString stringWithFormat:@"DOCK status install=%@ edgeInstall=%@ switch=%d calls=%lu lastProgress=%.2f lastLift=%.1f superviewInverted=%d viewInverted=%d",
-            DockInstall,EdgeInstall,MSRuntimeFlag(@"DockNotchEnabled"),DockCalls,DockLastProgress,DockLastLift,DockLastSuperInverted,DockLastViewInverted];
-        Class controller=objc_getClass("SBFloatingDockController");SEL supported=sel_registerName("isFloatingDockSupported");
-        if(controller&&[controller respondsToSelector:supported])
-            [body appendFormat:@" supported=%d",((BOOL(*)(id,SEL))objc_msgSend)(controller,supported)];
-        unsigned windows=0;
-        for(UIWindow *w in ExistingWindows()){
-            if(![NSStringFromClass(w.class) containsString:@"Dock"]||windows>=3)continue;
-            windows++;
-            UIViewController *rootVC=w.rootViewController;
-            [body appendFormat:@"\nwindow rootVC=%@ %@",rootVC?NSStringFromClass(rootVC.class):@"nil",MSDiagnosticsViewLine(w)];
-            NSMutableArray<UIView *> *queue=[NSMutableArray arrayWithObject:w];
-            for(NSUInteger i=0;i<queue.count&&i<1024;i++){
-                UIView *v=queue[i];
-                if([NSStringFromClass(v.class) containsString:@"FloatingDockView"]){
-                    [body appendFormat:@"\ndockView inverted=%d superviewInverted=%d %@",DownIsNotch(v),DownIsNotch(v.superview),MSDiagnosticsViewLine(v)];
-                    break;
-                }
-                [queue addObjectsFromArray:v.subviews];
-            }
-            if(rootVC)[body appendFormat:@"\nmethods %@",DockMethods(rootVC.class)];
-        }
-        if(!windows)[body appendString:@"\nwindow none"];
+        UIView *dock=DockViewRef;
+        NSMutableString *body=[NSMutableString stringWithFormat:@"DOCK status install=%@ edgeInstall=%@ switch=%d layoutCalls=%lu lastProgress=%.2f writes=%lu incomingTy=%.1f writtenTy=%.1f lift=%.1f shield=%@ shieldVisible=%d orientation=%ld",
+            DockInstall,EdgeInstall,MSRuntimeFlag(@"DockNotchEnabled"),DockCalls,DockLastProgress,DockWrites,DockIncoming.ty,DockWritten.ty,DockLastLift,ShieldReason,ShieldVisible(),(long)Orientation()];
+        if(dock)[body appendFormat:@"\ndockView progress=%.2f superviewInverted=%d %@",DockProgress(dock),DownIsNotch(dock.superview),MSDiagnosticsViewLine(dock)];
+        if(ShieldVisible())[body appendFormat:@"\nshieldStrip %@",MSDiagnosticsViewLine(ShieldStrip)];
+        if(FrontAppSel){id app=((id(*)(id,SEL))objc_msgSend)(UIApplication.sharedApplication,FrontAppSel);
+            [body appendFormat:@"\nfrontApp=%@",app?NSStringFromClass([app class]):@"nil"];}
+        NSMutableArray<NSString *> *levels=[NSMutableArray array];
+        for(UIWindow *w in ExistingWindows())
+            if(!w.hidden&&levels.count<24)[levels addObject:[NSString stringWithFormat:@"%@@%.0f",NSStringFromClass(w.class),w.windowLevel]];
+        [body appendFormat:@"\nwindows %@",[levels componentsJoinedByString:@","]];
         if(body.length>7500)[body setString:[body substringToIndex:7500]];
         if([body isEqualToString:lastBody]&&now-lastLog<30)return;
         lastBody=body;lastLog=now;
@@ -814,14 +872,24 @@ static void DockStatus(void){
     }@catch(__unused NSException *exception){}
 }
 static void InstallDockNotchFix(void){
-    Class root=objc_getClass("SBFloatingDockRootViewController");
-    SEL layout=sel_registerName("_layoutFloatingDockViewWithProgress:");
-    DockVCSel=sel_registerName("floatingDockViewController");
-    if(!root)DockInstall=@"no-root-class";
-    else if(!Signature(root,layout,"v",@[@(@encode(double))]))DockInstall=@"no-layout-method";
-    else if(!Signature(root,DockVCSel,"@",@[]))DockInstall=@"no-vc-getter";
-    else{MSHookMessageEx(root,layout,(IMP)HookDockLayout,(IMP *)&OrigDockLayout);DockInstall=@"hooked";}
-    if(![DockInstall isEqualToString:@"hooked"])Log([@"NO DOCK LIFT: " stringByAppendingString:DockInstall]);
+    DockRootClass=objc_getClass("SBFloatingDockRootViewController");
+    DockViewClass=objc_getClass("SBFloatingDockView");
+    SEL layout=sel_registerName("_layoutFloatingDockPresentationProgress:");
+    SEL presented=sel_registerName("presentedProgress");
+    FrontAppSel=sel_registerName("_accessibilityFrontMostApplication");
+    if(![UIApplication.sharedApplication respondsToSelector:FrontAppSel])FrontAppSel=NULL;
+    BOOL hasLayout=DockRootClass&&Signature(DockRootClass,layout,"v",@[@(@encode(double))]);
+    if(DockRootClass&&Signature(DockRootClass,presented,@encode(double),@[]))PresentedProgressSel=presented;
+    if(!DockRootClass)DockInstall=@"no-root-class";
+    else if(!DockViewClass||!ValidClass(DockViewClass,UIView.class)||
+            !Signature(DockViewClass,@selector(setTransform:),"v",@[@(@encode(CGAffineTransform))]))DockInstall=@"no-dock-view";
+    else if(!hasLayout&&!PresentedProgressSel)DockInstall=@"no-progress-source";
+    else{
+        if(hasLayout)MSHookMessageEx(DockRootClass,layout,(IMP)HookDockLayout,(IMP *)&OrigDockLayout);
+        MSHookMessageEx(DockViewClass,@selector(setTransform:),(IMP)HookDockTransform,(IMP *)&OrigDockTransform);
+        DockInstall=hasLayout?@"hooked":@"hooked-presented-only";
+    }
+    if(![DockInstall hasPrefix:@"hooked"])Log([@"NO DOCK LIFT: " stringByAppendingString:DockInstall]);
     // Hooked on the UIKit base class, where the edge-region test lives, so a
     // home-gesture subclass that overrides touchesBegan: and calls super is
     // still covered; HomeGestureClass scopes it back to home gestures only.
@@ -837,6 +905,8 @@ static void InstallDockNotchFix(void){
        Signature(edge,SetEdgeRegionSel,"v",@[@(@encode(double))])){
         MSHookMessageEx(edge,@selector(touchesBegan:withEvent:),(IMP)HookEdgeTouchesBegan,(IMP *)&OrigEdgeTouchesBegan);
         EdgeInstall=@"hooked";
+        if(Signature(HomeGestureClass,@selector(setState:),"v",@[@(@encode(UIGestureRecognizerState))]))
+            MSHookMessageEx(HomeGestureClass,@selector(setState:),(IMP)HookHomeSetState,(IMP *)&OrigHomeSetState);
     }else{EdgeInstall=@"signature-mismatch";Log(@"NO HOME EDGE FIX: signature mismatch");}
 }
 

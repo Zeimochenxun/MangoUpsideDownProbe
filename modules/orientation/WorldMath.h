@@ -49,9 +49,3 @@ static inline int MWOwns(MWTransform current, MWTransform after,
 static inline double MWDockLift(double progress, double lift) {
     return isfinite(progress) ? lift*fmin(1,fmax(0,progress)) : 0;
 }
-// Dock center y after applying `lift`. If the original layout left our last
-// written value in place, undo our last lift first so lifts never stack.
-static inline double MWDockCenterY(double current, double lastSet, double lastLift, double lift) {
-    if (current == lastSet) current += lastLift;
-    return current - lift;
-}
