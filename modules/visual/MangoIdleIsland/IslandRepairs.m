@@ -110,7 +110,8 @@ static NSArray<UIWindow *> *BackgroundWindows(UIWindow *aperture) {
     }];
     return result;
 }
-static NSArray<UIColor *> *SampleEdge(UIView *glass,CGRect local,NSString **result) {
+static NSArray<UIColor *> *SampleEdge(UIView *glass,CGRect local,NSString **result,double *meanLuma) {
+    if (meanLuma) *meanLuma=-1;
     if (Sampling) return nil;
     UIWindow *aperture=glass.window;
     CALayer *source=glass.layer.presentationLayer ?: glass.layer;
@@ -174,7 +175,7 @@ static NSArray<UIColor *> *SampleEdge(UIView *glass,CGRect local,NSString **resu
     if (!drew || failed) { *result=@"background-capture-unavailable"; return nil; }
     MSColorBin bins[4][13]={0};
     CGAffineTransform inverse=CGAffineTransformInvert(toFixed);
-    unsigned samples=0;
+    unsigned samples=0; double lumaSum=0;
     for (size_t py=0;py<height;py++) for (size_t px=0;px<width;px++) {
         CGPoint fixed=CGPointMake(crop.origin.x+(px+.5)*crop.size.width/width,crop.origin.y+(py+.5)*crop.size.height/height);
         CGPoint p=CGPointApplyAffineTransform(fixed,inverse);
@@ -189,7 +190,10 @@ static NSArray<UIColor *> *SampleEdge(UIView *glass,CGRect local,NSString **resu
         double alpha=pixels[index+3]/255.0;
         MSRGB c={fmin(1,pixels[index]/255.0/alpha),fmin(1,pixels[index+1]/255.0/alpha),fmin(1,pixels[index+2]/255.0/alpha)};
         MSColorAccumulate(bins[sector],c); ++samples;
+        lumaSum+=.2126*c.r+.7152*c.g+.0722*c.b;
     }
+    // Reported even when a side has too few samples for a dominant color below.
+    if (meanLuma) *meanLuma=samples>8 ? lumaSum/samples : -1;
     NSMutableArray *colors=[NSMutableArray new];
     for (unsigned side=0;side<4;side++) {
         MSRGB c;
@@ -271,7 +275,7 @@ void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edgeOptIn) {
     double sampleInterval=fmax(1.0/(4+4*dynamics),state.sampleCost>.02 ? .5 : 0);
     if (color && now-state.lastSample >= sampleInterval) {
         NSString *result=nil;
-        NSArray *sample=SampleEdge(best,bounds,&result);
+        NSArray *sample=SampleEdge(best,bounds,&result,NULL);
         state.sampleCost=CACurrentMediaTime()-now;
         state.lastSample=now; state.sampleResult=result;
         if (sample) { state.targets=sample; if (!state.colorsValid) state.colors=sample; state.colorsValid=YES; }
@@ -331,4 +335,24 @@ void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edgeOptIn) {
         state.lastLog=now;
         MSDiagnosticsLog(@"Glass",[NSString stringWithFormat:@"rim=%d geometry=%d presentation=%d halo=%d h=%.2f radius=%.2f thickness=%.2f dynamics=%.2f color=%d valid=%d capture=%@ sampleMs=%.1f intervalMs=%.1f opacity=%.3f path=(%.1f,%.1f,%.1f,%.1f)",rim,MSRuntimeFlag(@"RimGeometryEnabled"),hasPair,halo,bounds.size.height,radius,thickness,dynamics,color,state.colorsValid,state.sampleResult ?: @"off",state.sampleCost*1000,sampleInterval*1000,opacity,rect.origin.x,rect.origin.y,rect.size.width,rect.size.height]);
     }
+}
+
+double MSIslandBackgroundLuminance(UIView *host,UIView *glass) {
+    // Mean luminance (0...1) of what shows just around the island, never its own pixels; -1 when unknown.
+    // One capture about every second (every 3s once a capture has proven slow), shared by all hosts.
+    static double cached=-1,cost=0,last=0,loggedLuma=-1;
+    static NSString *loggedResult;
+    double now=CACurrentMediaTime();
+    if (last && now-last<(cost>.02 ? 3 : 1)) return cached;
+    last=now;
+    if (!NSThread.isMainThread || !HostVisible(host) || !glass.window) return cached=-1;
+    NSString *result=nil; double luma=-1;
+    (void)SampleEdge(glass,glass.bounds,&result,&luma);
+    cost=CACurrentMediaTime()-now;
+    cached=luma;
+    if (MSDiagnosticsActive() && (![result isEqualToString:loggedResult] || fabs(luma-loggedLuma)>.1)) {
+        loggedResult=[result copy]; loggedLuma=luma;
+        MSDiagnosticsLog(@"Glass",[NSString stringWithFormat:@"background-luminance=%.3f capture=%@ ms=%.1f",luma,result ?: @"none",cost*1000]);
+    }
+    return cached;
 }
