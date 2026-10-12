@@ -299,7 +299,7 @@ static void PillStatus(void);
 static void DockStatus(void);
 static void DockSync(void);
 static void DockDrawerTick(void);
-CGFloat MSDockDrawerOffset(UIView *dock,double progress);
+void MSDockDrawerProgress(UIView *dock,double progress);
 void MSDockDrawerTick(UIView *dock,double progress);
 void MSDockDrawerInstall(Class dockClass,Class rootClass);
 void MSDockReapply(BOOL animated);
@@ -734,13 +734,14 @@ static double DockProgress(UIView *dock){
     if(PresentedProgressSel&&[root isKindOfClass:DockRootClass])return ((double(*)(id,SEL))objc_msgSend)(root,PresentedProgressSel);
     return NAN;
 }
-// Everything added to SpringBoard's dock translation: the notch lift while
-// inverted, plus the second-row drawer's pull (DockDrawer.m) in any orientation.
+// The notch lift added to SpringBoard's dock translation while inverted.
+// The second-row drawer (DockDrawer.m) only hears the progress: it moves
+// the platter, not the dock (Beta9.9.21).
 static CGFloat DockLiftFor(UIView *dock){
     double progress=DockProgress(dock);
-    CGFloat drawer=MSDockDrawerOffset(dock,progress);
-    if(!DockFixOn()||!DownIsNotch(dock.superview))return drawer;
-    return MWDockLift(progress,MSRuntimeNumber(@"DockNotchLift",NotchHeight,0,50))+drawer;
+    MSDockDrawerProgress(dock,progress);
+    if(!DockFixOn()||!DownIsNotch(dock.superview))return 0;
+    return MWDockLift(progress,MSRuntimeNumber(@"DockNotchLift",NotchHeight,0,50));
 }
 static __weak UIView *DockViewRef;
 static CGAffineTransform DockIncoming,DockWritten;
@@ -757,7 +758,6 @@ static void HookDockTransform(UIView *self,SEL cmd,CGAffineTransform t){
     if(lift>0&&now-last>1){last=now;
         Log([NSString stringWithFormat:@"DOCKLIFT progress=%.2f lift=%.1f ty=%.1f->%.1f",DockProgress(self),lift,t.ty,out.ty]);}
 }
-// Also how the drawer pushes each finger step (animated inside its spring).
 void MSDockReapply(BOOL animated){
     UIView *dock=DockViewRef;
     if(!dock||!OrigDockTransform)return;

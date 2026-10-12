@@ -21,9 +21,18 @@
 // Pinned apps (Beta9.9.18): DockDrawerPinned, chosen in Settings, go first
 // in their order; recents fill the rest, after a divider styled like row
 // 1's when DockDrawerDivider is on.
-// Beta9.9.20: running-app marks like Lynx's under row 2, and a pull that
-// starts while SpringBoard is still animating the dock in waits for the
-// dock to come to rest instead of pulling row 2 out from under it.
+// Beta9.9.20: running-app marks like Lynx's under row 2.
+// Beta9.9.21 (device log): SpringBoard presents the dock frame by frame
+// through _layoutFloatingDockPresentationProgress:, writing the dock
+// transform with a springy progress (overshooting past 1), and the drawer
+// rode on that transform scaled by the progress, so a pull during the
+// spring bounced with it. The drawer now leaves the dock transform alone:
+// it only grows the platter upward (top up, bottom edge fixed), which
+// carries row 1 up and uncovers row 2 whatever the dock is doing. When
+// SpringBoard starts hiding the dock the drawer closes alongside it.
+// Row 1 switches between metric sets with its icon count (327x73 at 60pt
+// pitch, 330x90 at 74pt), so row 2 re-measures and re-lays itself out
+// whenever they change.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -33,10 +42,9 @@
 #include <math.h>
 #import "../../src/RuntimeDiagnostics.h"
 
-CGFloat MSDockDrawerOffset(UIView *dock,double progress);
+void MSDockDrawerProgress(UIView *dock,double progress);
 void MSDockDrawerTick(UIView *dock,double progress);
 void MSDockDrawerInstall(Class dockClass,Class rootClass);
-void MSDockReapply(BOOL animated); // World.m
 
 // Declared only so ARC sees an init-family call; SBIconView implements it.
 @interface NSObject (MSDockDrawerIconView)
@@ -59,9 +67,9 @@ static __weak UIView *DividerSource;
 static UIView *Divider;
 static NSUInteger Pins;
 static NSString *DividerLook=@"none";
-static NSUInteger Springs;
-static BOOL Waiting;
-static CGFloat Origin;
+static BOOL Closing,RefreshQueued;
+static NSString *RowKey=@"";
+static CGFloat DrawnWidth;
 
 static BOOL DrawerOn(void){return MSRuntimeFlag(@"DockDrawerEnabled");}
 static id Call(id obj,NSString *name){
@@ -103,8 +111,11 @@ static UIView *RowOneIcon(UIView *dock,UIView **next){
     return nil;
 }
 
-// Lengthens the platter downward by the current offset from SpringBoard's
-// own frame, and keeps row 2's strip on the platter's fixed bottom edge.
+static UIView *ImageView(UIView *iconView);
+static void Refresh(UIView *dock);
+static NSString *MetricKey(void);
+// Grows the platter upward from SpringBoard's own frame by the drawer's
+// pull, keeping its bottom edge and row 2's strip on that edge.
 static void ApplyExtension(UIView *dock){
     UIView *plat=Platter(dock);
     if(!plat)return;
@@ -118,6 +129,8 @@ static void ApplyExtension(UIView *dock){
             Pitch=second?second.frame.origin.x-first.frame.origin.x:IconSize.width;
             if(Pitch<IconSize.width)Pitch=IconSize.width;
         }
+        UIView *image=ImageView(first);
+        if(image)DrawnWidth=[image convertRect:image.bounds toView:first].size.width;
     }
     UIView *divider=Call(dock,@"dividerView");
     if([divider isKindOfClass:UIView.class]&&divider.superview){
@@ -125,8 +138,9 @@ static void ApplyExtension(UIView *dock){
         CGRect r=[divider convertRect:divider.bounds toView:plat];
         if(r.size.width>0&&r.size.height>0)DividerFrame=r;
     }
-    CGFloat d=fmax(0,fmin(LastOffset,Extent));
-    CGRect out=PlatBase;out.size.height+=d;
+    CGFloat d=DrawerOn()?fmax(0,fmin(1,P))*Extent:0;
+    LastOffset=d;
+    CGRect out=PlatBase;out.origin.y-=d;out.size.height+=d;
     PlatWritten=out;
     // Row 1's icon lists are flexible-height subviews of the platter and,
     // autoresized, re-centred row 1 in the taller platter (Beta9.9.16 on
@@ -142,9 +156,24 @@ static void ApplyExtension(UIView *dock){
     if(Strip.superview!=plat)[plat addSubview:Strip];
     Strip.frame=CGRectMake(0,PlatBase.size.height-Margin,PlatBase.size.width,Margin+d);
     Strip.hidden=d<=0;
+    // Lynx's running marks for row 1 live outside the platter; keep them
+    // under their icons as row 1 rides up.
+    for(NSString *name in @[@"userIconListView",@"recentIconListView"])
+        for(UIView *icon in ((UIView *)Call(dock,name)).subviews){
+            UIView *mark=Call(icon,@"indicator");
+            if([mark isKindOfClass:UIView.class]&&![mark isDescendantOfView:plat])mark.transform=CGAffineTransformMakeTranslation(0,-d);
+        }
+    // Row 1 changed metric set under an open row 2: lay row 2 out again.
+    NSString *key=MetricKey();
+    if(d>0&&Shown&&!RefreshQueued&&![key isEqualToString:RowKey]){
+        RefreshQueued=YES;
+        dispatch_async(dispatch_get_main_queue(),^{RefreshQueued=NO;if(Dock&&P>0)Refresh(Dock);});
+    }
 }
-static void Settle(UIView *dock,BOOL animated){
-    MSDockReapply(animated);
+static NSString *MetricKey(void){
+    return [NSString stringWithFormat:@"%.1f %.1f %@ %.1f %.1f",Margin,Pitch,NSStringFromCGSize(PlatBase.size),DrawnWidth,DividerFrame.size.height];
+}
+static void Settle(UIView *dock){
     [dock setNeedsLayout];
     [dock layoutIfNeeded];
 }
@@ -174,14 +203,20 @@ static NSSet<NSString *> *UserDock(id vc){
     for(id icon in Items(Call(Call(vc,@"dockListModel"),@"icons"))){NSString *b=Bundle(icon,@"applicationBundleID");if(b)[out addObject:b];}
     return out;
 }
+// Everything row 1 shows: its fixed apps and its recents.
+static NSSet<NSString *> *RowOne(id vc){
+    NSMutableSet<NSString *> *out=[UserDock(vc) mutableCopy];
+    id model=Call(Call(vc,@"suggestionsViewController"),@"suggestionsModel");
+    for(id item in Items(Call(model,@"currentDisplayItems"))){NSString *b=Bundle(item,@"bundleIdentifier");if(b)[out addObject:b];}
+    return out;
+}
 // Recent apps, newest first: the drawer's own list, then the app
 // switcher's if reachable, then SpringBoard's 3 dock recents. Row 1's apps
 // and the app in front are skipped.
 static NSArray<NSString *> *RecentBundles(UIView *dock){
     id vc=Call(dock.window.rootViewController,@"floatingDockViewController");
     id model=Call(Call(vc,@"suggestionsViewController"),@"suggestionsModel");
-    NSMutableSet<NSString *> *skip=[UserDock(vc) mutableCopy];
-    for(id item in Items(Call(model,@"currentDisplayItems"))){NSString *b=Bundle(item,@"bundleIdentifier");if(b)[skip addObject:b];}
+    NSMutableSet<NSString *> *skip=[RowOne(vc) mutableCopy];
     NSString *front=Bundle(Call(UIApplication.sharedApplication,@"_accessibilityFrontMostApplication"),@"bundleIdentifier");
     if(front)[skip addObject:front];
     NSMutableArray<NSString *> *out=[NSMutableArray array];
@@ -212,6 +247,7 @@ static NSArray<NSString *> *RecentBundles(UIView *dock){
     return out;
 }
 static UIView *ImageView(UIView *iconView){
+    if(!iconView)return nil;
     NSMutableArray<UIView *> *queue=[NSMutableArray arrayWithArray:iconView.subviews];
     for(NSUInteger i=0;i<queue.count&&i<64;i++){
         if([NSStringFromClass(queue[i].class) containsString:@"IconImageView"])return queue[i];
@@ -244,15 +280,6 @@ static UIView *IconView(NSString *bundle,UIView *model,id iconModel){
         SEL setter=NSSelectorFromString(name);
         if([view respondsToSelector:setter])((void(*)(id,SEL,BOOL))objc_msgSend)(view,setter,[name isEqualToString:@"setLabelHidden:"]);
     }
-    // Row 1 draws its 60pt icons at SpringBoard's content scale (0.78 on
-    // device) and ours did not pick that up, so match the drawn image size.
-    view.bounds=CGRectMake(0,0,IconSize.width,IconSize.height);
-    [view layoutIfNeeded];
-    UIView *mine=ImageView(view),*theirs=ImageView(model);
-    CGFloat want=theirs?[theirs convertRect:theirs.bounds toView:model].size.width:0;
-    CGFloat have=mine?[mine convertRect:mine.bounds toView:view].size.width:0;
-    if(want>0&&have>0&&fabs(want/have-1)>.02)view.transform=CGAffineTransformMakeScale(want/have,want/have);
-    IconScale=want>0&&have>0?want/have:NAN;
     if(!Icons)Icons=[NSMutableDictionary dictionary];
     Icons[bundle]=view;
     return view;
@@ -273,7 +300,11 @@ static void LearnIndicator(UIView *dock){
             if(!iconClass||![icon isKindOfClass:iconClass])continue;
             UIView *mark=Call(icon,@"indicator");
             if(![mark isKindOfClass:UIView.class]||mark.hidden||mark.alpha<.01||!mark.window)continue;
+            // Measured without the lift ApplyExtension may have given it.
+            CGAffineTransform lift=mark.transform;
+            mark.transform=CGAffineTransformIdentity;
             IndicatorBox=[mark convertRect:mark.bounds toView:icon];
+            mark.transform=lift;
             IndicatorSource=mark;
             IndicatorLook=[NSString stringWithFormat:@"%@ box=%@ bg=%@ radius=%.1f alpha=%.2f in=%@",NSStringFromClass(mark.class),
                 NSStringFromCGRect(IndicatorBox),mark.backgroundColor,mark.layer.cornerRadius,mark.alpha,NSStringFromClass(mark.superview.class)];
@@ -326,10 +357,10 @@ static void Refresh(UIView *dock){
     };
     NSMutableArray<UIView *> *views=[NSMutableArray array];
     NSMutableSet<NSString *> *used=[NSMutableSet set];
-    NSSet<NSString *> *userDock=UserDock(vc);
+    NSSet<NSString *> *rowOne=RowOne(vc);
     for(id bundle in Items(MSRuntimeSettings()[@"DockDrawerPinned"])){
         if(views.count>=capacity(0))break;
-        if(![bundle isKindOfClass:NSString.class]||[userDock containsObject:bundle]||[used containsObject:bundle])continue;
+        if(![bundle isKindOfClass:NSString.class]||[rowOne containsObject:bundle]||[used containsObject:bundle])continue;
         UIView *v=IconView(bundle,model,iconModel);
         if(v){[views addObject:v];[used addObject:bundle];}
     }
@@ -352,7 +383,19 @@ static void Refresh(UIView *dock){
     CGFloat g=divide?gap:0;
     CGFloat total=views.count?views.count*Pitch-(Pitch-IconSize.width)+g:0;
     CGFloat x=(PlatBase.size.width-total)/2;
+    // Row 1 draws its 60pt icon boxes at SpringBoard's content scale (0.78
+    // or 0.96 by metric set) and ours do not pick that up, so scale each to
+    // row 1's drawn image size, again on every layout.
+    UIView *theirs=ImageView(model);
+    CGFloat want=theirs?[theirs convertRect:theirs.bounds toView:model].size.width:0;
     for(NSUInteger i=0;i<views.count;i++){
+        views[i].transform=CGAffineTransformIdentity;
+        views[i].bounds=CGRectMake(0,0,IconSize.width,IconSize.height);
+        [views[i] layoutIfNeeded];
+        UIView *mine=ImageView(views[i]);
+        CGFloat have=mine?[mine convertRect:mine.bounds toView:views[i]].size.width:0;
+        IconScale=want>0&&have>0?want/have:NAN;
+        if(want>0&&have>0&&fabs(want/have-1)>.02)views[i].transform=CGAffineTransformMakeScale(want/have,want/have);
         views[i].center=CGPointMake(x+i*Pitch+(i>=Pins?g:0)+IconSize.width/2,Margin+IconSize.height/2);
         if(views[i].superview!=Strip)[Strip addSubview:views[i]];
     }
@@ -376,28 +419,22 @@ static void Refresh(UIView *dock){
     if(Divider.superview!=Strip)[Strip addSubview:Divider];
     UpdateIndicators();
     Shown=views.count;
+    RowKey=MetricKey();
 }
 
-// Up opens, down closes only an open drawer; mostly-sideways drags and a
-// dock that is not fully presented are left to SpringBoard.
+// Up opens, down closes only an open drawer; mostly-sideways drags, and a
+// dock less than half way in or on its way out, are left to SpringBoard.
 static BOOL Wants(UIPanGestureRecognizer *g){
     UIView *dock=g.view;
-    if(!DrawerOn()||!dock||dock!=Dock||PresentedProgress(dock)<.99)return NO;
+    if(!DrawerOn()||!dock||dock!=Dock||Closing||PresentedProgress(dock)<.5)return NO;
     CGPoint v=[g velocityInView:dock.superview];
     if(fabs(v.y)<=fabs(v.x))return NO;
     return v.y<0?P<1:P>0;
 }
-// SpringBoard is still animating the dock (its own animation, not our spring).
-static BOOL Settling(UIView *dock){return !Springs&&dock.layer.animationKeys.count>0;}
-static void Finish(UIView *dock,CGFloat target,NSUInteger tries){
-    if(Settling(dock)&&tries<20){
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC),dispatch_get_main_queue(),^{Finish(dock,target,tries+1);});
-        return;
-    }
-    Springs++;
-    [UIView animateWithDuration:.45 delay:0 usingSpringWithDamping:.86 initialSpringVelocity:0
+static void Animate(UIView *dock,CGFloat target,NSTimeInterval duration,void (^done)(void)){
+    [UIView animateWithDuration:duration delay:0 usingSpringWithDamping:.86 initialSpringVelocity:0
                         options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction
-                     animations:^{P=target;Settle(dock,YES);} completion:^(__unused BOOL finished){Springs--;}];
+                     animations:^{P=target;Settle(dock);} completion:^(__unused BOOL finished){if(done)done();}];
 }
 @interface MSDockDrawerPan : NSObject <UIGestureRecognizerDelegate>
 @end
@@ -410,25 +447,19 @@ static void Finish(UIView *dock,CGFloat target,NSUInteger tries){
     CGFloat e=fmax(Extent,1);
     switch(g.state){
         case UIGestureRecognizerStateBegan:
-            StartP=P;Origin=0;Waiting=Settling(dock);
+            StartP=P;
             if(P<=0)Refresh(dock);
             __attribute__((fallthrough));
-        case UIGestureRecognizerStateChanged:{
-            // Pulled while SpringBoard still brings the dock in: hold the
-            // drawer shut and measure the pull from where the dock settles.
-            CGFloat t=[g translationInView:dock.superview].y;
-            if(Waiting&&Settling(dock)){Origin=t;break;}
-            Waiting=NO;
-            P=fmax(0,fmin(1,StartP-(t-Origin)/e));
-            Settle(dock,NO);
+        case UIGestureRecognizerStateChanged:
+            P=fmax(0,fmin(1,StartP-[g translationInView:dock.superview].y/e));
+            [UIView performWithoutAnimation:^{Settle(dock);}];
             break;
-        }
         case UIGestureRecognizerStateEnded:
         case UIGestureRecognizerStateCancelled:{
             // Where the flick would coast to decides open or closed.
             CGFloat v=[g velocityInView:dock.superview].y;
             CGFloat target=g.state==UIGestureRecognizerStateEnded?(P-v*.15/e>.5?1:0):(StartP>.5?1:0);
-            Finish(dock,target,0);
+            Animate(dock,target,.45,nil);
             break;
         }
         default:break;
@@ -437,11 +468,19 @@ static void Finish(UIView *dock,CGFloat target,NSUInteger tries){
 @end
 static MSDockDrawerPan *PanTarget;
 
-CGFloat MSDockDrawerOffset(UIView *dock,double progress){
-    CGFloat k=isfinite(progress)?fmax(0,fmin(1,progress)):1;
-    CGFloat d=dock&&dock==Dock&&DrawerOn()?P*Extent*k:0;
-    if(d!=LastOffset){LastOffset=d;[dock setNeedsLayout];}
-    return d;
+// World.m reports every presentation progress SpringBoard lays the dock out
+// at; once it heads out, the drawer closes along with it.
+void MSDockDrawerProgress(UIView *dock,double progress){
+    static double last=1;
+    // Below .8 and falling: the presentation spring undershoots only a few
+    // percent after its ~1.27 overshoot, so this is the dock heading out.
+    BOOL leaving=isfinite(progress)&&progress<last-.001&&progress<.8;
+    if(isfinite(progress))last=progress;
+    if(!leaving||dock!=Dock||P<=0||Closing)return;
+    UIGestureRecognizerState s=DrawerPan.state;
+    if(s==UIGestureRecognizerStateBegan||s==UIGestureRecognizerStateChanged)return;
+    Closing=YES;
+    dispatch_async(dispatch_get_main_queue(),^{Animate(dock,0,.3,^{Closing=NO;});});
 }
 
 static void (*OrigLayout)(UIView *,SEL);
@@ -495,7 +534,7 @@ void MSDockDrawerTick(UIView *dock,double progress){
     BOOL on=dock&&DrawerOn()&&[InstallState isEqualToString:@"hooked"];
     if(DrawerPan&&(!on||DrawerPan.view!=dock)){[DrawerPan.view removeGestureRecognizer:DrawerPan];DrawerPan=nil;}
     if(!on){
-        if(P>0&&Dock){P=0;Settle(Dock,NO);}
+        if(P>0&&Dock){P=0;Settle(Dock);}
         Status(progress);
         return;
     }
@@ -506,6 +545,6 @@ void MSDockDrawerTick(UIView *dock,double progress){
         DrawerPan.delegate=PanTarget;DrawerPan.name=@"MangoDockDrawer";
         [dock addGestureRecognizer:DrawerPan];
     }
-    if(P>0&&isfinite(progress)&&progress<.01&&DrawerPan.state==UIGestureRecognizerStatePossible){P=0;Settle(dock,NO);}
+    if(P>0&&isfinite(progress)&&progress<.01&&DrawerPan.state==UIGestureRecognizerStatePossible){P=0;Settle(dock);}
     Status(progress);
 }
