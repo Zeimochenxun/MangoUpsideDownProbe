@@ -1,43 +1,40 @@
 #import "IdleGlow.h"
+#import "../../../src/RuntimeSettings.h"
 #import <QuartzCore/QuartzCore.h>
-#include <math.h>
 
-static NSString * const MangoDomain = @"com.go.mangoosprefs";
+static NSString * const MaskName = @"MangoSuiteIdleGlowMask";
 
-typedef struct { double opacity, spread; } GlowParams;
+typedef struct { double density, fade; } GlowParams;
 
-static double Number(id value, double fallback, double low, double high) {
-    double n = [value respondsToSelector:@selector(doubleValue)] ? [value doubleValue] : fallback;
-    return isfinite(n) ? fmax(low, fmin(high, n)) : fallback;
+// Suite settings (Settings > Mango Suite > Island appearance): black density 0...1 (default 1) and the
+// fraction of the pill height at which the black has faded out (0.3...1, default 0.55 = a little
+// higher than the first preview's 0.65).
+static GlowParams ReadParams(void) {
+    return (GlowParams){ MSRuntimeNumber(@"IdleGlowDensity", 1, 0, 1), MSRuntimeNumber(@"IdleGlowFade", .55, .3, 1) };
 }
 
-// Mango's own settings (Island Liquid Glass > Glow Opacity / Glow Spread): PillGlass.Glow.Opacity
-// 0...1 and .Spread (Mango clamps to 0.3...3), both default 1. Read about once a second.
-static GlowParams ReadParams(void) {
-    static GlowParams cached = {1, 1};
-    static CFTimeInterval last;
-    CFTimeInterval now = CACurrentMediaTime();
-    if (last && now - last < 1) return cached;
-    last = now;
-    CFStringRef domain = (__bridge CFStringRef)MangoDomain;
-    CFPreferencesAppSynchronize(domain);
-    id opacity = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("PillGlass.Glow.Opacity"), domain));
-    id spread = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("PillGlass.Glow.Spread"), domain));
-    cached.opacity = Number(opacity, 1, 0, 1);
-    cached.spread = Number(spread, 1, .3, 3);
-    return cached;
+static id Black(double alpha) { return (__bridge id)[UIColor colorWithWhite:0 alpha:alpha].CGColor; }
+static id White(double alpha) { return (__bridge id)[UIColor colorWithWhite:1 alpha:alpha].CGColor; }
+
+static CAGradientLayer *Vertical(NSArray *colors, NSArray<NSNumber *> *locations) {
+    CAGradientLayer *layer = [CAGradientLayer layer];
+    layer.colors = colors;
+    layer.locations = locations;
+    layer.startPoint = CGPointMake(.5, 0);
+    layer.endPoint = CGPointMake(.5, 1);
+    return layer;
 }
 
 @interface MSIdleGlowView : UIView
 - (void)refresh;
 @end
 
-// Mango's circle black glow, copied from the Beta7 island layout pass (mangoos.dylib): one radial
-// CAGradientLayer, black at alpha 1 / 1 / .55 / 0 at 0 / .42 / .78 / 1, from (.5,.3) to (1,1),
-// framed 1.2 W x 0.7 H (both times spread), centred, with its top 0.12 H above the island.
-// Mango shows it only when the island is taller than 90pt; the idle pill is shown here on purpose.
+// Straight top-black glow on the idle pill: pure black at the top feathering to clear, a soft light along
+// the lower edge and a thin glass rim that is brighter at the bottom. The glass backing is faded the same
+// way by MSIdleGlowSync, so the lower half is really clear instead of a murky grey.
 @implementation MSIdleGlowView {
-    CAGradientLayer *_glow;
+    CAGradientLayer *_dark, *_shine, *_rim;
+    CAShapeLayer *_ring;
     GlowParams _applied;
     CGSize _appliedSize;
     BOOL _hasApplied;
@@ -51,29 +48,30 @@ static GlowParams ReadParams(void) {
     self.clipsToBounds = YES;
     self.layer.cornerCurve = kCACornerCurveContinuous;
     self.layer.name = @"MangoSuiteIdleGlow";
-    _glow = [CAGradientLayer layer];
-    _glow.type = kCAGradientLayerRadial;
-    _glow.colors = @[(__bridge id)[UIColor colorWithWhite:0 alpha:1].CGColor,
-                     (__bridge id)[UIColor colorWithWhite:0 alpha:1].CGColor,
-                     (__bridge id)[UIColor colorWithWhite:0 alpha:.55].CGColor,
-                     (__bridge id)[UIColor colorWithWhite:0 alpha:0].CGColor];
-    _glow.locations = @[@0, @.42, @.78, @1];
-    _glow.startPoint = CGPointMake(.5, .3);
-    _glow.endPoint = CGPointMake(1, 1);
-    [self.layer addSublayer:_glow];
+    _dark = Vertical(@[], @[]);
+    _shine = Vertical(@[White(0), White(0), White(.16), White(.34)], @[@0, @.6, @.88, @1]);
+    _rim = Vertical(@[White(.07), White(.15), White(.40)], @[@0, @.5, @1]);
+    _ring = [CAShapeLayer layer];
+    _ring.fillColor = nil;
+    _ring.strokeColor = UIColor.whiteColor.CGColor;
+    _ring.lineWidth = 1;
+    _rim.mask = _ring;
+    for (CALayer *l in @[_dark, _shine, _rim]) [self.layer addSublayer:l];
     return self;
 }
 
 - (void)refresh {
     GlowParams p = ReadParams();
     CGSize s = self.bounds.size;
-    if (_hasApplied && p.opacity == _applied.opacity && p.spread == _applied.spread && CGSizeEqualToSize(s, _appliedSize)) return;
+    if (_hasApplied && p.density == _applied.density && p.fade == _applied.fade && CGSizeEqualToSize(s, _appliedSize)) return;
     _applied = p; _appliedSize = s; _hasApplied = YES;
-    double w = 1.2 * s.width * p.spread, h = .7 * s.height * p.spread;
     [CATransaction begin]; [CATransaction setDisableActions:YES];
+    CGRect b = self.bounds;
     self.layer.cornerRadius = s.height / 2;
-    _glow.frame = CGRectMake((s.width - w) / 2, -.12 * s.height, w, h);
-    _glow.opacity = (float)p.opacity;
+    for (CALayer *l in @[_dark, _shine, _rim, _ring]) l.frame = b;
+    _dark.colors = @[Black(p.density), Black(.55 * p.density), Black(0), Black(0)];
+    _dark.locations = @[@0, @(.538 * p.fade), @(p.fade), @1];
+    _ring.path = [UIBezierPath bezierPathWithRoundedRect:CGRectInset(b, .5, .5) cornerRadius:MAX(s.height / 2 - .5, 0)].CGPath;
     [CATransaction commit];
 }
 
@@ -85,6 +83,23 @@ static GlowParams ReadParams(void) {
 
 UIView *MSIdleGlowCreate(void) { return [MSIdleGlowView new]; }
 
+// Fade the glass backing toward clear at the bottom. Only ever installs or updates its own mask;
+// a mask someone else put there is left alone.
+static void MaskBacking(UIView *backing) {
+    CALayer *mask = backing.layer.mask;
+    if (!mask) {
+        CAGradientLayer *g = Vertical(@[White(1), White(.55), White(.15), White(.10)], @[@0, @.4, @.8, @1]);
+        g.name = MaskName;
+        backing.layer.mask = g;
+        mask = g;
+    }
+    if ([mask.name isEqualToString:MaskName] && !CGRectEqualToRect(mask.frame, backing.bounds)) mask.frame = backing.bounds;
+}
+
+void MSIdleGlowRelease(UIView *backing) {
+    if ([backing.layer.mask.name isEqualToString:MaskName]) backing.layer.mask = nil;
+}
+
 void MSIdleGlowSync(UIView *glow, UIView *host, UIView *backing, CGFloat opacity) {
     // Settled geometry must stay quiet: host hooks re-run on every setter.
     NSArray<UIView *> *subs = host.subviews;
@@ -94,4 +109,5 @@ void MSIdleGlowSync(UIView *glow, UIView *host, UIView *backing, CGFloat opacity
     if (glow.alpha != opacity) glow.alpha = opacity;
     if (glow.hidden) glow.hidden = NO;
     if ([glow isKindOfClass:MSIdleGlowView.class]) [(MSIdleGlowView *)glow refresh];
+    MaskBacking(backing);
 }

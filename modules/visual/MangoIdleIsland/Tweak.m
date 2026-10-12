@@ -487,7 +487,7 @@ static void Update(UIView *host) {
         // immediately and never participates in press/preview motion.
         BOOL needBackground = MSRuntimeFlag(@"IdleEnabled") && NeedsIdleBacking(backgroundState, blendableActivity, activity);
         // The idle glow rides on the glass backing: same pill, same gating, same
-        // inverse-activity handoff. Glass keeps the refraction; the glow adds Mango's black halo.
+        // inverse-activity handoff. The glow adds the black top; the backing fades to clear below.
         BOOL glowMode = needBackground && MSRuntimeFlag(@"IdleGlowEnabled");
         BOOL constructor = needBackground && GlassConstructorVerified && !GlassConstructionFailed;
         BOOL mango = constructor && (OriginalIslandGlassSeen || MangoGlassSetting());
@@ -542,8 +542,9 @@ static void Update(UIView *host) {
                 MSIdleGlowSync(glow, host, bg, glowOpacity);
                 [CATransaction commit];
             }];
-        } else if (glow.superview) {
-            [UIView performWithoutAnimation:^{ [glow removeFromSuperview]; }];
+        } else {
+            if (glow.superview) [UIView performWithoutAnimation:^{ [glow removeFromSuperview]; }];
+            if (bg) MSIdleGlowRelease(bg);
         }
 
         MSIslandRepairUpdate(host, bg, IslandEdgeOptIn());

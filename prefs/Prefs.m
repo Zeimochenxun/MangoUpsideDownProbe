@@ -59,7 +59,16 @@ static BOOL SuiteFlag(NSString *key) {
 
     [self addSection:@"灵动岛外观"];
     [self addSwitch:@"静止灵动岛与过渡修复" key:@"IdleEnabled"];
-    [self addSwitch:@"静止灵动岛黑色光晕（圆形，跟随 Mango 透明度/范围）" key:@"IdleGlowEnabled"];
+    [self addSwitch:@"静止灵动岛黑色光晕（上黑下透）" key:@"IdleGlowEnabled"];
+    for (NSDictionary *row in @[@{@"name":@"静止岛黑色浓度", @"key":@"IdleGlowDensity", @"min":@0.0, @"max":@1.0},
+                                @{@"name":@"静止岛渐隐位置（越小黑色越靠上）", @"key":@"IdleGlowFade", @"min":@.3, @"max":@1.0}]) {
+        PSSpecifier *slider = [PSSpecifier preferenceSpecifierNamed:row[@"name"] target:self set:@selector(writeValue:specifier:) get:@selector(readValue:) detail:nil cell:PSSliderCell edit:nil];
+        [slider setProperty:row[@"key"] forKey:@"key"];
+        [slider setProperty:row[@"min"] forKey:@"min"];
+        [slider setProperty:row[@"max"] forKey:@"max"];
+        [slider setProperty:@YES forKey:@"showValue"];
+        [_specifiers addObject:slider];
+    }
     PSSpecifier *glass = [PSSpecifier preferenceSpecifierNamed:@"玻璃与边缘光参数" target:self set:nil get:nil detail:NSClassFromString(@"MangoSuiteGlassController") cell:PSLinkCell edit:nil];
     [_specifiers addObject:glass];
 
@@ -119,13 +128,15 @@ static BOOL SuiteFlag(NSString *key) {
     NSString *key = [specifier propertyForKey:@"key"];
     if ([key isEqualToString:@"EdgeThickness"]) return MSReadPreferences(NULL)[key] ?: @1.2;
     if ([key isEqualToString:@"EdgeDynamics"]) return MSReadPreferences(NULL)[key] ?: @.5;
+    if ([key isEqualToString:@"IdleGlowDensity"]) return MSReadPreferences(NULL)[key] ?: @1.0;
+    if ([key isEqualToString:@"IdleGlowFade"]) return MSReadPreferences(NULL)[key] ?: @.55;
     if ([key isEqualToString:NativeUpsideDownKey]) return MSReadNativeUpsideDown(NULL) ?: @NO;
     return key.length ? @(SuiteFlag(key)) : nil;
 }
 
 - (void)writeValue:(id)value specifier:(PSSpecifier *)specifier {
     NSString *key = [specifier propertyForKey:@"key"];
-    if ([key isEqualToString:@"EdgeThickness"] || [key isEqualToString:@"EdgeDynamics"]) {
+    if ([key isEqualToString:@"EdgeThickness"] || [key isEqualToString:@"EdgeDynamics"] || [key isEqualToString:@"IdleGlowDensity"] || [key isEqualToString:@"IdleGlowFade"]) {
         NSError *error = nil;
         if (!MSWritePreferenceValue(key, value, &error)) [self showMessage:error.localizedDescription title:@"保存失败"];
         return;

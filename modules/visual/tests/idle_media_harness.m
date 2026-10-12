@@ -109,6 +109,7 @@ static BOOL IslandEdgeOptIn(void) { return YES; }
 static void MSIslandRepairUpdate(UIView *host,UIView *idle,BOOL edge) { (void)host; (void)idle; (void)edge; }
 static UIView *MSIdleGlowCreate(void) { return View(UIView.class, nil); }
 static void MSIdleGlowSync(UIView *glow, UIView *host, UIView *backing, CGFloat opacity) { (void)glow; (void)host; (void)backing; (void)opacity; }
+static void MSIdleGlowRelease(UIView *backing) { (void)backing; }
 /* ACTUAL_MEDIA_HELPERS */
 static UIView *View(Class cls, UIWindow *window) {
     UIView *view = [cls new];
