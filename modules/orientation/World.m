@@ -298,6 +298,8 @@ static BOOL KeepsWorld(UIView *root, MWWorldState *state, UIWindow *window) {
 static void PillStatus(void);
 static void DockStatus(void);
 static void DockSync(void);
+static void DockProbe(void);
+void MSDockDrawerProbe(UIView *dock,double progress,BOOL inApp,long orientation);
 static void ShieldUpdate(void);
 static BOOL ShieldVisible(void);
 static void ReconcileRoot(UIView *root) {
@@ -382,7 +384,7 @@ static void Reconcile(void) {
             for (UIWindow *w in Windows.allObjects) Discover(w);
             for (UIView *root in Roots.allObjects) ReconcileRoot(root);
         }];
-    } @finally { Busy = NO; DiagnosticWorldScan(decisionRead,decision); PillStatus(); DockSync(); ShieldUpdate(); DockStatus(); }
+    } @finally { Busy = NO; DiagnosticWorldScan(decisionRead,decision); PillStatus(); DockSync(); ShieldUpdate(); DockStatus(); DockProbe(); }
 }
 static BOOL Relevant(UIView *v){
     if([v isKindOfClass:WindowClass])return YES;
@@ -872,6 +874,12 @@ static void DockStatus(void){
         lastBody=body;lastLog=now;
         MSDiagnosticsLog(@"World",body);
     }@catch(__unused NSException *exception){}
+}
+// Dock second row, stage 1: the read-only probe in DockDrawer.m.
+static void DockProbe(void){
+    UIView *dock=DockViewRef;
+    BOOL inApp=MSDiagnosticsActive()&&FrontAppSel&&((id(*)(id,SEL))objc_msgSend)(UIApplication.sharedApplication,FrontAppSel);
+    MSDockDrawerProbe(dock,dock?DockProgress(dock):NAN,inApp,(long)Orientation());
 }
 static void InstallDockNotchFix(void){
     DockRootClass=objc_getClass("SBFloatingDockRootViewController");

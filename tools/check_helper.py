@@ -39,6 +39,6 @@ for filename in sys.argv[1:]:
     for string in (b"MangoSuiteOwnedOpticalRim",b"MangoSuiteOwnedNotificationHalo",b"UIGetScreenImage",b"MangoSuiteIdleGlow"):
         assert string in optical,string
     world=content["Library/MobileSubstrate/DynamicLibraries/MangoUpsideDownWorld.dylib"][0]
-    for string in (b"_layoutFloatingDockPresentationProgress:",b"_setBottomEdgeRegionSize:",b"DockNotchEnabled",b"DOCK status",b"MSNotchShieldWindow"):
+    for string in (b"_layoutFloatingDockPresentationProgress:",b"_setBottomEdgeRegionSize:",b"DockNotchEnabled",b"DOCK status",b"MSNotchShieldWindow",b"DOCKPROBE",b"MangoDockProbe"):
         assert string in world,string
     print("PASS: five compiled images, current arm64e ABI, signatures, process scopes, and native Settings integration")
