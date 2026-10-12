@@ -3,7 +3,7 @@
 int main(void) {
     @autoreleasepool {
         NSDictionary *defaults=MSReadPreferences(NULL);
-        assert(defaults && MSRepairKeys().count==7);
+        assert(defaults && MSRepairKeys().count==8);
         assert(!MSPreferenceFlag(defaults,@"EdgeColorEnabled") && !MSPreferenceFlag(defaults,@"DebugEnabled"));
         for (NSString *key in MSRepairKeys()) {
             assert(MSWritePreferenceFlag(key,NO,NULL));
@@ -26,7 +26,7 @@ int main(void) {
         assert(MSWritePreferenceFlag(@"DebugEnabled",YES,NULL));
         NSDictionary *saved=MSReadPreferences(NULL);
         assert([saved[@"DebugSessionToken"] doubleValue]==1000 && [saved[@"DebugEnabled"] boolValue]);
-        puts("PASS: seven repairs persist independently; color/debug opt in, bounded sliders, malformed values and session token persistence");
+        puts("PASS: eight repairs persist independently; color/debug opt in, bounded sliders, malformed values and session token persistence");
     }
     return 0;
 }

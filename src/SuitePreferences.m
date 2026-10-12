@@ -65,7 +65,8 @@ BOOL MSWritePreferenceFlag(NSString *key, BOOL enabled, NSError **error) {
 
 NSArray<NSString *> *MSRepairKeys(void) {
     return @[@"RimGeometryEnabled", @"LauncherRecoveryEnabled", @"GlassAnimationEnabled",
-             @"IslandLayoutEnabled", @"ShortHaloEnabled", @"EdgeColorEnabled", @"SwipeDirectionEnabled"];
+             @"IslandLayoutEnabled", @"ShortHaloEnabled", @"EdgeColorEnabled", @"SwipeDirectionEnabled",
+             @"DockNotchEnabled"];
 }
 
 BOOL MSWritePreferenceValue(NSString *key, id value, NSError **error) {
