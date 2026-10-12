@@ -73,12 +73,13 @@ BOOL MSWritePreferenceValue(NSString *key, id value, NSError **error) {
     if (error) *error = nil;
     NSString *path = MSPreferencesPath();
     NSArray *known = [@[@"Enabled", @"IdleEnabled", @"AdaptiveEnabled", @"WorldEnabled", @"SplitEnabled",
-        @"DebugEnabled", @"DebugSessionToken", @"EdgeThickness", @"EdgeDynamics", @"IdleGlowEnabled", @"IdleGlowShineEnabled", @"IdleGlowAdaptiveEnabled", @"IdleGlowFrostedEnabled", @"IdleGlowDensity", @"IdleGlowFade"] arrayByAddingObjectsFromArray:MSRepairKeys()];
+        @"DebugEnabled", @"DebugSessionToken", @"EdgeThickness", @"EdgeDynamics", @"IdleGlowEnabled", @"IdleGlowShineEnabled", @"IdleGlowAdaptiveEnabled", @"IdleGlowFrostedEnabled", @"IdleGlowDensity", @"IdleGlowFade", @"DockNotchLift"] arrayByAddingObjectsFromArray:MSRepairKeys()];
     BOOL valid = [known containsObject:key] && [value isKindOfClass:NSNumber.class] && isfinite([value doubleValue]);
     if ([key isEqualToString:@"EdgeThickness"]) valid = valid && [value doubleValue] >= .5 && [value doubleValue] <= 4;
     if ([key isEqualToString:@"EdgeDynamics"]) valid = valid && [value doubleValue] >= 0 && [value doubleValue] <= 1;
     if ([key isEqualToString:@"IdleGlowDensity"]) valid = valid && [value doubleValue] >= 0 && [value doubleValue] <= 1;
     if ([key isEqualToString:@"IdleGlowFade"]) valid = valid && [value doubleValue] >= .3 && [value doubleValue] <= 1;
+    if ([key isEqualToString:@"DockNotchLift"]) valid = valid && [value doubleValue] >= 0 && [value doubleValue] <= 50;
     if (!valid) {
         if (error) *error = StorageError(@"未知的整合开关。", path, nil);
         return NO;

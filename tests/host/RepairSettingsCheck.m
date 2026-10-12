@@ -21,6 +21,9 @@ int main(void) {
         assert(MSWritePreferenceValue(@"EdgeDynamics",@1,NULL));
         assert(!MSWritePreferenceValue(@"EdgeDynamics",@(-.01),NULL));
         assert(!MSWritePreferenceValue(@"EdgeDynamics",@(NAN),NULL));
+        assert(MSWritePreferenceValue(@"DockNotchLift",@0,NULL));
+        assert(MSWritePreferenceValue(@"DockNotchLift",@50,NULL));
+        assert(!MSWritePreferenceValue(@"DockNotchLift",@50.1,NULL));
         assert(!MSWritePreferenceValue(@"unrecognized",@YES,NULL));
         assert(MSWritePreferenceValue(@"DebugSessionToken",@1000,NULL));
         assert(MSWritePreferenceFlag(@"DebugEnabled",YES,NULL));

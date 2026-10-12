@@ -694,7 +694,9 @@ static void InstallOrientationLockFix(void){
 // reach only the system gestures, never the app. Taps inside that strip are
 // therefore not delivered to the app either; the strip is kept as shallow as
 // the device log's notch-rim touch-downs (38-47pt) allow.
-static const CGFloat NotchHeight=35;      // dock lift: 13 mini housing, 5.35mm at 0.1537mm/pt
+// Default dock lift: 13 mini housing, 5.35mm at 0.1537mm/pt. User-adjustable
+// 0-50pt through the DockNotchLift slider (Beta9.9.13).
+static const CGFloat NotchHeight=35;
 static const CGFloat NotchBand=50;        // home-edge region while inverted: the 13 mini's notch-side safe-area band
 static const CGFloat NotchHalfWidth=95;   // ~26mm (169pt) housing plus finger slack
 static const CGFloat NotchShieldDepth=48; // notch-rim touch-downs logged at 38-47pt from the edge
@@ -729,7 +731,7 @@ static double DockProgress(UIView *dock){
 }
 static CGFloat DockLiftFor(UIView *dock){
     if(!DockFixOn()||!DownIsNotch(dock.superview))return 0;
-    return MWDockLift(DockProgress(dock),NotchHeight);
+    return MWDockLift(DockProgress(dock),MSRuntimeNumber(@"DockNotchLift",NotchHeight,0,50));
 }
 static __weak UIView *DockViewRef;
 static CGAffineTransform DockIncoming,DockWritten;
