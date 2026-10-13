@@ -40,6 +40,10 @@
 // Beta9.9.23: the stretch also narrows the dock slightly (up to Narrow),
 // a horizontal scale World.m folds into the dock transform only while
 // stretched, so it springs back with the height on release.
+// Beta9.9.24: a pinned app, once opened, became one of SpringBoard's dock
+// recents, showed up in row 1 and was then skipped in row 2. Pinned apps
+// now count as dock apps for the recents model's own filter
+// (_displayItemContainedInUserDock:), so they stay in row 2 only.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -68,7 +72,7 @@ static __weak UIView *Dock;
 static UIView *Strip;
 static UIPanGestureRecognizer *DrawerPan;
 static NSMutableDictionary<NSString *,UIView *> *Icons;
-static NSString *Source=@"none",*InstallState=@"not-run",*IconFail=@"none";
+static NSString *Source=@"none",*InstallState=@"not-run",*IconFail=@"none",*PinFilter=@"not-run";
 static NSUInteger Shown,Candidates;
 static CGFloat IconScale=NAN;
 static CGRect DividerFrame={{0,12},{1,49}};
@@ -376,10 +380,10 @@ static void Refresh(UIView *dock){
     };
     NSMutableArray<UIView *> *views=[NSMutableArray array];
     NSMutableSet<NSString *> *used=[NSMutableSet set];
-    NSSet<NSString *> *rowOne=RowOne(vc);
+    NSSet<NSString *> *userDock=UserDock(vc);
     for(id bundle in Items(MSRuntimeSettings()[@"DockDrawerPinned"])){
         if(views.count>=capacity(0))break;
-        if(![bundle isKindOfClass:NSString.class]||[rowOne containsObject:bundle]||[used containsObject:bundle])continue;
+        if(![bundle isKindOfClass:NSString.class]||[userDock containsObject:bundle]||[used containsObject:bundle])continue;
         UIView *v=IconView(bundle,model,iconModel);
         if(v){[views addObject:v];[used addObject:bundle];}
     }
@@ -531,6 +535,30 @@ static BOOL HookRootShouldBegin(id self,SEL cmd,UIGestureRecognizer *g){
     if(g!=DrawerPan&&[g isKindOfClass:UIPanGestureRecognizer.class]&&Wants((UIPanGestureRecognizer *)g))return NO;
     return OrigRootShouldBegin(self,cmd,g);
 }
+static NSArray<NSString *> *PinnedList(void){
+    NSMutableArray<NSString *> *out=[NSMutableArray array];
+    for(id b in Items(MSRuntimeSettings()[@"DockDrawerPinned"]))if([b isKindOfClass:NSString.class])[out addObject:b];
+    return out;
+}
+// SpringBoard keeps a dock app out of the dock's recents; pinned row 2
+// apps are kept out the same way.
+static BOOL (*OrigContained)(id,SEL,id);
+static BOOL HookContained(id self,SEL cmd,id item){
+    if(OrigContained(self,cmd,item))return YES;
+    NSString *bundle=DrawerOn()?Bundle(item,@"bundleIdentifier"):nil;
+    return bundle&&[PinnedList() containsObject:bundle];
+}
+// After the switch or the pinned list changes, have the recents re-filter.
+static void ReloadRecentsIfPinsChanged(UIView *dock){
+    static NSString *last;
+    NSString *now=[NSString stringWithFormat:@"%d %@",DrawerOn(),[PinnedList() componentsJoinedByString:@","]];
+    if(!dock||[now isEqualToString:last])return;
+    BOOL first=!last;
+    last=now;
+    id model=Call(Call(Call(dock.window.rootViewController,@"floatingDockViewController"),@"suggestionsViewController"),@"suggestionsModel");
+    SEL reload=NSSelectorFromString(@"_reloadRecentsAndSuggestions");
+    if((!first||DrawerOn())&&[model respondsToSelector:reload])((void(*)(id,SEL))objc_msgSend)(model,reload);
+}
 void MSDockDrawerInstall(Class dockClass,Class rootClass){
     SEL begin=@selector(gestureRecognizerShouldBegin:);
     if(!dockClass||!rootClass||!class_getInstanceMethod(dockClass,@selector(layoutSubviews))||
@@ -540,6 +568,14 @@ void MSDockDrawerInstall(Class dockClass,Class rootClass){
     MSHookMessageEx(dockClass,@selector(pointInside:withEvent:),(IMP)HookPointInside,(IMP *)&OrigPointInside);
     MSHookMessageEx(rootClass,begin,(IMP)HookRootShouldBegin,(IMP *)&OrigRootShouldBegin);
     InstallState=@"hooked";
+    Class model=objc_getClass("SBFloatingDockSuggestionsModel");
+    SEL contained=NSSelectorFromString(@"_displayItemContainedInUserDock:");
+    Method m=model?class_getInstanceMethod(model,contained):NULL;
+    const char *types=m?method_getTypeEncoding(m):NULL;
+    if(types&&(types[0]=='B'||types[0]=='c')&&method_getNumberOfArguments(m)==3){
+        MSHookMessageEx(model,contained,(IMP)HookContained,(IMP *)&OrigContained);
+        PinFilter=@"hooked";
+    }else PinFilter=m?[NSString stringWithFormat:@"signature:%s",method_getTypeEncoding(m)]:@"missing";
     [NSNotificationCenter.defaultCenter addObserverForName:@"SBApplicationProcessStateDidChange" object:nil queue:NSOperationQueue.mainQueue
                                                 usingBlock:^(__unused NSNotification *note){if(Strip&&!Strip.hidden)UpdateIndicators();}];
 }
@@ -550,8 +586,8 @@ static void Status(double progress){
     double now=CACurrentMediaTime();
     if(now-last<2)return;
     last=now;
-    NSString *body=[NSString stringWithFormat:@"DRAWER status install=%@ on=%d pan=%d p=%.2f progress=%.2f extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ candidates=%lu pins=%lu shown=%lu divider=%d iconScale=%.3f iconFail=%@ dividerLook={%@} indicator={%@} recentFront=%@",
-        InstallState,DrawerOn(),DrawerPan!=nil,P,progress,Extent,LastOffset,Margin,NSStringFromCGSize(IconSize),Pitch,NSStringFromCGRect(PlatBase),Source,
+    NSString *body=[NSString stringWithFormat:@"DRAWER status install=%@ pinFilter=%@ on=%d pan=%d p=%.2f progress=%.2f extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ candidates=%lu pins=%lu shown=%lu divider=%d iconScale=%.3f iconFail=%@ dividerLook={%@} indicator={%@} recentFront=%@",
+        InstallState,PinFilter,DrawerOn(),DrawerPan!=nil,P,progress,Extent,LastOffset,Margin,NSStringFromCGSize(IconSize),Pitch,NSStringFromCGRect(PlatBase),Source,
         (unsigned long)Candidates,(unsigned long)Pins,(unsigned long)Shown,Divider&&!Divider.hidden,IconScale,IconFail,DividerLook,IndicatorLook,[[MRU subarrayWithRange:NSMakeRange(0,MIN(MRU.count,(NSUInteger)6))] componentsJoinedByString:@","]];
     if([body isEqualToString:lastBody])return;
     lastBody=body;
@@ -561,6 +597,7 @@ static void Status(double progress){
 // closes the drawer once the dock has gone away.
 void MSDockDrawerTick(UIView *dock,double progress){
     if(DrawerOn())RecordFront();
+    if([PinFilter isEqualToString:@"hooked"])ReloadRecentsIfPinsChanged(dock);
     BOOL on=dock&&DrawerOn()&&[InstallState isEqualToString:@"hooked"];
     if(DrawerPan&&(!on||DrawerPan.view!=dock)){[DrawerPan.view removeGestureRecognizer:DrawerPan];DrawerPan=nil;}
     if(!on){

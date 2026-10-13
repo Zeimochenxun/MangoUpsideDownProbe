@@ -70,7 +70,7 @@ static UIImage *AppIcon(NSString *bundle) {
     NSArray<NSArray<NSString *> *> *apps = InstalledApps();
     NSArray<NSString *> *pinned = Pinned();
     PSSpecifier *chosen = [PSSpecifier groupSpecifierWithName:@"已固定（按打开顺序从左往右）"];
-    [chosen setProperty:[NSString stringWithFormat:@"最多 %lu 个，排在第二排最左边，右边放最近使用。已在第一排的 App 不会重复显示。", (unsigned long)PinnedMax] forKey:@"footerText"];
+    [chosen setProperty:[NSString stringWithFormat:@"最多 %lu 个，排在第二排最左边，右边放最近使用。固定的 App 不会出现在第一排的最近使用里；已放在第一排固定栏里的 App 不会重复显示。", (unsigned long)PinnedMax] forKey:@"footerText"];
     [_specifiers addObject:chosen];
     for (NSString *bundle in pinned)
         for (NSArray<NSString *> *app in apps)
