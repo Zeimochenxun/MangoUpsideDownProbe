@@ -2,6 +2,7 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import "../../src/SuitePreferences.h"
 #import "../../src/NativePreferences.h"
+#import "../../src/MangoIdentity.h"
 
 @interface PSListController (ActualSuiteMethods)
 - (id)readValue:(PSSpecifier *)specifier;
@@ -70,7 +71,10 @@ int main(int argc, const char *argv[]) {
                 Require(ReadMask(controller) == mask, @"all 32 combinations persist");
                 PSListController *glass = [NSClassFromString(@"MangoSuiteGlassController") new];
                 BOOL tintAvailable = [[Item(glass, @"MangoIdleIsland.TintAlpha") propertyForKey:@"enabled"] boolValue];
-                Require(tintAvailable == !((mask & 1) && (mask & 4)), @"glass page uses the same master/adaptive state");
+                // The tint slider is locked only when AdaptiveColor actually owns the tint: master and
+                // adaptive both on AND the pinned Mango is one the module loads on.
+                BOOL effectiveAdaptive = MS_ADAPTIVE_SUPPORTED && (mask & 1) && (mask & 4);
+                Require(tintAvailable == !effectiveAdaptive, @"glass page uses the same effective master/adaptive state");
             }
             // Leave a nontrivial selection for a separate reader process.
             for (unsigned i = 0; i < Keys().count; i++) Write(controller, Keys()[i], !!(21 & (1u << i)));

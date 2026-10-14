@@ -88,18 +88,18 @@ static BOOL SuiteFlag(NSString *key) {
     [self addSlider:@"采色边缘粗细（点）" key:@"EdgeThickness" min:.5 max:4];
     [self addSlider:@"采色边缘动态程度" key:@"EdgeDynamics" min:0 max:1];
 
-#if MS_ADAPTIVE_SUPPORTED
-    [self addSection:@"背景颜色自适应" footer:@"模块开关，更改后需重新启动用户空间。"];
+    // The switch and parameter page are always present and still persist, so saved values survive a
+    // future re-enable. On a Mango build whose shader AdaptiveColor can no longer patch
+    // (MS_ADAPTIVE_SUPPORTED 0) the loader does not load the module, so turning it on has no effect;
+    // the footer says so instead of silently doing nothing.
+    [self addSection:@"背景颜色自适应" footer:(MS_ADAPTIVE_SUPPORTED
+        ? @"模块开关，更改后需重新启动用户空间。"
+        : @"当前 Mango " MS_MANGO_VERSION " 的玻璃着色器已改动，自适应颜色模块与之对不上，开启也不会生效（Mango 自己的玻璃照常工作）；开关与参数保留，待该模块重新适配后恢复。")];
     [self addSwitch:@"背景颜色自适应" key:@"AdaptiveEnabled"];
     Class adaptiveClass = [self adaptiveControllerClass];
     PSSpecifier *adaptive = [PSSpecifier preferenceSpecifierNamed:@"自适应颜色参数" target:self set:nil get:nil detail:adaptiveClass cell:adaptiveClass ? PSLinkCell : PSButtonCell edit:nil];
     if (!adaptiveClass) [adaptive setButtonAction:@selector(showMissingAdaptive)];
     [_specifiers addObject:adaptive];
-#else
-    // AdaptiveColor rewrites Mango's shader by exact strings that Mango 1.0-Beta10 and later no longer
-    // contain, so the module is not loaded. The saved switch is kept for when it is re-audited.
-    [self addSection:@"背景颜色自适应" footer:@"暂不支持当前的 Mango " MS_MANGO_VERSION "：它的玻璃着色器已改动，自适应颜色模块与之对不上，本整合包不会加载它（Mango 自己的玻璃照常工作）。待自适应颜色模块重新适配后恢复。"];
-#endif
 
     NSError *nativeReadError = nil;
     (void)MSReadNativeUpsideDown(&nativeReadError);

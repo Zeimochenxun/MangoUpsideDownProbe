@@ -1,5 +1,4 @@
 #import <Preferences/PSListController.h>
-#import "../../src/MangoIdentity.h"
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         if (argc != 3) return 2;
@@ -20,12 +19,8 @@ int main(int argc, const char *argv[]) {
             if (item.cellType == PSSwitchCell) [keys addObject:[item propertyForKey:@"key"]];
             if (item.cellType == PSLinkCell) [links addObject:NSStringFromClass(item.detailClass)];
         }
-        NSMutableArray *required = [@[@"Enabled", @"IdleEnabled", @"IdleGlowEnabled", @"IdleGlowShineEnabled", @"IdleGlowAdaptiveEnabled", @"IdleGlowFrostedEnabled", @"RimGeometryEnabled", @"GlassAnimationEnabled", @"ShortHaloEnabled", @"EdgeColorEnabled", @"AdaptiveEnabled", @"LeXiang.UpsideDown.Enabled", @"WorldEnabled", @"SplitEnabled", @"LauncherRecoveryEnabled", @"IslandLayoutEnabled", @"SwipeDirectionEnabled", @"DockNotchEnabled", @"DockDrawerEnabled", @"DockDrawerDivider"] mutableCopy];
-        NSMutableArray *children = [@[@"MangoSuiteGlassController", @"MangoIslandAdaptiveColorPrefsController", @"MangoSuiteDockPinnedController", @"MangoSuiteDiagnosticsController"] mutableCopy];
-        if (!MS_ADAPTIVE_SUPPORTED) {  // the root page then shows a note instead of the switch and the parameter link
-            [required removeObject:@"AdaptiveEnabled"];
-            [children removeObject:@"MangoIslandAdaptiveColorPrefsController"];
-        }
+        NSArray *required = @[@"Enabled", @"IdleEnabled", @"IdleGlowEnabled", @"IdleGlowShineEnabled", @"IdleGlowAdaptiveEnabled", @"IdleGlowFrostedEnabled", @"RimGeometryEnabled", @"GlassAnimationEnabled", @"ShortHaloEnabled", @"EdgeColorEnabled", @"AdaptiveEnabled", @"LeXiang.UpsideDown.Enabled", @"WorldEnabled", @"SplitEnabled", @"LauncherRecoveryEnabled", @"IslandLayoutEnabled", @"SwipeDirectionEnabled", @"DockNotchEnabled", @"DockDrawerEnabled", @"DockDrawerDivider"];
+        NSArray *children = @[@"MangoSuiteGlassController", @"MangoIslandAdaptiveColorPrefsController", @"MangoSuiteDockPinnedController", @"MangoSuiteDiagnosticsController"];
         if (![keys isEqual:required] || ![links isEqual:children]) {
             NSLog(@"FAIL switches=%@ links=%@", keys, links); return 1;
         }
