@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <substrate.h>
 #import <sys/stat.h>
 #import <fcntl.h>
@@ -65,6 +66,44 @@ static BOOL IslandEdgeOptIn(void) {
     id value = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("Island.SpecularEnabled"), (__bridge CFStringRef)MangoDomain));
     CachedEdgePreference = [value isKindOfClass:NSNumber.class] && [value boolValue];
     return CachedEdgePreference;
+}
+
+static CFTimeInterval LastBlurPreferenceRead;
+static double CachedBlurPreference = -1;
+// Beta11: Mango dropped the flat Island.* glass keys and offers no island
+// surface in its own UI on a notch device, so the old "色调通透" slider (which
+// still writes Island.Blur to the Mango domain) no longer reaches anything.
+// The island glass MangoSuite owns is still a Beta11 MGLiveBackdropView, which
+// exposes a per-instance blur override. Read Island.Blur ourselves and drive
+// that override, exactly as the specular/边缘光 path already does.
+static double IslandBlurRaw(void) {
+    CFTimeInterval now = CACurrentMediaTime();
+    if (LastBlurPreferenceRead && now - LastBlurPreferenceRead < 1.0) return CachedBlurPreference;
+    LastBlurPreferenceRead = now;
+    CFPreferencesAppSynchronize((__bridge CFStringRef)MangoDomain);
+    id value = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("Island.Blur"), (__bridge CFStringRef)MangoDomain));
+    CachedBlurPreference = [value isKindOfClass:NSNumber.class] ? [value doubleValue] : -1;
+    return CachedBlurPreference;
+}
+
+// ponytail: calibration build. Island.Blur is a 0..3 slider; the native
+// override's units (points vs normalized) are unconfirmed, so scale ×10 and log
+// raw+radius+argType — the next build fixes the mapping from the device sweep.
+static void ApplyIslandBlurOverride(UIView *glass) {
+    if (Disabled || !glass) return;
+    Class cls = object_getClass(glass);
+    SEL sel = @selector(setLgNativeBlurRadiusOverride:);
+    NSString *argType = ClassMethodSignature(cls, sel, "v", 3, "@") ? @"object"
+                      : (ClassMethodSignature(cls, sel, "v", 3, "d") ? @"double" : nil);
+    if (!argType) return;  // not this Mango build; Beta9 safe no-op
+    double raw = IslandBlurRaw();
+    double radius = raw < 0 ? -1 : raw * 10.0;
+    if ([argType isEqualToString:@"object"])
+        ((void (*)(id, SEL, id))objc_msgSend)(glass, sel, radius < 0 ? nil : @(radius));
+    else
+        ((void (*)(id, SEL, double))objc_msgSend)(glass, sel, radius < 0 ? 0.0 : radius);
+    Log([NSString stringWithFormat:@"[BLUR-OVERRIDE] raw=%.3f radius=%.2f argType=%@ ptr=%p",
+         raw, radius, argType, (void *)glass]);
 }
 
 static BOOL IsIslandGlass(id object) {
@@ -166,6 +205,7 @@ static void RefreshActiveIslandGlass(UIView *glass, CFTimeInterval eventTime) {
     if (ClassMethodSignature(cls, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) {
         [glass setLgSpecularEnabledOverride:edgeEnabled ? (__bridge id)kCFBooleanTrue : (__bridge id)kCFBooleanFalse];
     }
+    ApplyIslandBlurOverride(glass);
 
     NSNumber *last = objc_getAssociatedObject(glass, &LastParameterReapplyKey);
     BOOL observed = last && last.doubleValue >= eventTime - 0.15;
@@ -187,6 +227,7 @@ static void ParametersChanged(CFTimeInterval eventTime, uint64_t generation) {
 
     LastPreferenceRead = 0;
     LastEdgePreferenceRead = 0;
+    LastBlurPreferenceRead = 0;
     NSMutableOrderedSet<UIView *> *islandGlasses = CollectIslandGlasses();
     NSUInteger idleCount = 0, activeCount = 0;
     NSMutableArray<UIView *> *active = [NSMutableArray array];
@@ -233,7 +274,7 @@ static void MangoReload(CFNotificationCenterRef center, void *observer, CFString
     dispatch_async(dispatch_get_main_queue(), ^{
         CFTimeInterval eventTime = CACurrentMediaTime();
         uint64_t generation = ++ParameterReloadGeneration;
-        LastPreferenceRead = LastEdgePreferenceRead = 0;
+        LastPreferenceRead = LastEdgePreferenceRead = LastBlurPreferenceRead = 0;
         Log([NSString stringWithFormat:@"[PARAMETERS] notification=go.mangoos/ParametersReloaded generation=%llu", (unsigned long long)generation]);
         // Beta9 Rendering reloads its preference cache before publishing this
         // event. Let native observers finish, and coalesce slider changes.
@@ -347,6 +388,7 @@ static UIView *CreateBackground(BOOL useMango, CGRect rect) {
         if ([view isKindOfClass:GlassClass] && ClassMethodSignature(GlassClass, @selector(setLgSpecularEnabledOverride:), "v", 3, "@")) {
             [view setLgSpecularEnabledOverride:IslandEdgeOptIn() ? (__bridge id)kCFBooleanTrue : (__bridge id)kCFBooleanFalse];
         }
+        if ([view isKindOfClass:GlassClass]) ApplyIslandBlurOverride(view);
     }
     if (!view) {
         UIVisualEffectView *fallback = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterialDark]];
