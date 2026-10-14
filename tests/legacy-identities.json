@@ -1,0 +1,12 @@
+{
+  "1.0-Beta8-1": {
+    "MangoPanda.dylib": "05FEE465-833B-3982-AC57-CC721F1DA2E5",
+    "MangoHello.dylib": "15D63429-C2F1-3997-B6A2-3E0F803D8FED",
+    "MangoOSRendering.dylib": "0D23BE7C-63FC-335E-A5B2-6773627BA077"
+  },
+  "1.0-Beta9-1": {
+    "MangoPanda.dylib": "2081DA7E-6C9B-30AA-9B3E-2DA9628A5B95",
+    "MangoHello.dylib": "2E847FEA-97B0-3739-9097-3CEDCC5E1D1A",
+    "MangoOSRendering.dylib": "7D067B62-6203-3D64-BE8A-3A4A7E965959"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "shaderSHA256": "37f427cbaf267d4021f7fc99086f666ef7a1261f64c7a0a9cd78a21342b93a95",
+  "compiled": true,
+  "inputBytes": 23939,
+  "airBytes": 27312,
+  "compiler": "Apple Metal / iphoneos",
+  "mangoVersion": "1.0-Beta9-1",
+  "verifiedRun": 37691636076,
+  "sourceCommit": "0c45bb0594aac60cd075e6b164414b526c30d590"
+}

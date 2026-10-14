@@ -1,0 +1,49 @@
+{
+  "binary": "MangoPanda.dylib",
+  "sha256": "f6f8f523cc2725c587dc26fce2c666cde85c533eb55e040fb101761cf0eccf79",
+  "export": "MRMediaRemoteGetNowPlayingApplicationIsPlaying",
+  "decodedExport": [
+    {
+      "source": "0xa13ae0",
+      "text": "MRMediaRemoteGetNowPlayingApplicationIsPlaying",
+      "decode_instruction": "0x457fd4"
+    }
+  ],
+  "callbackDescriptor": "0x9c6218",
+  "callbackSignaturePointerSlot": "0x9c6238",
+  "callbackSignatureAddress": "0x9ab904",
+  "callbackSignature": "v12@?0B8",
+  "callInstructions": [
+    {
+      "address": "0x4573b0",
+      "mnemonic": "ldur",
+      "operands": "x1, [x29, #-0x78]"
+    },
+    {
+      "address": "0x4573b4",
+      "mnemonic": "ldur",
+      "operands": "x8, [x29, #-0x98]"
+    },
+    {
+      "address": "0x4573b8",
+      "mnemonic": "adrp",
+      "operands": "x0, #0x9c4000"
+    },
+    {
+      "address": "0x4573bc",
+      "mnemonic": "ldr",
+      "operands": "x0, [x0, #0xb08]"
+    },
+    {
+      "address": "0x4573c0",
+      "mnemonic": "blraaz",
+      "operands": "x8"
+    }
+  ],
+  "queueImport": {
+    "address": "0x9c4b08",
+    "symbol": "__dispatch_main_q"
+  },
+  "claim": "Read-only main-queue query with BOOL completion matches supplied Beta8 call ABI; no API creates media content",
+  "limitation": "Static call ABI only; no evidence proving Idle glass caused the reported missing media, and no connected-device validation"
+}
