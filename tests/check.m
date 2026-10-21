@@ -26,15 +26,21 @@ int main(void) {
         assert(!DDReleaseOpen(1, .9, 1, 2000, 66.5) && DDReleaseOpen(0, .1, 1, 0, 66.5));
         // Leaving: a fall below .8, not the presentation spring settling from its overshoot.
         assert(DDLeaving(.7, .75) && !DDLeaving(1, 1.27) && !DDLeaving(.75, .7) && !DDLeaving(NAN, 1));
+        // Lift: follows the presentation, holds through its overshoot, nothing without progress.
+        assert(DDLift(.5, 35) == 17.5 && DDLift(1.27, 35) == 35 && DDLift(-.2, 35) == 0 && DDLift(NAN, 35) == 0);
+        assert(DDLiftHeight(@{}) == 35 && DDLiftHeight(@{@"LiftHeight": @(-5)}) == 0 && DDLiftHeight(@{@"LiftHeight": @(NAN)}) == 35);
 
-        // Settings: no files means every switch on and nothing pinned.
+        // Settings: no files means every switch on, nothing pinned, the default lift.
         NSDictionary *settings = DDReadSettings();
-        assert(settings.count == 0 && DDFlag(settings, @"Enabled") && DDFlag(settings, @"FloatingDock") && DDPinned(settings).count == 0);
-        // A first run takes Mango Suite's drawer choices, cleaned to 5 distinct apps.
+        assert(settings.count == 0 && DDFlag(settings, @"Enabled") && DDFlag(settings, @"FloatingDock") && DDFlag(settings, @"NotchLift"));
+        assert(DDPinned(settings).count == 0 && DDLiftHeight(settings) == 35);
+        // A first run takes Mango Suite's drawer and lift choices, pins cleaned to 5 distinct apps.
         Write(DDSuiteFile(@"settings.plist"), @{@"DockDrawerPinned": @[@"a", @"b", @"a", @"c", @7, @"d", @"e", @"f"],
-                                                @"DockDrawerDivider": @NO, @"DockDrawerEnabled": @YES});
+                                                @"DockDrawerDivider": @NO, @"DockDrawerEnabled": @YES,
+                                                @"DockNotchEnabled": @NO, @"DockNotchLift": @80});
         settings = DDReadSettings();
         assert([DDPinned(settings) isEqualToArray:(@[@"a", @"b", @"c", @"d", @"e"])] && !DDFlag(settings, @"Divider") && DDFlag(settings, @"Enabled"));
+        assert(!DDFlag(settings, @"NotchLift") && DDLiftHeight(settings) == 50);
         // The first write keeps that seed in our own file; Mango Suite is not read again.
         NSError *error = nil;
         assert(DDWriteSetting(@"Enabled", @NO, &error));

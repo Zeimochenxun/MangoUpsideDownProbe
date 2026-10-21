@@ -4,8 +4,11 @@
 #pragma once
 #import <Foundation/Foundation.h>
 #import <roothide.h>
+#include <math.h>
 
 static const NSUInteger DDPinnedMax = 5;
+// Lift while inverted: the iPhone 13 mini's 5.35mm housing at 0.1537mm/pt.
+static const double DDLiftDefault = 35, DDLiftMax = 50;
 
 static inline NSString *DDJB(const char *path) { return [NSString stringWithUTF8String:jbroot(path)]; }
 static inline NSString *DDDirectory(void) { return DDJB("/var/mobile/Library/Application Support/DoubleDock"); }
@@ -22,10 +25,18 @@ static inline NSDictionary *DDReadSettings(void) {
     NSMutableDictionary *seed = [NSMutableDictionary dictionary];
     if ([suite[@"DockDrawerPinned"] isKindOfClass:NSArray.class]) seed[@"Pinned"] = suite[@"DockDrawerPinned"];
     if ([suite[@"DockDrawerDivider"] isKindOfClass:NSNumber.class]) seed[@"Divider"] = suite[@"DockDrawerDivider"];
+    if ([suite[@"DockNotchEnabled"] isKindOfClass:NSNumber.class]) seed[@"NotchLift"] = suite[@"DockNotchEnabled"];
+    if ([suite[@"DockNotchLift"] isKindOfClass:NSNumber.class]) seed[@"LiftHeight"] = suite[@"DockNotchLift"];
     return seed;
 }
 
-// Every switch (Enabled, Divider, FloatingDock) defaults on.
+static inline double DDLiftHeight(NSDictionary *settings) {
+    id value = settings[@"LiftHeight"];
+    double height = [value isKindOfClass:NSNumber.class] ? [value doubleValue] : DDLiftDefault;
+    return isfinite(height) ? fmin(DDLiftMax, fmax(0, height)) : DDLiftDefault;
+}
+
+// Every switch (Enabled, Divider, FloatingDock, NotchLift) defaults on.
 static inline BOOL DDFlag(NSDictionary *settings, NSString *key) {
     id value = settings[key];
     return [value isKindOfClass:NSNumber.class] ? [value boolValue] : YES;

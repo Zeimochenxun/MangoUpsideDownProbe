@@ -32,6 +32,13 @@
 // - Lynx's running marks under row 1 are copied under row 2's running apps.
 // - Mango Suite's own copy of the drawer wins: while its pan
 //   ("MangoDockDrawer") is on the dock, this one steps aside.
+// - Inverted (Mango turning SpringBoard upside down), the dock's bottom edge
+//   sits under the notch, so the dock is lifted further by LiftHeight,
+//   scaled by the presentation progress so the same finger travel lifts it
+//   further; upright nothing changes (Mango Suite Beta9.9.12-9.9.13). While
+//   a MangoUpsideDownWorld image does this itself (Mango Suite's, under its
+//   DockNotchEnabled, which also covers the notch's touch fixes), this lift
+//   steps aside.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -76,7 +83,7 @@ static __weak UIView *DockView;
 static double LayoutProgress=NAN;
 static SEL PresentedSel;
 static CGAffineTransform Incoming,Final;
-static CGFloat LastSqueeze=1;
+static CGFloat LastSqueeze=1,LastLift;
 
 // Status lines for 导出诊断日志 in Settings; one rollover at 512KB.
 static void Log(NSString *line){
@@ -91,6 +98,15 @@ static void Log(NSString *line){
     strftime(stamp,sizeof stamp,"%m-%d %H:%M:%S",&local);
     fprintf(file,"%s %s\n",stamp,line.UTF8String);
     fclose(file);
+}
+static BOOL ImageLoaded(const char *suffix){
+    size_t n=strlen(suffix);
+    for(uint32_t i=0;i<_dyld_image_count();i++){
+        const char *name=_dyld_get_image_name(i);
+        size_t l=name?strlen(name):0;
+        if(l>=n&&!strcmp(name+l-n,suffix))return YES;
+    }
+    return NO;
 }
 static NSDictionary *S(void){
     static NSDictionary *snapshot;static CFTimeInterval last;
@@ -125,6 +141,34 @@ static double Presented(UIView *dock){
 // else the presented progress.
 static double DockProgress(UIView *dock){
     return isfinite(LayoutProgress)?LayoutProgress:Presented(dock);
+}
+// Whether v's +y points at the physical top edge, i.e. v's bottom is the notch.
+static BOOL DownIsNotch(UIView *v){
+    id<UICoordinateSpace> fixed=v.window.screen.fixedCoordinateSpace;
+    if(!fixed)return NO;
+    CGPoint o=[v convertPoint:CGPointZero toCoordinateSpace:fixed];
+    CGPoint d=[v convertPoint:CGPointMake(0,1) toCoordinateSpace:fixed];
+    return d.y-o.y<-.5;
+}
+// A MangoUpsideDownWorld image lifts the dock itself: Mango Suite's module
+// while its switches (both default on) are, the standalone World 1.3.0
+// always. The Suite's settings are re-read at most every 250ms.
+static BOOL SuiteLifts(void){
+    static int world=-1;static NSDictionary *suite;static CFTimeInterval last;
+    if(world<0)world=ImageLoaded("/MangoUpsideDownWorld.dylib");
+    if(!world)return NO;
+    CFTimeInterval now=CACurrentMediaTime();
+    if(!suite||now-last>=.25){suite=[NSDictionary dictionaryWithContentsOfFile:DDSuiteFile(@"settings.plist")]?:@{};last=now;}
+    for(NSString *key in @[@"Enabled",@"DockNotchEnabled"]){
+        id value=suite[key];
+        if([value isKindOfClass:NSNumber.class]&&![value boolValue])return NO;
+    }
+    return YES;
+}
+// The extra upward translation for the dock's current presentation.
+static CGFloat Lift(UIView *dock){
+    if(!DDFlag(S(),@"NotchLift")||SuiteLifts()||!DownIsNotch(dock.superview))return 0;
+    return DDLift(DockProgress(dock),DDLiftHeight(S()));
 }
 static UIView *Platter(UIView *dock){
     id p=Call(dock,@"mainPlatterView");
@@ -208,14 +252,15 @@ static CGFloat Squeeze(UIView *dock){
     return dock&&dock==Dock&&DrawerOn()?DDSqueeze(P):1;
 }
 static void (*OrigSetTransform)(UIView *,SEL,CGAffineTransform);
-// Replays SpringBoard's last write with the current squeeze through the
-// hooks below this one (Mango Suite's notch lift among them), and only while
-// nothing else has written since. Inside an animation block it animates.
+// Replays SpringBoard's last write with the current lift and squeeze through
+// the hooks below this one, and only while nothing else has written since.
+// Inside an animation block it animates.
 static void Reapply(UIView *dock){
-    CGFloat squeeze=Squeeze(dock);
-    if(!dock||dock!=DockView||squeeze==LastSqueeze||!CGAffineTransformEqualToTransform(dock.transform,Final))return;
-    CGAffineTransform t=Incoming;t.a*=squeeze;
-    LastSqueeze=squeeze;
+    if(!dock||dock!=DockView)return;
+    CGFloat squeeze=Squeeze(dock),lift=Lift(dock);
+    if((squeeze==LastSqueeze&&lift==LastLift)||!CGAffineTransformEqualToTransform(dock.transform,Final))return;
+    CGAffineTransform t=Incoming;t.ty-=lift;t.a*=squeeze;
+    LastSqueeze=squeeze;LastLift=lift;
     OrigSetTransform(dock,@selector(setTransform:),t);
     Final=dock.transform;
 }
@@ -538,8 +583,8 @@ static void HookSetTransform(UIView *self,SEL cmd,CGAffineTransform t){
     DockView=self;
     DrawerProgress(self,DockProgress(self));
     Incoming=t;
-    LastSqueeze=Squeeze(self);
-    t.a*=LastSqueeze;
+    LastLift=Lift(self);LastSqueeze=Squeeze(self);
+    t.ty-=LastLift;t.a*=LastSqueeze;
     OrigSetTransform(self,cmd,t);
     Final=self.transform;
 }
@@ -585,15 +630,6 @@ static void ReloadRecentsIfPinsChanged(UIView *dock){
     if((!first||DrawerOn())&&[model respondsToSelector:reload])((void(*)(id,SEL))objc_msgSend)(model,reload);
 }
 
-static BOOL ImageLoaded(const char *suffix){
-    size_t n=strlen(suffix);
-    for(uint32_t i=0;i<_dyld_image_count();i++){
-        const char *name=_dyld_get_image_name(i);
-        size_t l=name?strlen(name):0;
-        if(l>=n&&!strcmp(name+l-n,suffix))return YES;
-    }
-    return NO;
-}
 // Once, when the dock first shows: what else decides the dock here.
 static void Environment(void){
     static BOOL done;
@@ -604,24 +640,26 @@ static void Environment(void){
     id defaults=Call(Call(objc_getClass("SBDefaults"),@"localDefaults"),@"floatingDockDefaults");
     SEL recents=NSSelectorFromString(@"recentsEnabled");
     int recentsOn=[defaults respondsToSelector:recents]?((BOOL(*)(id,SEL))objc_msgSend)(defaults,recents):-1;
-    Log([NSString stringWithFormat:@"environment floating=%@ wanted=%d withoutUs=%d lynx=%d mangoSuiteWorld=%d recentsEnabled=%d drawer=%@ progressHook=%@ pinFilter=%@",
-        FloatingState,FloatingWanted,others,ImageLoaded("/Lynx.dylib"),ImageLoaded("/MangoUpsideDownWorld.dylib"),recentsOn,InstallState,ProgressState,PinFilter]);
+    Log([NSString stringWithFormat:@"environment floating=%@ wanted=%d withoutUs=%d lynx=%d mangoSuiteWorld=%d suiteLifts=%d recentsEnabled=%d drawer=%@ progressHook=%@ pinFilter=%@",
+        FloatingState,FloatingWanted,others,ImageLoaded("/Lynx.dylib"),ImageLoaded("/MangoUpsideDownWorld.dylib"),SuiteLifts(),recentsOn,InstallState,ProgressState,PinFilter]);
 }
 static void Status(double progress){
     static double last;static NSString *lastBody;
     double now=CACurrentMediaTime();
     if(now-last<2)return;
     last=now;
-    NSString *body=[NSString stringWithFormat:@"status on=%d yield=%d pan=%d p=%.2f progress=%.2f extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ candidates=%lu pins=%lu shown=%lu divider=%d iconScale=%.3f iconFail=%@ dividerLook={%@} indicator={%@} recentFront=%@",
-        DrawerOn(),Yield,DrawerPan!=nil,P,progress,Extent,LastOffset,Margin,NSStringFromCGSize(IconSize),Pitch,NSStringFromCGRect(PlatBase),Source,
+    UIView *dock=DockView;
+    NSString *body=[NSString stringWithFormat:@"status on=%d yield=%d pan=%d p=%.2f progress=%.2f inverted=%d lift=%.1f suiteLifts=%d ty=%.1f extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ candidates=%lu pins=%lu shown=%lu divider=%d iconScale=%.3f iconFail=%@ dividerLook={%@} indicator={%@} recentFront=%@",
+        DrawerOn(),Yield,DrawerPan!=nil,P,progress,dock&&DownIsNotch(dock.superview),LastLift,SuiteLifts(),dock?dock.transform.ty:NAN,Extent,LastOffset,Margin,NSStringFromCGSize(IconSize),Pitch,NSStringFromCGRect(PlatBase),Source,
         (unsigned long)Candidates,(unsigned long)Pins,(unsigned long)Shown,Divider&&!Divider.hidden,IconScale,IconFail,DividerLook,IndicatorLook,
         [[MRU subarrayWithRange:NSMakeRange(0,MIN(MRU.count,(NSUInteger)6))] componentsJoinedByString:@","]];
     if([body isEqualToString:lastBody])return;
     lastBody=body;
     Log(body);
 }
-// Every 250ms: attaches or removes the drawer's pan, records the app in
-// front, and closes the drawer once the dock has gone away.
+// Every 250ms: re-lifts a dock sitting still after a turn or a switch
+// change, attaches or removes the drawer's pan, records the app in front,
+// and closes the drawer once the dock has gone away.
 static void Tick(void){
     UIView *dock=DockView;
     double progress=dock?DockProgress(dock):NAN;
@@ -629,6 +667,7 @@ static void Tick(void){
     BOOL suite=NO;
     for(UIGestureRecognizer *g in dock.gestureRecognizers)if(g!=DrawerPan&&[g.name isEqualToString:@"MangoDockDrawer"])suite=YES;
     Yield=suite;
+    if(dock)[UIView performWithoutAnimation:^{Reapply(dock);}];
     if(DrawerOn())RecordFront();
     if([PinFilter isEqualToString:@"hooked"])ReloadRecentsIfPinsChanged(dock);
     BOOL on=dock&&DrawerOn();

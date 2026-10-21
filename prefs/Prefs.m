@@ -45,6 +45,13 @@ static PSSpecifier *Group(NSString *name, NSString *footer) {
     [list addObject:[PSSpecifier preferenceSpecifierNamed:@"第二排固定 App" target:self set:nil get:nil detail:DoubleDockPinnedController.class cell:PSLinkCell edit:nil]];
     [list addObject:Group(@"iPad 样式 Dock", @"让 iPhone 用上 iPad 那样悬浮的 Dock，双层 Dock 要靠它。已经在 Lynx 里打开浮动 Dock 的话，这里开不开都一样。改动后注销一次才生效。")];
     [list addObject:[self toggle:@"启用 iPad 样式 Dock" key:@"FloatingDock"]];
+    [list addObject:Group(@"倒置时避开刘海", @"屏幕倒过来时，Dock 的底边正好在刘海下面。打开后，完全出来的 Dock 会再往上抬一些，滑动距离不变；正着用时不受影响。装着 Mango Suite 且它的“倒置时 Dock 避开刘海”开着时，由 Suite 负责抬升（它还管刘海处防误触），这里的设置先不起作用。")];
+    [list addObject:[self toggle:@"倒置时 Dock 避开刘海" key:@"NotchLift"]];
+    PSSpecifier *height = [PSSpecifier preferenceSpecifierNamed:@"Dock 抬升高度（点，默认 35）" target:self set:@selector(setHeight:specifier:) get:@selector(height:) detail:nil cell:PSSliderCell edit:nil];
+    [height setProperty:@0 forKey:@"min"];
+    [height setProperty:@(DDLiftMax) forKey:@"max"];
+    [height setProperty:@YES forKey:@"showValue"];
+    [list addObject:height];
     [list addObject:Group(@"诊断", [NSString stringWithFormat:@"双层 Dock %@。遇到问题时导出日志发给开发者。", @DD_VERSION])];
     PSSpecifier *share = [PSSpecifier preferenceSpecifierNamed:@"导出诊断日志" target:self set:nil get:nil detail:nil cell:PSButtonCell edit:nil];
     [share setButtonAction:@selector(shareLog)];
@@ -60,6 +67,16 @@ static PSSpecifier *Group(NSString *name, NSString *footer) {
 - (void)setFlag:(id)value specifier:(PSSpecifier *)specifier {
     NSError *error = nil;
     if (![value isKindOfClass:NSNumber.class] || !DDWriteSetting([specifier propertyForKey:@"key"], @([value boolValue]), &error))
+        Alert(self, @"保存失败", error.localizedDescription ?: @"无效的值。");
+}
+
+- (id)height:(__unused PSSpecifier *)specifier {
+    return @(DDLiftHeight(DDReadSettings()));
+}
+
+- (void)setHeight:(id)value specifier:(__unused PSSpecifier *)specifier {
+    NSError *error = nil;
+    if (![value isKindOfClass:NSNumber.class] || !DDWriteSetting(@"LiftHeight", @(round(fmin(DDLiftMax, fmax(0, [value doubleValue])))), &error))
         Alert(self, @"保存失败", error.localizedDescription ?: @"无效的值。");
 }
 

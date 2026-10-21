@@ -21,6 +21,12 @@ static inline unsigned long DDCapacity(double width, double margin, double gap, 
 static inline int DDReleaseOpen(int ended, double p, double startP, double velocityY, double extent) {
     return ended ? p - velocityY * .15 / extent > .5 : startP > .5;
 }
+// The dock's extra lift while inverted: the full height once presented,
+// scaled by the presentation progress on the way in and out, so the same
+// finger travel lifts it further.
+static inline double DDLift(double progress, double height) {
+    return isfinite(progress) ? height * fmin(1, fmax(0, progress)) : 0;
+}
 // The dock heading out: presentation progress falling and below .8 (its
 // spring only undershoots a few percent after a ~1.27 overshoot).
 static inline int DDLeaving(double progress, double last) {
