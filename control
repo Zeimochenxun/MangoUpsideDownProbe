@@ -1,8 +1,8 @@
 Package: com.chenxun.doubledock
 Name: 双层 Dock
-Version: 1.1.0
+Version: 1.2.0
 Architecture: iphoneos-arm64e
-Description: 在 iPad 样式的悬浮 Dock 上往上滑，拉出第二排 App：固定的 App 加最近使用。自带 iPad 样式 Dock 开关和倒置时避开刘海的抬升，不需要 Lynx。
+Description: 在 iPad 样式的悬浮 Dock 上往上滑，拉出第二排 App：固定的 App 加最近使用。自带 iPad 样式 Dock 开关，以及倒置时 Dock 避开刘海和刘海处防误触，不需要 Lynx。
 Maintainer: Chen Xun
 Author: Chen Xun
 Section: Tweaks

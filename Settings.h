@@ -25,7 +25,9 @@ static inline NSDictionary *DDReadSettings(void) {
     NSMutableDictionary *seed = [NSMutableDictionary dictionary];
     if ([suite[@"DockDrawerPinned"] isKindOfClass:NSArray.class]) seed[@"Pinned"] = suite[@"DockDrawerPinned"];
     if ([suite[@"DockDrawerDivider"] isKindOfClass:NSNumber.class]) seed[@"Divider"] = suite[@"DockDrawerDivider"];
-    if ([suite[@"DockNotchEnabled"] isKindOfClass:NSNumber.class]) seed[@"NotchLift"] = suite[@"DockNotchEnabled"];
+    // One Suite switch covered both the lift and the notch guard.
+    for (NSString *key in @[@"NotchLift", @"NotchGuard"])
+        if ([suite[@"DockNotchEnabled"] isKindOfClass:NSNumber.class]) seed[key] = suite[@"DockNotchEnabled"];
     if ([suite[@"DockNotchLift"] isKindOfClass:NSNumber.class]) seed[@"LiftHeight"] = suite[@"DockNotchLift"];
     return seed;
 }
@@ -36,7 +38,7 @@ static inline double DDLiftHeight(NSDictionary *settings) {
     return isfinite(height) ? fmin(DDLiftMax, fmax(0, height)) : DDLiftDefault;
 }
 
-// Every switch (Enabled, Divider, FloatingDock, NotchLift) defaults on.
+// Every switch (Enabled, Divider, FloatingDock, NotchLift, NotchGuard) defaults on.
 static inline BOOL DDFlag(NSDictionary *settings, NSString *key) {
     id value = settings[key];
     return [value isKindOfClass:NSNumber.class] ? [value boolValue] : YES;

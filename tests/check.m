@@ -32,7 +32,7 @@ int main(void) {
 
         // Settings: no files means every switch on, nothing pinned, the default lift.
         NSDictionary *settings = DDReadSettings();
-        assert(settings.count == 0 && DDFlag(settings, @"Enabled") && DDFlag(settings, @"FloatingDock") && DDFlag(settings, @"NotchLift"));
+        assert(settings.count == 0 && DDFlag(settings, @"Enabled") && DDFlag(settings, @"FloatingDock") && DDFlag(settings, @"NotchLift") && DDFlag(settings, @"NotchGuard"));
         assert(DDPinned(settings).count == 0 && DDLiftHeight(settings) == 35);
         // A first run takes Mango Suite's drawer and lift choices, pins cleaned to 5 distinct apps.
         Write(DDSuiteFile(@"settings.plist"), @{@"DockDrawerPinned": @[@"a", @"b", @"a", @"c", @7, @"d", @"e", @"f"],
@@ -40,7 +40,7 @@ int main(void) {
                                                 @"DockNotchEnabled": @NO, @"DockNotchLift": @80});
         settings = DDReadSettings();
         assert([DDPinned(settings) isEqualToArray:(@[@"a", @"b", @"c", @"d", @"e"])] && !DDFlag(settings, @"Divider") && DDFlag(settings, @"Enabled"));
-        assert(!DDFlag(settings, @"NotchLift") && DDLiftHeight(settings) == 50);
+        assert(!DDFlag(settings, @"NotchLift") && !DDFlag(settings, @"NotchGuard") && DDLiftHeight(settings) == 50);
         // The first write keeps that seed in our own file; Mango Suite is not read again.
         NSError *error = nil;
         assert(DDWriteSetting(@"Enabled", @NO, &error));

@@ -35,10 +35,15 @@
 // - Inverted (Mango turning SpringBoard upside down), the dock's bottom edge
 //   sits under the notch, so the dock is lifted further by LiftHeight,
 //   scaled by the presentation progress so the same finger travel lifts it
-//   further; upright nothing changes (Mango Suite Beta9.9.12-9.9.13). While
-//   a MangoUpsideDownWorld image does this itself (Mango Suite's, under its
-//   DockNotchEnabled, which also covers the notch's touch fixes), this lift
-//   steps aside.
+//   further; upright nothing changes (Mango Suite Beta9.9.12-9.9.13).
+// - Inverted, the home gesture's bottom edge is the notch side too, and a
+//   swipe starting on the notch's lower rim reached the app under it. While
+//   NotchGuard is on the home gesture's bottom-edge region is held at 50pt
+//   (the notch side's safe area), and with an app in front a SpringBoard
+//   strip covers the notch's span 48pt deep, so touches starting there go
+//   to the system gestures only (Mango Suite Beta9.9.11-9.9.12). Taps in
+//   that strip do not reach the app either.
+// - Whoever else already does these (NotchOwner) is left to do them.
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -150,24 +155,26 @@ static BOOL DownIsNotch(UIView *v){
     CGPoint d=[v convertPoint:CGPointMake(0,1) toCoordinateSpace:fixed];
     return d.y-o.y<-.5;
 }
-// A MangoUpsideDownWorld image lifts the dock itself: Mango Suite's module
-// while its switches (both default on) are, the standalone World 1.3.0
-// always. The Suite's settings are re-read at most every 250ms.
-static BOOL SuiteLifts(void){
-    static int world=-1;static NSDictionary *suite;static CFTimeInterval last;
-    if(world<0)world=ImageLoaded("/MangoUpsideDownWorld.dylib");
-    if(!world)return NO;
+// Who else handles the notch while inverted: 2, Mango Suite's World module
+// with its switches (both default on) on, which lifts the dock, widens the
+// home edge and shields the notch; 1, another MangoUpsideDownWorld image
+// (the standalone World 1.3.0: lift and home edge, no shield); 0, nobody.
+// The Suite's settings are re-read at most every 250ms.
+static int NotchOwner(void){
+    static int image=-1;static NSDictionary *suite;static CFTimeInterval last;
+    if(image<0)image=ImageLoaded("/MangoSuite/Modules/MangoUpsideDownWorld.dylib")?2:ImageLoaded("/MangoUpsideDownWorld.dylib")?1:0;
+    if(image!=2)return image;
     CFTimeInterval now=CACurrentMediaTime();
     if(!suite||now-last>=.25){suite=[NSDictionary dictionaryWithContentsOfFile:DDSuiteFile(@"settings.plist")]?:@{};last=now;}
     for(NSString *key in @[@"Enabled",@"DockNotchEnabled"]){
         id value=suite[key];
-        if([value isKindOfClass:NSNumber.class]&&![value boolValue])return NO;
+        if([value isKindOfClass:NSNumber.class]&&![value boolValue])return 0;
     }
-    return YES;
+    return 2;
 }
 // The extra upward translation for the dock's current presentation.
 static CGFloat Lift(UIView *dock){
-    if(!DDFlag(S(),@"NotchLift")||SuiteLifts()||!DownIsNotch(dock.superview))return 0;
+    if(!DDFlag(S(),@"NotchLift")||NotchOwner()||!DownIsNotch(dock.superview))return 0;
     return DDLift(DockProgress(dock),DDLiftHeight(S()));
 }
 static UIView *Platter(UIView *dock){
@@ -630,6 +637,103 @@ static void ReloadRecentsIfPinsChanged(UIView *dock){
     if((!first||DrawerOn())&&[model respondsToSelector:reload])((void(*)(id,SEL))objc_msgSend)(model,reload);
 }
 
+// The notch guard (NotchGuard). Notch geometry of the iPhone 13 mini, as
+// Mango Suite calibrated it from device logs.
+static const CGFloat NotchBand=50;        // bottom-edge region while inverted: the notch side's safe area
+static const CGFloat NotchHalfWidth=95;   // ~26mm (169pt) housing plus finger slack
+static const CGFloat NotchShieldDepth=48; // notch-rim touch-downs logged at 38-47pt from the edge
+static Class HomeGestureClass;
+static SEL TouchOrientationSel,EdgeRegionSel,SetEdgeRegionSel;
+static NSString *EdgeState=@"not-run",*ShieldReason=@"not-run";
+static char EdgeRegionKey;
+static BOOL Inverted(void){
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return UIApplication.sharedApplication.statusBarOrientation==UIInterfaceOrientationPortraitUpsideDown;
+#pragma clang diagnostic pop
+}
+// Holds the home gesture's bottom-edge region at NotchBand while inverted,
+// so a swipe from the notch's lower rim is still an edge swipe; upright or
+// switched off it hands back SpringBoard's own value. Left alone while
+// another World handles the home edge.
+static void (*OrigEdgeTouchesBegan)(id,SEL,NSSet *,UIEvent *);
+static void HookEdgeTouchesBegan(UIGestureRecognizer *self,SEL cmd,NSSet<UITouch *> *touches,UIEvent *event){
+    if(!NSThread.isMainThread||![self isKindOfClass:HomeGestureClass]){OrigEdgeTouchesBegan(self,cmd,touches,event);return;}
+    if(NotchOwner()){
+        objc_setAssociatedObject(self,&EdgeRegionKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        OrigEdgeTouchesBegan(self,cmd,touches,event);
+        return;
+    }
+    BOOL inverted=((long long(*)(id,SEL))objc_msgSend)(self,TouchOrientationSel)==UIInterfaceOrientationPortraitUpsideDown;
+    double current=((double(*)(id,SEL))objc_msgSend)(self,EdgeRegionSel);
+    // Only our own last write counts as ours; any other value is
+    // SpringBoard's fresh base, and that is what gets handed back.
+    NSArray<NSNumber *> *owned=objc_getAssociatedObject(self,&EdgeRegionKey);
+    double base=owned&&current==owned[1].doubleValue?owned[0].doubleValue:current;
+    double region=inverted&&DDFlag(S(),@"NotchGuard")?fmax(base,NotchBand):base;
+    if(isfinite(region)&&region!=current)((void(*)(id,SEL,double))objc_msgSend)(self,SetEdgeRegionSel,region);
+    objc_setAssociatedObject(self,&EdgeRegionKey,@[@(base),@(region)],OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    OrigEdgeTouchesBegan(self,cmd,touches,event);
+    UITouch *t=touches.anyObject;
+    CGPoint p=[t locationInView:nil];
+    if(t.window)p=[t.window convertPoint:p toCoordinateSpace:UIScreen.mainScreen.fixedCoordinateSpace];
+    // A half-turn mirrors x about the centre, so the span test holds in fixed
+    // and upside-down coordinates alike.
+    if(inverted&&isfinite(p.x)&&fabs(p.x-CGRectGetMidX(UIScreen.mainScreen.fixedCoordinateSpace.bounds))<=NotchHalfWidth&&p.y<=NotchBand+10)
+        Log([NSString stringWithFormat:@"homeEdge notch touch point={%.1f,%.1f} region=%.1f->%.1f stateAfter=%ld shield=%@",
+            p.x,p.y,base,region,(long)self.state,ShieldReason]);
+}
+// The notch strip: a SpringBoard window whose only hit-testable content is
+// the strip, so the render server routes touches there to SpringBoard (and
+// its system gestures) instead of to the app; everywhere else stays clear.
+@interface DoubleDockShieldWindow : UIWindow
+@end
+@implementation DoubleDockShieldWindow
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *hit=[super hitTest:point withEvent:event];
+    return hit==self?nil:hit;
+}
+@end
+static DoubleDockShieldWindow *ShieldWindow;
+static UIView *ShieldStrip;
+static UIWindowScene *MainWindowScene(void){
+    for(UIScene *scene in UIApplication.sharedApplication.connectedScenes)
+        if([scene isKindOfClass:UIWindowScene.class]&&((UIWindowScene *)scene).screen==UIScreen.mainScreen)
+            return (UIWindowScene *)scene;
+    return nil;
+}
+// Shown only while inverted with an app in front; Mango Suite's own strip
+// takes over while its switch is on.
+static void ShieldUpdate(void){
+    NSString *reason=nil;
+    if(![EdgeState isEqualToString:@"hooked"])reason=@"no-home-edge";
+    else if(!DDFlag(S(),@"NotchGuard"))reason=@"switch-off";
+    else if(NotchOwner()==2)reason=@"mango-suite";
+    else if(!Inverted())reason=@"not-inverted";
+    else if(!Call(UIApplication.sharedApplication,@"_accessibilityFrontMostApplication"))reason=@"no-front-app";
+    ShieldReason=reason?:@"active";
+    if(reason){if(ShieldWindow&&!ShieldWindow.hidden)ShieldWindow.hidden=YES;return;}
+    if(!ShieldWindow){
+        UIWindowScene *scene=MainWindowScene();
+        ShieldWindow=scene?[[DoubleDockShieldWindow alloc] initWithWindowScene:scene]:[[DoubleDockShieldWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+        ShieldWindow.windowLevel=UIWindowLevelStatusBar-1;
+        ShieldWindow.backgroundColor=UIColor.clearColor;
+        ShieldStrip=[UIView new];
+        // Nearly invisible, but real content, which is what the render
+        // server's hit test needs; hitTestsAsOpaque says the same where it exists.
+        ShieldStrip.backgroundColor=[UIColor colorWithWhite:0 alpha:.011];
+        if([ShieldStrip.layer respondsToSelector:NSSelectorFromString(@"setHitTestsAsOpaque:")])
+            [ShieldStrip.layer setValue:@YES forKey:@"hitTestsAsOpaque"];
+        [ShieldWindow addSubview:ShieldStrip];
+    }
+    id<UICoordinateSpace> fixed=UIScreen.mainScreen.fixedCoordinateSpace;
+    ShieldWindow.frame=UIScreen.mainScreen.bounds;
+    CGRect strip=CGRectMake(CGRectGetMidX(fixed.bounds)-NotchHalfWidth,0,2*NotchHalfWidth,NotchShieldDepth);
+    CGRect local=[ShieldWindow convertRect:strip fromCoordinateSpace:fixed];
+    if(!CGRectEqualToRect(ShieldStrip.frame,local))ShieldStrip.frame=local;
+    if(ShieldWindow.hidden)ShieldWindow.hidden=NO;
+}
+
 // Once, when the dock first shows: what else decides the dock here.
 static void Environment(void){
     static BOOL done;
@@ -640,8 +744,8 @@ static void Environment(void){
     id defaults=Call(Call(objc_getClass("SBDefaults"),@"localDefaults"),@"floatingDockDefaults");
     SEL recents=NSSelectorFromString(@"recentsEnabled");
     int recentsOn=[defaults respondsToSelector:recents]?((BOOL(*)(id,SEL))objc_msgSend)(defaults,recents):-1;
-    Log([NSString stringWithFormat:@"environment floating=%@ wanted=%d withoutUs=%d lynx=%d mangoSuiteWorld=%d suiteLifts=%d recentsEnabled=%d drawer=%@ progressHook=%@ pinFilter=%@",
-        FloatingState,FloatingWanted,others,ImageLoaded("/Lynx.dylib"),ImageLoaded("/MangoUpsideDownWorld.dylib"),SuiteLifts(),recentsOn,InstallState,ProgressState,PinFilter]);
+    Log([NSString stringWithFormat:@"environment floating=%@ wanted=%d withoutUs=%d lynx=%d notchOwner=%d recentsEnabled=%d drawer=%@ progressHook=%@ pinFilter=%@ homeEdge=%@",
+        FloatingState,FloatingWanted,others,ImageLoaded("/Lynx.dylib"),NotchOwner(),recentsOn,InstallState,ProgressState,PinFilter,EdgeState]);
 }
 static void Status(double progress){
     static double last;static NSString *lastBody;
@@ -649,18 +753,20 @@ static void Status(double progress){
     if(now-last<2)return;
     last=now;
     UIView *dock=DockView;
-    NSString *body=[NSString stringWithFormat:@"status on=%d yield=%d pan=%d p=%.2f progress=%.2f inverted=%d lift=%.1f suiteLifts=%d ty=%.1f extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ candidates=%lu pins=%lu shown=%lu divider=%d iconScale=%.3f iconFail=%@ dividerLook={%@} indicator={%@} recentFront=%@",
-        DrawerOn(),Yield,DrawerPan!=nil,P,progress,dock&&DownIsNotch(dock.superview),LastLift,SuiteLifts(),dock?dock.transform.ty:NAN,Extent,LastOffset,Margin,NSStringFromCGSize(IconSize),Pitch,NSStringFromCGRect(PlatBase),Source,
+    NSString *body=[NSString stringWithFormat:@"status on=%d yield=%d pan=%d p=%.2f progress=%.2f statusBarInverted=%d dockInverted=%d notchOwner=%d lift=%.1f ty=%.1f shield=%@ extent=%.1f offset=%.1f margin=%.1f icon=%@ pitch=%.1f platter=%@ source=%@ candidates=%lu pins=%lu shown=%lu divider=%d iconScale=%.3f iconFail=%@ dividerLook={%@} indicator={%@} recentFront=%@",
+        DrawerOn(),Yield,DrawerPan!=nil,P,progress,Inverted(),dock&&DownIsNotch(dock.superview),NotchOwner(),LastLift,dock?dock.transform.ty:NAN,ShieldReason,Extent,LastOffset,Margin,NSStringFromCGSize(IconSize),Pitch,NSStringFromCGRect(PlatBase),Source,
         (unsigned long)Candidates,(unsigned long)Pins,(unsigned long)Shown,Divider&&!Divider.hidden,IconScale,IconFail,DividerLook,IndicatorLook,
         [[MRU subarrayWithRange:NSMakeRange(0,MIN(MRU.count,(NSUInteger)6))] componentsJoinedByString:@","]];
     if([body isEqualToString:lastBody])return;
     lastBody=body;
     Log(body);
 }
-// Every 250ms: re-lifts a dock sitting still after a turn or a switch
-// change, attaches or removes the drawer's pan, records the app in front,
-// and closes the drawer once the dock has gone away.
+// Every 250ms: shows or hides the notch strip, re-lifts a dock sitting
+// still after a turn or a switch change, attaches or removes the drawer's
+// pan, records the app in front, and closes the drawer once the dock has
+// gone away.
 static void Tick(void){
+    ShieldUpdate();
     UIView *dock=DockView;
     double progress=dock?DockProgress(dock):NAN;
     if(dock)Environment();
@@ -689,17 +795,42 @@ static void Tick(void){
     Status(progress);
 }
 
-static BOOL ReturnsBool(Method m,unsigned args){
+// Whether m takes args arguments (self and _cmd included) and returns one of
+// the type codes in types.
+static BOOL Returns(Method m,const char *types,unsigned args){
     char type[8]={0};
     if(!m||method_getNumberOfArguments(m)!=args)return NO;
     method_getReturnType(m,type,sizeof type);
-    return type[0]=='B'||type[0]=='c';
+    return type[0]&&strchr(types,type[0]);
+}
+static BOOL ArgumentIs(Method m,unsigned index,char code){
+    char type[8]={0};
+    method_getArgumentType(m,index,type,sizeof type);
+    return type[0]==code;
+}
+static void InstallNotchGuard(void){
+    // Hooked on UIKit's base class, where the edge-region test lives, so a
+    // home-gesture subclass that overrides touchesBegan: and calls super is
+    // still covered; HomeGestureClass scopes it back to home gestures.
+    Class edge=objc_getClass("UIScreenEdgePanGestureRecognizer");
+    HomeGestureClass=objc_getClass("SBHomeGesturePanGestureRecognizer");
+    TouchOrientationSel=sel_registerName("_touchInterfaceOrientation");
+    EdgeRegionSel=sel_registerName("_bottomEdgeRegionSize");
+    SetEdgeRegionSel=sel_registerName("_setBottomEdgeRegionSize:");
+    Method setter=edge?class_getInstanceMethod(edge,SetEdgeRegionSel):NULL;
+    if(!edge||!HomeGestureClass||![HomeGestureClass isSubclassOfClass:edge]||
+       !Returns(class_getInstanceMethod(edge,@selector(touchesBegan:withEvent:)),"v",4)||
+       !Returns(class_getInstanceMethod(HomeGestureClass,TouchOrientationSel),"q",2)||
+       !Returns(class_getInstanceMethod(edge,EdgeRegionSel),"d",2)||!Returns(setter,"v",3)||!ArgumentIs(setter,2,'d')){
+        EdgeState=@"signature";return;}
+    MSHookMessageEx(edge,@selector(touchesBegan:withEvent:),(IMP)HookEdgeTouchesBegan,(IMP *)&OrigEdgeTouchesBegan);
+    EdgeState=@"hooked";
 }
 static void InstallFloatingDock(void){
     Class controller=objc_getClass("SBFloatingDockController");
     SEL sel=sel_registerName("isFloatingDockSupported");
     Method m=controller?class_getClassMethod(controller,sel):NULL;
-    if(!ReturnsBool(m,2)){FloatingState=m?@"signature":@"missing";return;}
+    if(!Returns(m,"Bc",2)){FloatingState=m?@"signature":@"missing";return;}
     MSHookMessageEx(object_getClass(controller),sel,(IMP)HookSupported,(IMP *)&OrigSupported);
     FloatingState=@"hooked";
 }
@@ -726,7 +857,7 @@ static void InstallDrawer(void){
     Class model=objc_getClass("SBFloatingDockSuggestionsModel");
     SEL contained=NSSelectorFromString(@"_displayItemContainedInUserDock:");
     m=model?class_getInstanceMethod(model,contained):NULL;
-    if(ReturnsBool(m,3)){
+    if(Returns(m,"Bc",3)){
         MSHookMessageEx(model,contained,(IMP)HookContained,(IMP *)&OrigContained);
         PinFilter=@"hooked";
     }else PinFilter=m?[NSString stringWithFormat:@"signature:%s",method_getTypeEncoding(m)]:@"missing";
@@ -741,9 +872,9 @@ __attribute__((constructor)) static void DoubleDockInit(void){
         FloatingWanted=DDFlag(DDReadSettings(),@"FloatingDock");
         InstallFloatingDock();
         InstallDrawer();
-        Log([NSString stringWithFormat:@"DoubleDock %@ loaded floating=%@ wanted=%d drawer=%@ progressHook=%@ pinFilter=%@",
-            @DD_VERSION,FloatingState,FloatingWanted,InstallState,ProgressState,PinFilter]);
-        if(![InstallState isEqualToString:@"hooked"])return;
+        InstallNotchGuard();
+        Log([NSString stringWithFormat:@"DoubleDock %@ loaded floating=%@ wanted=%d drawer=%@ progressHook=%@ pinFilter=%@ homeEdge=%@",
+            @DD_VERSION,FloatingState,FloatingWanted,InstallState,ProgressState,PinFilter,EdgeState]);
         NSTimer *timer=[NSTimer timerWithTimeInterval:.25 repeats:YES block:^(__unused NSTimer *t){Tick();}];
         [NSRunLoop.mainRunLoop addTimer:timer forMode:NSRunLoopCommonModes];
     }
