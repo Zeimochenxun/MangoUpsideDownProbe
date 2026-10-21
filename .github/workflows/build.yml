@@ -1,0 +1,61 @@
+name: Build DoubleDock (RootHide)
+
+on:
+  workflow_dispatch:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Check drawer math and settings
+        run: |
+          clang -fobjc-arc -fblocks -Wall -Wextra -Werror -I tests -framework Foundation tests/check.m -o /tmp/doubledock-check
+          DD_TEST_ROOT="$(mktemp -d)" /tmp/doubledock-check
+
+      - name: Install signing and packaging tools
+        uses: dhinakg/procursus-action@main
+        with:
+          packages: ldid make
+
+      - name: Install RootHide Theos
+        run: git clone --recursive https://github.com/roothide/theos.git "$HOME/theos"
+
+      - name: Install verified iOS 16.5 SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz \
+            --output "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz"
+          echo "5e0fd3f01266cce4ce012d4a99b38eb56578fca40d09edc81cd83dee958202fb  $RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" | shasum -a 256 -c -
+          mkdir -p "$HOME/theos/sdks"
+          tar -xJf "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" -C "$HOME/theos/sdks"
+
+      - name: Build package
+        shell: bash
+        run: |
+          set -euo pipefail
+          export THEOS="$HOME/theos"
+          make package FINALPACKAGE=1 2>&1 | tee build.log
+          if grep -qi 'incompatible arm64e ABI' build.log; then
+            echo 'Refusing an incompatible arm64e ABI.'
+            exit 1
+          fi
+          for deb in packages/*.deb; do dpkg-deb -I "$deb"; dpkg-deb -c "$deb"; done 2>&1 | tee -a build.log
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: DoubleDock-arm64e-RootHide
+          if-no-files-found: error
+          path: |
+            packages/*.deb
+            build.log
