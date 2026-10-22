@@ -1,0 +1,9 @@
+Package: com.chenxun.dynamicisland
+Name: 灵动岛
+Version: 0.1.0
+Architecture: iphoneos-arm64e
+Description: 让带刘海的 iPhone 用上灵动岛（改机型值伪装，可备份、可还原），并能调灵动岛的大小和位置。调节写在窗口局部坐标里，与倒置用的窗口旋转互不干涉，所以调节不会让倒置失效。
+Maintainer: Chen Xun
+Author: Chen Xun
+Section: Tweaks
+Depends: mobilesubstrate, preferenceloader, firmware (>= 16.0), firmware (<< 17.0)

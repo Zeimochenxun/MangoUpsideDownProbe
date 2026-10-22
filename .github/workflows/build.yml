@@ -21,6 +21,12 @@ jobs:
           xcrun clang -std=c11 -Wall -Wextra -Werror tests/world_math_test.c -o "$RUNNER_TEMP/geometry-test"
           "$RUNNER_TEMP/geometry-test"
 
+      - name: Verify island arithmetic
+        run: |
+          set -eu
+          xcrun clang -std=c11 -Wall -Wextra -Werror island/tests/island_test.c -o "$RUNNER_TEMP/island-test"
+          "$RUNNER_TEMP/island-test"
+
       - name: Install Procursus tools
         uses: dhinakg/procursus-action@main
         with:
@@ -112,3 +118,37 @@ jobs:
           path: |
             camera/packages/*.deb
             camera-build-info/*
+
+      - name: Build and inspect Dynamic Island package
+        shell: bash
+        run: |
+          set -euo pipefail
+          export THEOS="$HOME/theos"
+          # The log goes straight into the artifact folder so a failed build still uploads it.
+          mkdir -p island-build-info
+          shasum -a 256 island/*.m island/*.h island/prefs/*.m island/control
+          make -C island clean
+          make -C island package FINALPACKAGE=1 2>&1 | tee island-build-info/island-build.log
+          if grep -qi 'incompatible arm64e ABI' island-build-info/island-build.log; then
+            echo 'Refusing package with incompatible arm64e ABI warning'
+            exit 1
+          fi
+          echo "compiler warnings: $(grep -c 'warning:' island-build-info/island-build.log || true)"
+          python3 tools/check_island_package.py island/packages/*.deb
+          dylib="$(find island/.theos -name DynamicIsland.dylib -type f | head -n 1)"
+          test -n "$dylib"
+          xcrun lipo -info "$dylib"
+          xcrun otool -L "$dylib"
+          xcrun otool -l "$dylib" > island-build-info/island-load-commands.txt
+          shasum -a 256 island/packages/*.deb > island-build-info/SHA256SUMS.txt
+
+      - name: Upload Dynamic Island package and build information
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DynamicIsland-0.1.0
+          if-no-files-found: warn
+          path: |
+            island/packages/*.deb
+            island-build-info/*
+            island/README.md
