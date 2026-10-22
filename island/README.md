@@ -93,7 +93,7 @@ SpringBoard 靠 MobileGestalt 里的 `ArtworkDeviceSubType` 判断要不要建�
 ## 检查
 
 - 主机上：`gcc -std=c11 -Wall -Wextra -Werror island/tests/island_test.c -lm && ./a.out`。覆盖：调节与半转的组合（正着/倒置一致）、回到默认值时无痕迹、窗口单位、所有权不抢、机型值备份/还原/拒绝规则、崩溃保护时序。
-- CI（`.github/workflows/build.yml`）：同一个测试用 clang 再跑一遍，然后用 Theos 构建 deb，`tools/check_island_package.py` 检查包的结构。构建通过不等于上机验证。
+- CI（`.github/workflows/island.yml`，和 World/相机的 `build.yml` 分开，互不影响）：同一个测试用 clang 再跑一遍，然后用 Theos 构建 deb，`tools/check_island_package.py` 检查包的结构；失败时也会上传构建日志。构建通过不等于上机验证。
 
 ## 文件
 
