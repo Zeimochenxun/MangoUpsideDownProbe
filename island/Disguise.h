@@ -7,7 +7,9 @@
 //
 // Result dictionaries go straight into result.plist: ok (BOOL), message
 // (text for the user), and where it applies subtype, original, restore
-// (NSNumber) and respring (BOOL).
+// (NSNumber) and respring (BOOL). Status adds simulated (Mango's
+// isCurrentlyEnabled: an island value that is not the panel's own height) and
+// osSupported (Mango's iOS 16.1 gate, applied to apply only).
 #pragma once
 #import <Foundation/Foundation.h>
 
@@ -19,12 +21,20 @@ NSDictionary *DIDisguiseRestore(double nativeHeight);
 // the value stored when the disguise was applied.
 BOOL DIDisguiseRestoreFromState(NSString **note);
 
-// Crash-loop guard. DIGuardStartup runs once per launch and returns YES when
-// this launch has to undo the disguise; DIGuardTick runs every few seconds and
-// costs nothing unless the guard is armed.
+// Crash-loop guard, shared by the model change (here) and the screen canvas
+// (Canvas.m). DIGuardStartup runs once per launch and returns YES when this
+// launch has to undo something; DIGuardTargets then says what (IM_GUARD_DISGUISE
+// and/or IM_GUARD_CANVAS, IslandPolicy.h): only the change that was armed for
+// the guard is undone. DIGuardTick runs every few seconds and costs nothing
+// unless the guard is armed. A change arms the guard when it is made
+// (DIGuardArmFor) and takes its own bit back when it is undone (DIGuardDoneFor);
+// the guard stays armed for whatever is left.
 BOOL DIGuardStartup(void);
+int DIGuardTargets(void);
 void DIGuardTick(void);
 BOOL DIGuardArmed(void);
+void DIGuardArmFor(int target);
+void DIGuardDoneFor(int target);
 
 // FBSystemService exitAndRelaunch:YES, the call Mango uses. NO when this
 // SpringBoard does not have it.

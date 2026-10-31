@@ -107,6 +107,17 @@ def check(path):
     require(entry.get("bundle") == "DynamicIslandPrefs" and entry.get("detail") == "DynamicIslandRootController",
             "Settings entry does not point at the bundle")
 
+    # Both halves of the simulation must really be in the tweak: the model value
+    # (key and cache path) and the screen canvas (keys and the two paths).
+    tweak_bytes = by_name["DynamicIsland.dylib"][1]
+    for needle in (b"oPeik/9e8lQWMszEjbPzng", b"com.apple.MobileGestalt.plist", b"canvas_width", b"canvas_height",
+                   b"/var/tmp/com.apple.iokit.IOMobileGraphicsFamily.plist",
+                   b"/private/var/mobile/Library/Preferences/com.apple.iokit.IOMobileGraphicsFamily.plist"):
+        require(needle in tweak_bytes, f"DynamicIsland.dylib lacks {needle.decode()}")
+    bundle_bytes = by_name["DynamicIslandPrefs"][1]
+    for needle in (b"canvas-apply", b"canvas-restore", b"DynamicIsland.restore"):
+        require(needle in bundle_bytes or needle in tweak_bytes, f"package lacks {needle.decode()}")
+
     tweak = macho_summary("DynamicIsland.dylib", by_name["DynamicIsland.dylib"][1])
     bundle = macho_summary("DynamicIslandPrefs", by_name["DynamicIslandPrefs"][1])
     print(f"PASS {path.name}: {fields['Architecture']}, arm64e, SpringBoard tweak + Settings bundle, signature data present")

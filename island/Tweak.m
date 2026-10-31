@@ -1,12 +1,16 @@
-// 灵动岛: a Dynamic Island for notch iPhones on iOS 16.5, in SpringBoard.
+// 灵动岛: a Dynamic Island for notch iPhones on iOS 16.5, in SpringBoard. All of
+// Mango's 灵动岛模拟 (the model change, the screen canvas presets, position and
+// size), without Mango.
 //
-// Two halves.
-// - The disguise (Disguise.m). SpringBoard builds the island when the device
+// Three parts.
+// - The model change (Disguise.m). SpringBoard builds the island when the device
 //   model value (MobileGestalt ArtworkDeviceSubType) says 14 Pro / 14 Pro Max.
 //   The Settings pane asks this tweak, over request.plist + a Darwin
 //   notification, to change that value (backed up, restorable) and respring.
 //   Nothing is ever written without that explicit request, except undoing it:
 //   a crash-loop guard and a restore file (DynamicIsland.restore).
+// - The screen canvas (Canvas.m): Mango's "应用分辨率" presets, same request path,
+//   same guard, same restore file.
 // - Size and position (this file). Written so that turning the phone upside
 //   down can never undo them, and adjusting can never undo the inversion.
 //
@@ -47,6 +51,7 @@
 #import "IslandPolicy.h"
 #import "Settings.h"
 #import "Disguise.h"
+#import "Canvas.h"
 
 static Class WindowClass, PassClass;
 static char StateKey;
@@ -92,7 +97,25 @@ static NSString *Machine(void) {
     return [NSString stringWithUTF8String:buffer] ?: @"?";
 }
 
-static double NativeHeight(void) { return UIScreen.mainScreen.nativeBounds.size.height; }
+static CGSize LiveNative(void) { return UIScreen.mainScreen.nativeBounds.size; }
+
+// The panel's own pixel height, the value every decision about the model value
+// uses. Under a screen canvas the live nativeBounds may be the canvas, so while
+// one is active this is the height noted when none was (Canvas.h).
+static double NativeHeight(void) { return DICanvasPanelHeight(LiveNative().height); }
+
+// Reconcile runs four times a second and only reports the size; it changes with
+// a canvas, which needs a respring, so looking every few seconds is enough.
+static double PanelHeightCached(void) {
+    static double value;
+    static CFTimeInterval at;
+    CFTimeInterval now = CACurrentMediaTime();
+    if (value <= 0 || now - at >= 3) {
+        value = NativeHeight();
+        at = now;
+    }
+    return value;
+}
 
 static NSInteger BarOrientation(void) {
 #pragma clang diagnostic push
@@ -231,8 +254,14 @@ static void ProcessNode(UIWindow *w, UIView *node, BOOL wanted, IMAdjust adj, do
 
     UIView *root = node.superview;
     CGPoint anchorLocal = [root.layer convertPoint:node.layer.position toLayer:w.layer];
-    CGRect wb = w.bounds;
-    IMPoint pivot = {CGRectGetMinX(wb) + wb.size.width / 2, CGRectGetMinY(wb) + adj.anchorY / unit};
+    // Mango's pivot [read]: the node's horizontal centre, anchorY points below the
+    // node's top (Mango sets anchorPoint = (0.5, 42 / height)), in window-local
+    // points. The node's top-left, as if untransformed, follows from its position
+    // and anchor point; the parent is a pure translation of the window (Ineligible).
+    CGRect nb = node.bounds;
+    CGPoint nodeAnchor = node.layer.anchorPoint;
+    IMPoint nodeTopLeft = {anchorLocal.x - nodeAnchor.x * nb.size.width, anchorLocal.y - nodeAnchor.y * nb.size.height};
+    IMPoint pivot = {nodeTopLeft.x + nb.size.width / 2, nodeTopLeft.y + adj.anchorY};
     IMAffine desired = IMNodeTransform(adj, unit, pivot, ToIP(anchorLocal));
     BOOL want = wanted && ![state.failedFor isEqualToString:signature] && IMAffineFinite(desired);
 
@@ -355,9 +384,10 @@ static void Reconcile(void) {
         else state = @"waiting";
 
         WriteStatus(@{@"version": @DI_VERSION, @"ios": NSProcessInfo.processInfo.operatingSystemVersionString, @"machine": Machine(),
-                      @"nativeHeight": @(NativeHeight()), @"windows": @(windows.count), @"nodes": @(tally.nodes), @"owned": @(tally.owned),
+                      @"nativeHeight": @(PanelHeightCached()), @"windows": @(windows.count), @"nodes": @(tally.nodes), @"owned": @(tally.owned),
                       @"adjust": state, @"turnFixed": turnFixed, @"turnModel": turnModel, @"statusBar": @(BarOrientation()),
-                      @"scale": @(adj.scale), @"offsetX": @(adj.offsetX), @"offsetY": @(adj.offsetY), @"guardArmed": @(DIGuardArmed()),
+                      @"scale": @(adj.scale), @"offsetX": @(adj.offsetX), @"offsetY": @(adj.offsetY), @"anchorY": @(adj.anchorY),
+                      @"guardArmed": @(DIGuardArmed()),
                       @"restoreNote": RestoreNote});
         LogChange(@"state", [NSString stringWithFormat:@"STATE adjust=%@ windows=%lu nodes=%u owned=%u conflict=%u failed=%u ineligible=%u",
                              state, (unsigned long)windows.count, tally.nodes, tally.owned, tally.conflict, tally.failed, tally.ineligible]);
@@ -383,17 +413,24 @@ static void HandleRequest(void) {
         Log([NSString stringWithFormat:@"REQUEST %@ ignored (age %.1fs)", action, age]);
         return;
     }
-    NSInteger mode = [request[@"mode"] integerValue];
+    NSInteger mode = [request[@"mode"] integerValue], preset = [request[@"preset"] integerValue];
     NSDictionary *result;
-    if ([action isEqualToString:@"status"]) result = DIDisguiseStatus(NativeHeight());
+    if ([action isEqualToString:@"status"]) {
+        // One answer for the whole pane: the model value and the canvas.
+        NSMutableDictionary *merged = [DIDisguiseStatus(NativeHeight()) mutableCopy];
+        [merged addEntriesFromDictionary:DICanvasStatus(LiveNative().width, LiveNative().height)];
+        result = merged;
+    }
     else if ([action isEqualToString:@"apply"]) result = DIDisguiseApply(mode, NativeHeight());
     else if ([action isEqualToString:@"restore"]) result = DIDisguiseRestore(NativeHeight());
+    else if ([action isEqualToString:@"canvas-apply"]) result = DICanvasApply(preset, LiveNative().width, LiveNative().height);
+    else if ([action isEqualToString:@"canvas-restore"]) result = DICanvasRestore();
     else {
         Log([NSString stringWithFormat:@"REQUEST %@ unknown", action]);
         return;
     }
     if (![action isEqualToString:@"status"])
-        Log([NSString stringWithFormat:@"REQUEST %@ mode=%ld -> ok=%@ %@", action, (long)mode, result[@"ok"], result[@"message"]]);
+        Log([NSString stringWithFormat:@"REQUEST %@ mode=%ld preset=%ld -> ok=%@ %@", action, (long)mode, (long)preset, result[@"ok"], result[@"message"]]);
     NSMutableDictionary *answer = [result mutableCopy];
     answer[@"id"] = identifier;
     answer[@"action"] = action;
@@ -425,19 +462,24 @@ static void OnNotification(__unused CFNotificationCenterRef center, __unused voi
 
 static BOOL RestoreFileTried;
 
+// The restore file undoes both changes: the model value and the screen canvas.
+// It is removed here, first, and not at launch: the launch pass below can only
+// undo what has a record, and a model value changed by something else (Mango's
+// simulation) is put right by this pass, from the screen.
 static void RestoreByFile(void) {
     if (RestoreFileTried || access(DI_RESTORE_PATH, F_OK) != 0) return;
     RestoreFileTried = YES;
     unlink(DI_RESTORE_PATH);
-    NSDictionary *result = DIDisguiseRestore(NativeHeight());
-    Log([NSString stringWithFormat:@"RESTORE FILE -> ok=%@ %@", result[@"ok"], result[@"message"]]);
-    if ([result[@"respring"] boolValue])
+    NSDictionary *model = DIDisguiseRestore(NativeHeight());
+    NSDictionary *canvas = DICanvasRestore();
+    Log([NSString stringWithFormat:@"RESTORE FILE -> model ok=%@ %@ | canvas ok=%@ %@", model[@"ok"], model[@"message"], canvas[@"ok"], canvas[@"message"]]);
+    if ([model[@"respring"] boolValue] || [canvas[@"respring"] boolValue])
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ DIRespring(); });
 }
 
 static void Tick(void) {
     static unsigned count;
-    Reconcile();
+    if (WindowClass && PassClass) Reconcile();
     if (++count % 20 == 0) {  // every 5 seconds
         DIGuardTick();
         RestoreByFile();
@@ -446,8 +488,28 @@ static void Tick(void) {
 
 // ---- Install -------------------------------------------------------------------------
 
+static BOOL ServicesStarted;
+
+// Requests from the pane, the crash guard and the restore file work whether or
+// not the island windows can be adjusted, so they start first and on their own.
+static void StartServices(void) {
+    if (ServicesStarted) return;
+    ServicesStarted = YES;
+    CFNotificationCenterRef center = CFNotificationCenterGetDarwinNotifyCenter();
+    for (NSString *name in @[DINotifySettings, DINotifyRequest])
+        CFNotificationCenterAddObserver(center, NULL, OnNotification, (__bridge CFStringRef)name, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
+    NSTimer *timer = [NSTimer timerWithTimeInterval:.25 repeats:YES block:^(__unused NSTimer *t) { Tick(); }];
+    [NSRunLoop.mainRunLoop addTimer:timer forMode:NSRunLoopCommonModes];
+    // The panel's size, noted while no canvas is active (a no-op under one).
+    CGSize live = LiveNative();
+    DICanvasNotePanel(live.width, live.height);
+    Log([NSString stringWithFormat:@"INSTALLED 灵动岛 %@ ios=%@ machine=%@ nativeHeight=%.0f live=%.0fx%.0f statusBar=%ld", @DI_VERSION,
+         NSProcessInfo.processInfo.operatingSystemVersionString, Machine(), NativeHeight(), live.width, live.height, (long)BarOrientation()]);
+}
+
 static unsigned Attempts;
 static void Install(void) {
+    StartServices();
     NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
     if (os.majorVersion != 16) {
         Log([NSString stringWithFormat:@"NO ADJUST: written for iOS 16, this is %ld.%ld", (long)os.majorVersion, (long)os.minorVersion]);
@@ -456,17 +518,11 @@ static void Install(void) {
     WindowClass = objc_getClass("SBSystemApertureWindow");
     PassClass = objc_getClass("SBFTouchPassThroughView");
     if (!WindowClass || !PassClass || ![WindowClass isSubclassOfClass:UIWindow.class] || ![PassClass isSubclassOfClass:UIView.class]) {
+        WindowClass = PassClass = Nil;
         if (++Attempts < 40) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ Install(); });
         else Log(@"NO ADJUST: SBSystemApertureWindow / SBFTouchPassThroughView not found");
         return;
     }
-    CFNotificationCenterRef center = CFNotificationCenterGetDarwinNotifyCenter();
-    for (NSString *name in @[DINotifySettings, DINotifyRequest])
-        CFNotificationCenterAddObserver(center, NULL, OnNotification, (__bridge CFStringRef)name, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
-    NSTimer *timer = [NSTimer timerWithTimeInterval:.25 repeats:YES block:^(__unused NSTimer *t) { Tick(); }];
-    [NSRunLoop.mainRunLoop addTimer:timer forMode:NSRunLoopCommonModes];
-    Log([NSString stringWithFormat:@"INSTALLED 灵动岛 %@ ios=%@ machine=%@ nativeHeight=%.0f statusBar=%ld", @DI_VERSION,
-         NSProcessInfo.processInfo.operatingSystemVersionString, Machine(), NativeHeight(), (long)BarOrientation()]);
     Reconcile();
 }
 
@@ -475,17 +531,29 @@ __attribute__((constructor)) static void DynamicIslandInit(void) {
         if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"]) return;
         [NSFileManager.defaultManager createDirectoryAtPath:DIDirectory() withIntermediateDirectories:YES attributes:nil error:nil];
 
-        // Undo the disguise before anything else if the last launch after applying
-        // it died young, or if the user left the restore file. File operations
-        // only here: UIKit is not up yet.
+        // Undo a change before anything else if the last launch after making it
+        // died young (the guard names what to undo: the model value, the screen
+        // canvas, or both), or if the user left the restore file (both). File
+        // operations only here: UIKit is not up yet.
         BOOL tripped = DIGuardStartup();
         BOOL byFile = access(DI_RESTORE_PATH, F_OK) == 0;
         if (tripped || byFile) {
-            NSString *note = nil;
-            BOOL done = DIDisguiseRestoreFromState(&note);
-            RestoreNote = [NSString stringWithFormat:@"%@: %@", tripped ? @"崩溃保护" : @"还原文件", note ?: @""];
-            Log([NSString stringWithFormat:@"%@ restore at launch -> done=%d %@", tripped ? @"GUARD" : @"FILE", done, note]);
-            if (done && byFile) unlink(DI_RESTORE_PATH);
+            int targets = byFile ? IM_GUARD_ALL : DIGuardTargets();
+            NSMutableArray<NSString *> *notes = [NSMutableArray array];
+            BOOL done = NO;
+            if (targets & IM_GUARD_DISGUISE) {
+                NSString *modelNote = nil;
+                if (DIDisguiseRestoreFromState(&modelNote)) done = YES;
+                [notes addObject:[NSString stringWithFormat:@"机型 %@", modelNote ?: @""]];
+            }
+            if (targets & IM_GUARD_CANVAS) {
+                NSDictionary *canvas = DICanvasRestore();
+                if ([canvas[@"respring"] boolValue]) done = YES;
+                [notes addObject:[NSString stringWithFormat:@"分辨率 %@", canvas[@"message"] ?: @""]];
+            }
+            NSString *summary = [notes componentsJoinedByString:@"；"];
+            RestoreNote = [NSString stringWithFormat:@"%@: %@", tripped ? @"崩溃保护" : @"还原文件", summary];
+            Log([NSString stringWithFormat:@"%@ restore at launch targets=%d -> done=%d %@", tripped ? @"GUARD" : @"FILE", targets, done, summary]);
             if (done)
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ DIRespring(); });
         }

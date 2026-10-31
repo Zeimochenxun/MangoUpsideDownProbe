@@ -7,7 +7,7 @@ export DI_VERSION := $(shell sed -n 's/^Version: //p' control)
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = DynamicIsland
-DynamicIsland_FILES = Tweak.m Disguise.m
+DynamicIsland_FILES = Tweak.m Disguise.m Canvas.m
 DynamicIsland_CFLAGS = -fobjc-arc -fblocks -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-deprecated-declarations -DDI_VERSION='"$(DI_VERSION)"'
 DynamicIsland_FRAMEWORKS = Foundation CoreFoundation UIKit QuartzCore
 DynamicIsland_LIBRARIES = roothide

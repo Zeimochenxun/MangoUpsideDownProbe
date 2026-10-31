@@ -84,14 +84,17 @@ static BOOL WriteSubtype(int64_t value, NSString **why) {
 // ---- Guard ------------------------------------------------------------------
 
 static IMGuardState Guard;
+static int GuardTargets;  // IM_GUARD_* bits the armed guard undoes if it trips
+static int TripTargets;   // what this launch has to undo; valid after DIGuardStartup returned YES
 static BOOL GuardLoaded;
 
 static void GuardSave(void) {
     WritePlist(@{@"Armed": @(Guard.armed), @"ShortRuns": @(Guard.shortRuns), @"ArmedAt": @(Guard.armedAt),
-                 @"LastStart": @(Guard.lastStart), @"LastAlive": @(Guard.lastAlive)}, @"guard.plist");
+                 @"LastStart": @(Guard.lastStart), @"LastAlive": @(Guard.lastAlive), @"Targets": @(GuardTargets)}, @"guard.plist");
 }
 static void GuardLoad(void) {
     memset(&Guard, 0, sizeof Guard);
+    GuardTargets = 0;
     NSDictionary *saved = ReadPlist(@"guard.plist");
     if ([saved[@"Armed"] isKindOfClass:NSNumber.class]) {
         Guard.armed = [saved[@"Armed"] boolValue];
@@ -99,29 +102,39 @@ static void GuardLoad(void) {
         Guard.armedAt = [saved[@"ArmedAt"] doubleValue];
         Guard.lastStart = [saved[@"LastStart"] doubleValue];
         Guard.lastAlive = [saved[@"LastAlive"] doubleValue];
+        // A guard file from 0.1.0 has no list: only the model change existed then.
+        GuardTargets = saved[@"Targets"] ? (int)NumberIn(saved, @"Targets") & IM_GUARD_ALL : IM_GUARD_DISGUISE;
+        if (!Guard.armed) GuardTargets = 0;
+        else if (!GuardTargets) IMGuardDisarm(&Guard);  // armed with nothing to undo
     }
     GuardLoaded = YES;
 }
-static void GuardArm(void) {
+
+void DIGuardArmFor(int target) {
     if (!GuardLoaded) GuardLoad();
+    GuardTargets = IMGuardTargetsOnArm(Guard.armed, GuardTargets, target);
     IMGuardArm(&Guard, Now());
     GuardSave();
 }
-static void GuardDisarm(void) {
+void DIGuardDoneFor(int target) {
     if (!GuardLoaded) GuardLoad();
-    IMGuardDisarm(&Guard);
+    GuardTargets = IMGuardTargetsOnDone(GuardTargets, target);
+    if (!GuardTargets) IMGuardDisarm(&Guard);
     GuardSave();
 }
 
 BOOL DIGuardStartup(void) {
     GuardLoad();
     BOOL trip = IMGuardLaunch(&Guard, Now());
+    TripTargets = trip ? GuardTargets : 0;
     GuardSave();
     return trip;
 }
+int DIGuardTargets(void) { return TripTargets; }
 void DIGuardTick(void) {
     if (!GuardLoaded || !Guard.armed) return;
     IMGuardAlive(&Guard, Now());
+    if (!Guard.armed) GuardTargets = 0;  // lived long enough: nothing left to undo
     GuardSave();
 }
 BOOL DIGuardArmed(void) { return GuardLoaded && Guard.armed; }
@@ -141,11 +154,18 @@ NSDictionary *DIDisguiseStatus(double nativeHeight) {
     out[@"hardwareIsland"] = @(IMHardwareHasIsland(nativeHeight));
     out[@"restore"] = @(IMRestoreValue(original > 0, original, nativeHeight));
     out[@"applied"] = @([ReadPlist(@"state.plist")[@"Applied"] boolValue]);
+    if (plist) out[@"simulated"] = @(IMIsSimulated(SubtypeIn(plist), nativeHeight));
+    NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
+    out[@"osSupported"] = @(IMOSSupportsSimulation((long)os.majorVersion, (long)os.minorVersion));
     out[@"guardArmed"] = @(DIGuardArmed());
     return out;
 }
 
 NSDictionary *DIDisguiseApply(NSInteger mode, double nativeHeight) {
+    // Mango's own gate, before anything is read or written.
+    NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
+    if (!IMOSSupportsSimulation((long)os.majorVersion, (long)os.minorVersion))
+        return Fail(@"灵动岛模拟需要 iOS 16.1 及以上系统，当前系统版本过低，什么都没改。");
     NSString *why = nil;
     NSData *raw = nil;
     NSMutableDictionary *plist = LoadGestalt(&raw, &why);
@@ -198,7 +218,7 @@ NSDictionary *DIDisguiseApply(NSInteger mode, double nativeHeight) {
         WriteSubtype(current, NULL);  // no record to restore from: take the change back
         return Fail(@"保存还原记录失败，已把机型值写回原样。");
     }
-    GuardArm();
+    DIGuardArmFor(IM_GUARD_DISGUISE);
 
     NSMutableDictionary *out = [@{@"ok": @YES, @"subtype": @(target), @"restore": @(restore), @"respring": @YES,
                                   @"message": [NSString stringWithFormat:@"已把机型值从 %lld 改成 %lld。%@", current, target, note]} mutableCopy];
@@ -220,7 +240,7 @@ NSDictionary *DIDisguiseRestore(double nativeHeight) {
         return @{@"ok": @YES, @"message": @"机型值本来就是原值，没有改动。", @"subtype": @(current), @"respring": @NO};
     if (current != value && !WriteSubtype(value, &why)) return Fail(why);
     WritePlist(@{@"Applied": @NO, @"RestoredAt": @(Now()), @"Value": @(value)}, @"state.plist");
-    GuardDisarm();
+    DIGuardDoneFor(IM_GUARD_DISGUISE);
     return @{@"ok": @YES, @"subtype": @(value), @"restore": @(value), @"respring": @YES,
              @"message": [NSString stringWithFormat:@"已把机型值从 %lld 还原成 %lld。", current, value]};
 }
@@ -238,7 +258,7 @@ BOOL DIDisguiseRestoreFromState(NSString **note) {
         return NO;
     }
     WritePlist(@{@"Applied": @NO, @"RestoredAt": @(Now()), @"Value": @(value), @"By": @"launch"}, @"state.plist");
-    GuardDisarm();
+    DIGuardDoneFor(IM_GUARD_DISGUISE);
     if (note) *note = [NSString stringWithFormat:@"已写回 %lld", value];
     return YES;
 }

@@ -78,9 +78,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: DynamicIsland-0.1.0
+          name: DynamicIsland-0.2.0
           if-no-files-found: warn
           path: |
             island/packages/*.deb
             island-build-info/*
             island/README.md
+            island/MANGO-SIMULATION.md

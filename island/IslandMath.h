@@ -21,13 +21,19 @@ typedef struct { double a, b, c, d, tx, ty; } IMAffine;  // CGAffineTransform la
 #define IM_SCALE_MIN 0.60
 #define IM_SCALE_MAX 1.50
 #define IM_OFFSET_MAX 80.0
-// 11pt top inset + half of the 37pt resting pill of an iPhone 14 Pro: the
-// point the island grows and shrinks around. Inferred from public device
-// metrics, not read from SpringBoard.
-#define IM_ANCHOR_Y_DEFAULT 29.5
+// The point the island grows and shrinks around. [read] Mango's position/scale
+// code (MangoPanda, the function that applies PillGlass.PosX/PosY/PosScale) sets
+// the adjusted view's anchorPoint to (0.5, 42.0 / bounds.height): the view's
+// horizontal centre, 42 points below its top, in the view's own points. This
+// package measures it the same way, from the top of the node it adjusts. That the
+// view Mango adjusts is the full-height pass-through view is [inferred] from the
+// division by the view's own height. (0.1.0 used 29.5, 11pt top inset plus half
+// of a 37pt pill: an estimate from public metrics, now replaced.)
+#define IM_ANCHOR_Y_DEFAULT 42.0
 
-// What the user asks for, in visual points. offsetX > 0 moves right and
-// offsetY > 0 moves down, as seen by the user, whichever way the phone is held.
+// What the user asks for. offsetX > 0 moves right and offsetY > 0 moves down, in
+// visual points, as seen by the user, whichever way the phone is held. anchorY
+// is the pivot: window-local points below the top of the adjusted node.
 typedef struct { double scale, offsetX, offsetY, anchorY; } IMAdjust;
 
 static inline double IMClamp(double v, double lo, double hi, double fallback) {
