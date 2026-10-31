@@ -429,8 +429,10 @@ static void HandleRequest(void) {
         Log([NSString stringWithFormat:@"REQUEST %@ unknown", action]);
         return;
     }
-    if (![action isEqualToString:@"status"])
+    if (![action isEqualToString:@"status"]) {
         Log([NSString stringWithFormat:@"REQUEST %@ mode=%ld preset=%ld -> ok=%@ %@", action, (long)mode, (long)preset, result[@"ok"], result[@"message"]]);
+        if (![result[@"ok"] boolValue]) Log(DIGestaltSummary());  // what the cache looked like when it did not work
+    }
     NSMutableDictionary *answer = [result mutableCopy];
     answer[@"id"] = identifier;
     answer[@"action"] = action;
@@ -505,6 +507,7 @@ static void StartServices(void) {
     DICanvasNotePanel(live.width, live.height);
     Log([NSString stringWithFormat:@"INSTALLED 灵动岛 %@ ios=%@ machine=%@ nativeHeight=%.0f live=%.0fx%.0f statusBar=%ld", @DI_VERSION,
          NSProcessInfo.processInfo.operatingSystemVersionString, Machine(), NativeHeight(), live.width, live.height, (long)BarOrientation()]);
+    Log(DIGestaltSummary());
 }
 
 static unsigned Attempts;

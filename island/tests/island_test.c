@@ -163,24 +163,65 @@ static void disguise_policy(void) {
     assert(IMNativeSubtype(NAN) == 0 && IMNativeSubtype(INFINITY) == 0 && IMNativeSubtype(-5) == 0 && IMNativeSubtype(0) == 0);
     assert(!IMHardwareHasIsland(2340) && !IMHardwareHasIsland(2436) && IMHardwareHasIsland(2556) && IMHardwareHasIsland(2796) &&
            !IMHardwareHasIsland(NAN));
+    // What original.plist holds becomes an original; a disguise never does.
+    IMOriginal none = IMStoredOriginal(0, false), val = IMStoredOriginal(2340, false), absent = IMStoredOriginal(0, true);
+    assert(none.kind == IMOriginalNone && val.kind == IMOriginalValue && val.value == 2340 && absent.kind == IMOriginalAbsent);
+    assert(IMStoredOriginal(2556, false).kind == IMOriginalNone && IMStoredOriginal(2796, false).kind == IMOriginalNone);
+    assert(IMStoredOriginal(2556, true).kind == IMOriginalAbsent);   // an island value beside "absent": absent wins
+    assert(IMStoredOriginal(-3, false).kind == IMOriginalNone);
     // Back-up decisions never overwrite an original and never store a disguise.
-    assert(IMBackupDecide(true, 2556) == IMBackupKeep && IMBackupDecide(true, 2436) == IMBackupKeep);
-    assert(IMBackupDecide(false, 2436) == IMBackupStore);
-    assert(IMBackupDecide(false, 2556) == IMBackupUnknown && IMBackupDecide(false, 2796) == IMBackupUnknown);
-    assert(IMBackupDecide(false, 0) == IMBackupUnreadable && IMBackupDecide(false, -1) == IMBackupUnreadable);
-    // Restore: the stored original wins; otherwise Mango's nativeBounds rule.
-    assert(IMRestoreValue(true, 2436, 2436) == 2436);
-    assert(IMRestoreValue(true, 2340, 2436) == 2340);
-    assert(IMRestoreValue(true, 2556, 2436) == 2436);   // a stored disguise is not an original
-    assert(IMRestoreValue(false, 0, 2436) == 2436);
-    assert(IMRestoreValue(false, 0, 2340) == 2340);
-    assert(IMRestoreValue(false, 0, NAN) == 0);
-    // Apply refuses unreadable input and phones that already have an island.
+    assert(IMBackupDecide(val, 2556) == IMBackupKeep && IMBackupDecide(val, 2436) == IMBackupKeep && IMBackupDecide(absent, 2556) == IMBackupKeep);
+    assert(IMBackupDecide(absent, IM_ENTRY_ABSENT) == IMBackupKeep);
+    assert(IMBackupDecide(none, 2436) == IMBackupStore && IMBackupDecide(none, 2340) == IMBackupStore);
+    assert(IMBackupDecide(none, 2556) == IMBackupUnknown && IMBackupDecide(none, 2796) == IMBackupUnknown);
+    // A phone whose cache has no entry (the first device run of 0.2.0): the original is "no entry".
+    assert(IMBackupDecide(none, IM_ENTRY_ABSENT) == IMBackupStoreAbsent);
+    // An entry that is not a number is the only thing that is refused.
+    assert(IMBackupDecide(none, IM_ENTRY_UNUSABLE) == IMBackupUnreadable && IMBackupDecide(none, -7) == IMBackupUnreadable);
+    // Restore: "no entry" deletes; the stored original wins; otherwise Mango's nativeBounds rule.
+    IMRestorePlan plan = IMRestorePlanFor(absent, 2340);
+    assert(plan.remove && plan.value == 0);
+    plan = IMRestorePlanFor(absent, NAN);
+    assert(plan.remove);                                // deleting needs no screen size
+    plan = IMRestorePlanFor(IMStoredOriginal(2436, false), 2436);
+    assert(!plan.remove && plan.value == 2436);
+    plan = IMRestorePlanFor(IMStoredOriginal(2340, false), 2436);
+    assert(!plan.remove && plan.value == 2340);         // the stored original beats the screen
+    plan = IMRestorePlanFor((IMOriginal){IMOriginalValue, 2556}, 2436);
+    assert(!plan.remove && plan.value == 2436);         // a stored disguise is not an original
+    plan = IMRestorePlanFor(none, 2436);
+    assert(!plan.remove && plan.value == 2436);
+    plan = IMRestorePlanFor(none, 2340);
+    assert(!plan.remove && plan.value == 2340);
+    plan = IMRestorePlanFor(none, NAN);
+    assert(!plan.remove && plan.value == 0);            // nothing computable: the caller refuses
+    // Nothing stored and no entry in the cache: nothing to put back, and no entry is invented.
+    plan = IMRestorePlanNow(none, IM_ENTRY_ABSENT, 2340);
+    assert(plan.remove && IMPlanAlreadyHolds(plan, IM_ENTRY_ABSENT));
+    plan = IMRestorePlanNow(none, IM_ENTRY_ABSENT, NAN);
+    assert(plan.remove);
+    // Otherwise it is the plan of the stored original / the screen rule.
+    plan = IMRestorePlanNow(none, 2556, 2340);
+    assert(!plan.remove && plan.value == 2340);         // simulated by something else: Mango's rule
+    plan = IMRestorePlanNow(absent, 2556, 2340);
+    assert(plan.remove);
+    plan = IMRestorePlanNow(val, IM_ENTRY_ABSENT, 2436);
+    assert(!plan.remove && plan.value == 2340);
+    plan = IMRestorePlanNow(none, IM_ENTRY_UNUSABLE, 2340);
+    assert(!plan.remove && plan.value == 2340);
+    // "Already there": a delete holds when there is no entry; a write when the entry equals it.
+    assert(IMPlanAlreadyHolds(IMRestorePlanFor(absent, 2340), IM_ENTRY_ABSENT));
+    assert(!IMPlanAlreadyHolds(IMRestorePlanFor(absent, 2340), 2556) && !IMPlanAlreadyHolds(IMRestorePlanFor(absent, 2340), IM_ENTRY_UNUSABLE));
+    assert(IMPlanAlreadyHolds(IMRestorePlanFor(val, 2436), 2340) && !IMPlanAlreadyHolds(IMRestorePlanFor(val, 2436), 2556));
+    assert(!IMPlanAlreadyHolds(IMRestorePlanFor(none, NAN), 0) && !IMPlanAlreadyHolds(IMRestorePlanFor(none, NAN), 2340));
+    // Apply refuses an unusable entry and phones that already have an island; a missing entry is fine.
     assert(IMApplyDecide(2436, 2556, 2436) == IMApplyOK);
     assert(IMApplyDecide(2556, 2556, 2436) == IMApplyAlreadyIsland);
     assert(IMApplyDecide(2556, 2796, 2436) == IMApplyOK);   // switching style
     assert(IMApplyDecide(2556, 2796, 2556) == IMApplyHardwareIsland);
-    assert(IMApplyDecide(0, 2556, 2436) == IMApplyUnreadable && IMApplyDecide(2436, 0, 2436) == IMApplyUnreadable);
+    assert(IMApplyDecide(IM_ENTRY_ABSENT, 2556, 2340) == IMApplyOK && IMApplyDecide(IM_ENTRY_ABSENT, 2796, 2340) == IMApplyOK);
+    assert(IMApplyDecide(IM_ENTRY_ABSENT, 2556, 2556) == IMApplyHardwareIsland);
+    assert(IMApplyDecide(IM_ENTRY_UNUSABLE, 2556, 2436) == IMApplyUnreadable && IMApplyDecide(2436, 0, 2436) == IMApplyUnreadable);
     assert(IMApplyDecide(2340, 2556, 2340) == IMApplyOK && IMApplyDecide(2340, 2796, 2340) == IMApplyOK);  // 13 mini
 }
 
@@ -252,7 +293,7 @@ static void panel_size_under_a_canvas(void) {
     // not make it look like a phone with a real island.
     assert(near(IMPanelSize(true, 2340, 2556), 2340));
     assert(!IMHardwareHasIsland(IMPanelSize(true, 2340, 2556)) && IMHardwareHasIsland(2556));
-    assert(IMRestoreValue(false, 0, IMPanelSize(true, 2340, 2556)) == 2340);
+    assert(IMRestorePlanFor(IMStoredOriginal(0, false), IMPanelSize(true, 2340, 2556)).value == 2340);
     // Nothing noted (a canvas that was there before this package): all we have is live.
     assert(near(IMPanelSize(true, 0, 2556), 2556) && near(IMPanelSize(true, NAN, 2556), 2556) && near(IMPanelSize(true, -1, 2556), 2556));
     // Noting: only without a canvas, only a plausible size, only when it changed.

@@ -50,6 +50,8 @@ Mango 把运行时字符串加密存放，按字节异或还原；中文界面�
 | `applyResolutionWithWidth:height:` | 0xd0c254 | `fileURLWithPath:@"/var/tmp/com.apple.iokit.IOMobileGraphicsFamily.plist"` → `removeItemAtURL:error:` → `numberWithInteger:` 两次 → `dictionaryWithObjects:forKeys:count:`（键 `canvas_height`、`canvas_width`）→ `writeToURL:atomically:`（YES）→ `fileURLWithPath:@"/private/var/mobile/Library/Preferences/com.apple.iokit.IOMobileGraphicsFamily.plist"` → `removeItemAtURL:error:` → `createSymbolicLinkAtURL:withDestinationURL:error:` → `dispatch_time(0, 0x1dcd6500 = 0.5 s)` → `dispatch_after` 里 `performUserSpaceReboot` |
 | `restoreDefaultResolution` | 0xd10db0 | `removeItemAtPath:error:` 两个路径各一次 → `dispatch_time(0, 0.5 s)` → `dispatch_after` 里 `performUserSpaceReboot` |
 
+【读】`modifyArtworkDeviceSubType:` 里各选择子的调用点各只有一处：`objectForKeyedSubscript:`（0xd0785c，取 `CacheExtra`）、`numberWithInteger:`（0xd07acc）、`setObject:forKeyedSubscript:`（0xd07b28，设机型键）、`dataWithPropertyList:format:options:error:`（0xd08144）、`writeToURL:atomically:`（0xd08288）。没有第二次读取、也没有 `isKindOfClass:`：Mango **不检查机型这一项原来在不在，直接设**，缓存里没有就是加上。`currentArtworkDeviceSubType` 读不到缓存值时回到屏幕高度，说明 Mango 自己就预期有的机器上这一项是缺的。0.2.0 把「这一项不在」当成错误（「读不到当前的机型值」），上机第一步就被它挡住；0.2.1 照 Mango 的做法加上，并把「原来没有」记下来，取消时删掉。
+
 【缺】`currentArtworkDeviceSubType` 的回退细节；`defaultDeviceSubType` 取整用的是 `fcvtzs`（向零截断），本插件用四舍五入，面板像素高是整数时两者相同。
 
 【推】Mango 的 `defaultDeviceSubType`、`isCurrentlyEnabled`、弹窗里的「当前原生」都实时读 `UIScreen.nativeBounds`。如果应用画布后 `nativeBounds` 报告的是画布尺寸（改画布的目的就是这个，但没在设备上见过），这几处在 Pro 尺寸的画布下会得出「这台机器本来就有灵动岛」、取消模拟时写回 2556。本插件不照搬这一点：没有画布时把面板尺寸记下来，画布生效期间用记下的值（README 里的「面板尺寸」）。

@@ -1,4 +1,6 @@
-# 灵动岛 0.2.0（实验，未上机）
+# 灵动岛 0.2.1（实验，未上机）
+
+**0.2.1 修了 0.2.0 上机第一步就遇到的问题**：缓存里没有机型值这一项时，0.2.0 报「读不到当前的机型值」并拒绝。Mango 对这种情况是直接把这一项加上（`modifyArtworkDeviceSubType:` 里只查了 `CacheExtra` 一次，没有测这个键在不在，反汇编读到），所以「没有这一项」是正常的起点；0.2.1 照 Mango 加上它，并把「原来没有」记下，取消模拟时把它删掉，回到系统自己按机型算的状态。这一项存在但不是数字时才拒绝，并且会说明是什么类型。设置页和日志里多了缓存的说明（`GESTALT …` 一行）和系统此刻回答的机型值（`effective`，用 `MGCopyAnswer` 问的），应用并注销后它有没有变成 2556 / 2796，就是系统有没有认这一项。
 
 从 Mango 的「灵动岛模拟」里提取出来的独立插件：让带刘海的 iPhone（目标是 iPhone 13 mini，iOS 16.5，Dopamine RootHide，arm64e）用上系统自己的灵动岛，带 Mango 那 10 个分辨率预设，并且能调灵动岛的大小和位置；调节写在不会碰倒置的那一层，倒置时不会失效。不装 Mango 也能用，不读、不改、不依赖 Mango 的任何文件。
 
@@ -12,7 +14,7 @@ Mango 菜单里「灵动岛」一栏的末尾是模拟（类 `MangoDynamicIsland
 |---|---|---|---|
 | 模拟灵动岛模式 | 两档：`Pro (1179×2556)`、`Pro Max (1290×2796)`；`enableWithMode:` 0 写 2556，其余写 2796 | 「模式」，同样两档同样两个值 | 已做 |
 | 应用模拟灵动岛 | 改 `MobileGestalt.plist` 的 `CacheExtra["oPeik/9e8lQWMszEjbPzng"]`，XML 原子写，随后注销 | 「应用模拟灵动岛」，同一个键同一个文件，在 SpringBoard 里做；先备份原缓存和原值 | 已做，比 Mango 多备份 |
-| 取消模拟 | `disable` 写回 `defaultDeviceSubType`，它就是 `(NSInteger)UIScreen.nativeBounds.size.height`（`nativeBounds` 之后一条 `fcvtzs d3`，没有查表） | 「取消模拟」，写回备份的原值；没有备份就按同一条规则用 `nativeBounds` 高度 | 已做 |
+| 取消模拟 | `disable` 写回 `defaultDeviceSubType`，它就是 `(NSInteger)UIScreen.nativeBounds.size.height`（`nativeBounds` 之后一条 `fcvtzs d3`，没有查表） | 「取消模拟」，写回备份的原值；原来缓存里就没有这一项就把它删掉；没有备份就按同一条规则用 `nativeBounds` 高度 | 已做 |
 | 是否已模拟 | `isCurrentlyEnabled`：当前值是 2556 或 2796，且不等于 `nativeBounds` 高度（用真实控制流逐组合验证过） | 设置页文字里的「已模拟 / 未模拟」，同一条规则；本机自带灵动岛（原生高度 2556/2796）时直接说不需要，什么都不改 | 已做 |
 | iOS 16.1 闸 | 低于 16.1 弹「系统版本不支持」，应用模拟和应用分辨率都拦 | 应用模拟、应用分辨率都拦，提示的意思相同；取消、恢复不拦 | 已做 |
 | 确认弹窗 | `⚠️ 模拟灵动岛`「即将切换至 %@ 模式 … 此操作会修改系统配置文件，请在充分了解风险后使用」；`⚠️ 取消模拟灵动岛`「即将恢复为原始设备子类型 (%ld)」 | 标题和主体的意思相同，加了备份与还原文件的说明 | 已做 |
@@ -47,6 +49,7 @@ SpringBoard 靠 MobileGestalt 里的 `ArtworkDeviceSubType` 判断要不要建�
 - 【读】机型值的「原值」就是面板的像素高：Mango 的 `defaultDeviceSubType` 只做 `UIScreen.mainScreen.nativeBounds.size.height` 取整。**13 mini 的面板是 1080×2340，所以这条规则给出 2340**【推：`nativeBounds` 的值没在这台机器上见过】；0.1.0 的说明里写成 2436 是错的。代码一直是运行时读 `nativeBounds`，行为没受影响，只是说明和测试注释写错了。日志 `INSTALLED` 行的 `nativeHeight=` 会给出这台机器的真值。
 - 比 Mango 多出来的：
   - 第一次模拟前把整个缓存文件和原机型值备份到 `…/Application Support/DynamicIsland/`（`MobileGestalt.original.plist`、`original.plist`）。如果当前值已经是 2556/2796（比如之前用 Mango 模拟过），不会把它当成「原值」备份，取消时按 `nativeBounds` 推算。
+  - 缓存里可以**没有**机型值这一项（系统那时按机型自己算）：这是正常的起点。应用时把这一项加上，`original.plist` 里记 `Absent`，取消时把它删掉；这样回到的就是系统原来的状态，不用猜一个数。【读】Mango 就是这样（只设键，不测在不在）；【推】0.2.0 上机报「读不到当前的机型值」说明这台机器的缓存里这一项不在或不是数字，但当时只报了那句话，没区分两种情况，所以 0.2.1 起设置页和日志（`GESTALT …`）会写明。
   - 【崩溃保护】模拟后 SpringBoard 第一次重启就在 15 秒内死掉，下一次启动时插件会先把机型值写回去；活过 60 秒就解除保护。保护只撤销**被它盯着的那一项**（机型、画布或两者），不会因为刚改了分辨率就顺带撤掉稳定用了几天的机型模拟。
   - 【还原文件】在 `/var/mobile/Library/Preferences/` 新建一个空文件 `DynamicIsland.restore`（Filza 或 ssh），插件下次启动或 5 秒内就把机型值和画布都还原并注销。
 - 本机自带灵动岛（原生像素高 2556/2796）时直接拒绝，什么都不改。
@@ -126,12 +129,13 @@ SpringBoard 靠 MobileGestalt 里的 `ArtworkDeviceSubType` 判断要不要建�
 | `has a transform that is not ours` | 那一层上有别人的 transform，已让开 |
 | `ORIENTATION statusBar=… turnFixed=… turnModel=…` | 方向变化（`statusBar` 2 是倒置）和窗口转没转 |
 | `STATE adjust=…` | 当前状态：`applied`/`default`/`off`/`no-window`/`verify-failed`/`conflict`… |
-| `REQUEST apply …` / `REQUEST canvas-apply …` | 机型模拟、分辨率请求和结果（带 `mode=`、`preset=`） |
+| `REQUEST apply …` / `REQUEST canvas-apply …` | 机型模拟、分辨率请求和结果（带 `mode=`、`preset=`）；没成功时紧跟一行 `GESTALT …` |
+| `GESTALT file=…B top=[…] extraEntries=N modelEntry=… effective=N` | 缓存文件的样子和系统此刻的回答。`modelEntry` 是缓存里机型值那一项（`没有这一项` 是正常的）；`effective` 是系统（`MGCopyAnswer`）此刻回答的机型值，没有这一项时它就是这台机器自己的值（13 mini 预期 2340），应用并注销后应该变成 2556 / 2796；启动时记一次，请求失败时再记一次 |
 | `GUARD restore at launch targets=… -> done=…` | 崩溃保护触发，`targets` 1 是机型、2 是画布 |
 | `RESTORE FILE -> model … \| canvas …` | 还原文件触发 |
 
 最想确认的几件事：
-1. 机型模拟后系统灵动岛是不是出现了；`nativeHeight` 是不是 2340。
+1. 机型模拟后系统灵动岛是不是出现了；`nativeHeight` 是不是 2340；应用并注销后 `GESTALT` 行的 `effective` 是不是变成了 2556 / 2796（变了说明系统采用了缓存里的值，没变说明系统没认那一项）。
 2. 应用分辨率后屏幕是不是真的换了画布（黑屏/花屏要重新注销）；如果系统不认这两个键，画面不会变，日志也没有异常。
 3. 正着调大小/位置，岛有没有按预期动，触摸（点、长按、上下滑）是否正常。
 4. 倒置（`turnFixed=turned`）时调节，岛是否仍在正确的一侧、没有被撤下，调节方向是否是你看到的方向。

@@ -8,10 +8,23 @@
 // Result dictionaries go straight into result.plist: ok (BOOL), message
 // (text for the user), and where it applies subtype, original, restore
 // (NSNumber) and respring (BOOL). Status adds simulated (Mango's
-// isCurrentlyEnabled: an island value that is not the panel's own height) and
-// osSupported (Mango's iOS 16.1 gate, applied to apply only).
+// isCurrentlyEnabled: an island value that is not the panel's own height),
+// osSupported (Mango's iOS 16.1 gate, applied to apply only), entry ("value",
+// "absent" or "unusable": what the cache holds for the model value, where
+// "absent" is a normal state that apply adds to and restore deletes again)
+// with entryText, originalAbsent and restoreRemoves (restore deletes the entry
+// instead of writing `restore`).
 #pragma once
 #import <Foundation/Foundation.h>
+
+// What the system answers for ArtworkDeviceSubType in this process (MGCopyAnswer),
+// -1 if it cannot be asked. SpringBoard builds the island from this, and reads the
+// cache once at launch, so a change in the file shows here after the next respring.
+int64_t DIEffectiveSubtype(void);
+
+// One log line describing the cache (size, top-level keys, how many CacheExtra
+// entries, what the model entry looks like) and what the system answers.
+NSString *DIGestaltSummary(void);
 
 NSDictionary *DIDisguiseStatus(double nativeHeight);
 NSDictionary *DIDisguiseApply(NSInteger mode, double nativeHeight);

@@ -57,30 +57,77 @@ static inline bool IMOSSupportsSimulation(long major, long minor) {
     return major > 16 || (major == 16 && minor >= 1);
 }
 
+// ---- What the cache holds for the model value -------------------------------
+// The value is CacheExtra["oPeik/9e8lQWMszEjbPzng"] in the MobileGestalt cache.
+// [read] Mango's `modifyArtworkDeviceSubType:` sets that key whether or not it
+// was there, and its `currentArtworkDeviceSubType` falls back to the screen when
+// the read gives nothing: Mango itself expects the entry to be missing on some
+// phones. [inferred] 0.2.0 on its first device run refused with "读不到当前的机型值",
+// which that code says when the entry is missing or not a number; reading a
+// missing entry as an error was the bug. No entry is a normal starting state:
+// MobileGestalt then answers from the product type, and putting the entry back
+// to "missing" is exactly the way back.
+#define IM_ENTRY_ABSENT 0       // no entry
+#define IM_ENTRY_UNUSABLE (-1)  // an entry that is not a positive whole number
+
+// What the package stored the first time it changed the model value.
+typedef enum { IMOriginalNone, IMOriginalValue, IMOriginalAbsent } IMOriginalKind;
+typedef struct { IMOriginalKind kind; int64_t value; } IMOriginal;
+
+// From what original.plist holds. An island value is never accepted as an original.
+static inline IMOriginal IMStoredOriginal(int64_t subtype, bool absent) {
+    if (subtype > 0 && !IMIsIslandSubtype(subtype)) return (IMOriginal){IMOriginalValue, subtype};
+    if (absent) return (IMOriginal){IMOriginalAbsent, 0};
+    return (IMOriginal){IMOriginalNone, 0};
+}
+
 typedef enum {
-    IMBackupKeep,     // an original is already stored: never overwrite it
-    IMBackupStore,    // the current value is plausibly original: store it now
-    IMBackupUnknown,  // already an island value and nothing stored: the original is lost
-    IMBackupUnreadable
+    IMBackupKeep,         // an original is already stored: never overwrite it
+    IMBackupStore,        // the current value is plausibly original: store it now
+    IMBackupStoreAbsent,  // there is no entry: the original is "no entry", restoring deletes it
+    IMBackupUnknown,      // already an island value and nothing stored: the original is lost
+    IMBackupUnreadable    // an entry that is not a number: touch nothing
 } IMBackupAction;
 
-static inline IMBackupAction IMBackupDecide(bool haveBackup, int64_t current) {
-    if (haveBackup) return IMBackupKeep;
-    if (current <= 0) return IMBackupUnreadable;
+static inline IMBackupAction IMBackupDecide(IMOriginal stored, int64_t current) {
+    if (stored.kind != IMOriginalNone) return IMBackupKeep;
+    if (current < 0) return IMBackupUnreadable;
+    if (current == IM_ENTRY_ABSENT) return IMBackupStoreAbsent;
     return IMIsIslandSubtype(current) ? IMBackupUnknown : IMBackupStore;
 }
 
-// What a restore writes: the stored original, else the value derived from the
-// screen (Mango's rule). An island value is never accepted as an "original".
-static inline int64_t IMRestoreValue(bool haveBackup, int64_t backup, double nativeHeightPx) {
-    if (haveBackup && backup > 0 && !IMIsIslandSubtype(backup)) return backup;
-    return IMNativeSubtype(nativeHeightPx);
+// What a restore does: delete the entry when the original was "no entry"; else
+// write the stored original; else write the value derived from the screen
+// (Mango's rule). value 0 with remove false means nothing could be worked out.
+typedef struct { bool remove; int64_t value; } IMRestorePlan;
+
+static inline IMRestorePlan IMRestorePlanFor(IMOriginal original, double nativeHeightPx) {
+    if (original.kind == IMOriginalAbsent) return (IMRestorePlan){true, 0};
+    if (original.kind == IMOriginalValue && original.value > 0 && !IMIsIslandSubtype(original.value))
+        return (IMRestorePlan){false, original.value};
+    return (IMRestorePlan){false, IMNativeSubtype(nativeHeightPx)};
+}
+
+// The plan to use now, given what the cache holds: with nothing stored and no
+// entry in the cache there is nothing to put back, and writing a number derived
+// from the screen would invent an entry the phone never had. Deleting a missing
+// entry is "no change".
+static inline IMRestorePlan IMRestorePlanNow(IMOriginal original, int64_t current, double nativeHeightPx) {
+    if (original.kind == IMOriginalNone && current == IM_ENTRY_ABSENT) return (IMRestorePlan){true, 0};
+    return IMRestorePlanFor(original, nativeHeightPx);
+}
+
+// Is the entry already what the plan would leave behind?
+static inline bool IMPlanAlreadyHolds(IMRestorePlan plan, int64_t current) {
+    return plan.remove ? current == IM_ENTRY_ABSENT : plan.value > 0 && current == plan.value;
 }
 
 typedef enum { IMApplyOK, IMApplyAlreadyIsland, IMApplyHardwareIsland, IMApplyUnreadable } IMApplyCheck;
 
+// `current` is IM_ENTRY_ABSENT, IM_ENTRY_UNUSABLE or the value. A missing entry is
+// no obstacle: the island value is simply added.
 static inline IMApplyCheck IMApplyDecide(int64_t current, int64_t target, double nativeHeightPx) {
-    if (current <= 0 || target <= 0) return IMApplyUnreadable;
+    if (current < 0 || target <= 0) return IMApplyUnreadable;
     if (IMHardwareHasIsland(nativeHeightPx)) return IMApplyHardwareIsland;
     return current == target ? IMApplyAlreadyIsland : IMApplyOK;
 }

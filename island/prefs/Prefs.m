@@ -120,8 +120,25 @@ static NSString *TurnText(NSString *name) {
     NSDictionary *d = _status;
     if (!d) return @"正在向 SpringBoard 询问当前的机型值……（需要灵动岛插件已启用）";
     if (![d[@"ok"] boolValue]) return [NSString stringWithFormat:@"读不到机型值：%@", d[@"message"] ?: @"没有回应"];
-    NSMutableString *text = [NSMutableString stringWithFormat:@"当前机型值 %@，原值 %@（%@），取消模拟时写回 %@。",
-                             ShowInt(d[@"subtype"]), d[@"original"] ? ShowInt(d[@"original"]) : @"未备份", d[@"original"] ? @"已备份" : @"应用时会先备份", ShowInt(d[@"restore"])];
+    // The cache may simply have no entry for the model value: a normal state, the
+    // system then works it out from the phone model. Applying adds the entry and
+    // cancelling deletes it again.
+    NSString *entry = d[@"entry"];
+    NSString *current = [entry isEqualToString:@"absent"] ? @"没有这一项（系统按机型自己算）"
+                      : [entry isEqualToString:@"unusable"] ? [NSString stringWithFormat:@"%@，不敢改", d[@"entryText"] ?: @"不是数字"]
+                      : ShowInt(d[@"subtype"]);
+    NSString *original = d[@"original"] ? [NSString stringWithFormat:@"%@（已备份）", ShowInt(d[@"original"])]
+                       : [d[@"originalAbsent"] boolValue] ? @"没有这一项（已记下）" : @"应用时会先备份";
+    NSString *back = [d[@"restoreRemoves"] boolValue] ? @"把这一项删掉" : [NSString stringWithFormat:@"写回 %@", ShowInt(d[@"restore"])];
+    NSMutableString *text = [NSMutableString stringWithFormat:@"当前机型值：%@。原值：%@。取消模拟时：%@。", current, original, back];
+    // What the system itself answers (SpringBoard reads the cache once, at launch):
+    // the island is built from this, so it shows whether the entry is honoured.
+    long long effective = [d[@"effective"] isKindOfClass:NSNumber.class] ? [d[@"effective"] longLongValue] : -1;
+    if (effective > 0) {
+        [text appendFormat:@"\n系统此刻回答的机型值：%lld（SpringBoard 启动时读到的，岛是按它建的）。", effective];
+        long long entryValue = [d[@"subtype"] isKindOfClass:NSNumber.class] ? [d[@"subtype"] longLongValue] : 0;
+        if (entryValue > 0 && entryValue != effective) [text appendString:@"和缓存里的不一样：还没注销过，或者系统没有采用缓存里的值。"];
+    }
     if ([d[@"hardwareIsland"] boolValue]) {
         [text appendString:@"\n这台手机自带灵动岛，不需要模拟。"];
     } else if ([d[@"simulated"] boolValue]) {
@@ -314,7 +331,7 @@ static NSString *TurnText(NSString *name) {
 }
 
 - (void)cancelTapped {
-    NSString *restore = _status[@"restore"] ? ShowInt(_status[@"restore"]) : @"原值";
+    NSString *restore = [_status[@"restoreRemoves"] boolValue] ? @"原来没有这一项，会把它删掉" : (_status[@"restore"] ? ShowInt(_status[@"restore"]) : @"原值");
     NSString *message = [NSString stringWithFormat:@"即将恢复为原始设备子类型 (%@)\n\n修改后设备将自动注销重启，请耐心等待。", restore];
     [self confirm:@"⚠️ 取消模拟灵动岛" message:message button:@"确定恢复" action:@"restore" mode:0 preset:0 doneTitle:@"已还原"];
 }
